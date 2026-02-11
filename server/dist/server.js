@@ -104,6 +104,7 @@ app.delete('/api/rooms/:roomId', (req, res) => __awaiter(void 0, void 0, void 0,
         yield RoomService_1.RoomService.deleteRoom(roomId);
         rooms.delete(roomId);
         roomStates.delete(roomId);
+        clearRoomTimer(roomId, false);
         res.json({ message: 'Room deleted successfully' });
     }
     catch (error) {
@@ -209,6 +210,52 @@ const getSortedCards = (cards) => {
 };
 // Connection monitoring
 let connectionCount = 0;
+const roomTimers = new Map();
+const getRemainingSeconds = (endAt) => {
+    return Math.max(0, Math.ceil((endAt - Date.now()) / 1000));
+};
+const emitTimerResetToRoom = (roomId) => {
+    io.to(roomId).emit('timer-updated', {
+        durationSeconds: 0,
+        remainingSeconds: 0,
+        running: false
+    });
+};
+const emitTimerToRoom = (roomId, session) => {
+    io.to(roomId).emit('timer-updated', {
+        phase: session.phase,
+        durationSeconds: session.durationSeconds,
+        remainingSeconds: getRemainingSeconds(session.endAt),
+        running: true
+    });
+};
+const emitTimerToSocket = (socket, roomId) => {
+    const session = roomTimers.get(roomId);
+    if (!session) {
+        socket.emit('timer-updated', {
+            durationSeconds: 0,
+            remainingSeconds: 0,
+            running: false
+        });
+        return;
+    }
+    socket.emit('timer-updated', {
+        phase: session.phase,
+        durationSeconds: session.durationSeconds,
+        remainingSeconds: getRemainingSeconds(session.endAt),
+        running: true
+    });
+};
+const clearRoomTimer = (roomId, emitReset = true) => {
+    const session = roomTimers.get(roomId);
+    if (session) {
+        clearInterval(session.interval);
+        roomTimers.delete(roomId);
+    }
+    if (emitReset) {
+        emitTimerResetToRoom(roomId);
+    }
+};
 io.on('connection', (socket) => {
     connectionCount++;
     console.log(`Client connected (${connectionCount} total):`, socket.id);
@@ -247,6 +294,7 @@ io.on('connection', (socket) => {
                     users: room.users
                 }
             });
+            emitTimerToSocket(socket, roomId);
         }
         catch (error) {
             console.error('Error restoring session:', error);
@@ -290,6 +338,7 @@ io.on('connection', (socket) => {
                 },
                 userId: socket.id
             });
+            emitTimerToSocket(socket, roomId);
         }
         catch (error) {
             console.error('Error creating room:', error);
@@ -345,6 +394,7 @@ io.on('connection', (socket) => {
                 },
                 userId: user.id
             });
+            emitTimerToSocket(socket, roomId);
             socket.to(roomId).emit('user-joined', user);
         }
         catch (error) {
@@ -568,6 +618,7 @@ io.on('connection', (socket) => {
             // После смены фазы сбрасываем состояния готовности всех пользователей
             const roomWithResetStates = yield RoomService_1.RoomService.resetUsersReadyState(currentUser.roomId);
             if (roomWithResetStates) {
+                clearRoomTimer(currentUser.roomId, true);
                 // Отправляем оба события для обновления UI
                 io.to(currentUser.roomId).emit('phase-changed', {
                     phase: roomWithResetStates.phase,
@@ -583,6 +634,55 @@ io.on('connection', (socket) => {
         catch (error) {
             console.error('Error changing phase:', error);
             socket.emit('error', 'Failed to change phase');
+        }
+    }));
+    socket.on('set-phase-timer', ({ durationSeconds }) => __awaiter(void 0, void 0, void 0, function* () {
+        if (!(currentUser === null || currentUser === void 0 ? void 0 : currentUser.roomId))
+            return;
+        const allowedDurations = [60, 180, 300, 600, 900];
+        if (!allowedDurations.includes(durationSeconds)) {
+            socket.emit('error', 'Invalid timer duration');
+            return;
+        }
+        try {
+            const room = yield RoomService_1.RoomService.getRoom(currentUser.roomId);
+            if (!room)
+                return;
+            const isAdmin = room.users.some((user) => user.name === (currentUser === null || currentUser === void 0 ? void 0 : currentUser.name) && user.role === 'admin');
+            if (!isAdmin) {
+                socket.emit('error', 'Only admin can start timer');
+                return;
+            }
+            clearRoomTimer(currentUser.roomId, false);
+            const endAt = Date.now() + durationSeconds * 1000;
+            const session = {
+                phase: room.phase,
+                durationSeconds,
+                endAt,
+                interval: setInterval(() => {
+                    const activeSession = roomTimers.get(room.id);
+                    if (!activeSession)
+                        return;
+                    const remainingSeconds = getRemainingSeconds(activeSession.endAt);
+                    if (remainingSeconds <= 0) {
+                        io.to(room.id).emit('timer-updated', {
+                            phase: activeSession.phase,
+                            durationSeconds: activeSession.durationSeconds,
+                            remainingSeconds: 0,
+                            running: false
+                        });
+                        clearRoomTimer(room.id, false);
+                        return;
+                    }
+                    emitTimerToRoom(room.id, activeSession);
+                }, 1000)
+            };
+            roomTimers.set(currentUser.roomId, session);
+            emitTimerToRoom(currentUser.roomId, session);
+        }
+        catch (error) {
+            console.error('Error setting phase timer:', error);
+            socket.emit('error', 'Failed to start timer');
         }
     }));
     socket.on('delete-room', () => __awaiter(void 0, void 0, void 0, function* () {
@@ -605,6 +705,7 @@ io.on('connection', (socket) => {
             yield RoomService_1.RoomService.deleteRoom(roomId);
             rooms.delete(roomId);
             roomStates.delete(roomId);
+            clearRoomTimer(roomId, false);
             io.to(roomId).emit('room-deleted');
             io.in(roomId).socketsLeave(roomId);
             currentUser = null;

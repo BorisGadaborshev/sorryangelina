@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { observer } from 'mobx-react-lite';
-import { Box, AppBar, Toolbar, Typography, Button, ButtonGroup, CircularProgress, IconButton, Tooltip, Tabs, Tab, useMediaQuery, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions } from '@mui/material';
+import { Box, AppBar, Toolbar, Typography, Button, ButtonGroup, CircularProgress, IconButton, Tooltip, Tabs, Tab, useMediaQuery, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, FormControl, Select, MenuItem } from '@mui/material';
 import { DragDropContext, DropResult } from '@hello-pangea/dnd';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
@@ -22,6 +22,7 @@ const Board: React.FC<Props> = observer(({ store }) => {
   const isMobile = useMediaQuery('(max-width:600px)');
   const [mobileTab, setMobileTab] = useState<number>(0); // 0 - доска, 1 - участники
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [selectedTimerSeconds, setSelectedTimerSeconds] = useState<number>(300);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -41,6 +42,12 @@ const Board: React.FC<Props> = observer(({ store }) => {
 
   const handleReadyStateChange = (isReady: boolean) => {
     store.socketService?.updateReadyState(isReady);
+  };
+
+  const formatDuration = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   };
 
   const handleDragEnd = (result: DropResult) => {
@@ -165,8 +172,38 @@ const Board: React.FC<Props> = observer(({ store }) => {
                     Обсуждение
                   </Button>
                 </ButtonGroup>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mr: 2 }}>
+                  <Typography variant="caption" sx={{ color: store.phaseTimer.running ? 'warning.light' : 'text.secondary' }}>
+                    Таймер: {formatDuration(store.phaseTimer.remainingSeconds)}
+                  </Typography>
+                  <FormControl size="small" sx={{ minWidth: 110 }}>
+                    <Select
+                      value={selectedTimerSeconds}
+                      onChange={(event) => setSelectedTimerSeconds(Number(event.target.value))}
+                      sx={{ color: 'white', '.MuiSelect-icon': { color: 'white' }, height: 32 }}
+                    >
+                      <MenuItem value={60}>1 минута</MenuItem>
+                      <MenuItem value={180}>3 минуты</MenuItem>
+                      <MenuItem value={300}>5 минут</MenuItem>
+                      <MenuItem value={600}>10 минут</MenuItem>
+                      <MenuItem value={900}>15 минут</MenuItem>
+                    </Select>
+                  </FormControl>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    sx={{ color: 'white', borderColor: 'white' }}
+                    onClick={() => store.socketService?.setPhaseTimer(selectedTimerSeconds)}
+                  >
+                    {store.phaseTimer.running ? 'Перезапуск' : 'Старт'}
+                  </Button>
+                </Box>
               </Box>
-            ) : null;
+            ) : (
+              <Typography variant="caption" sx={{ mr: 2, color: store.phaseTimer.running ? 'warning.light' : 'text.secondary' }}>
+                Таймер: {formatDuration(store.phaseTimer.remainingSeconds)}
+              </Typography>
+            );
           })()}
           {store.currentUser?.role === 'admin' && (
             <Tooltip title="Удалить комнату">

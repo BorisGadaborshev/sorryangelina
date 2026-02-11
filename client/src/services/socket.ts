@@ -1,6 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { RetroStore } from '../store/RetroStore';
-import { Room, RoomState, User, Card } from '../types';
+import { Room, RoomState, User, Card, PhaseTimerState } from '../types';
 
 export class SocketService {
   private socket: Socket;
@@ -182,6 +182,10 @@ export class SocketService {
       console.log('Phase changed:', { phase, cards });
       this.store.setPhase(phase);
       this.store.setCards(cards);
+    });
+
+    this.socket.on('timer-updated', (timer: PhaseTimerState) => {
+      this.store.setPhaseTimer(timer);
     });
 
     this.socket.on('user-kicked', () => {
@@ -427,6 +431,10 @@ export class SocketService {
   async updateReadyState(isReady: boolean): Promise<void> {
     console.log('Updating ready state:', isReady);
     this.socket.emit('update-ready-state', { isReady });
+  }
+
+  setPhaseTimer(durationSeconds: number): void {
+    this.socket.emit('set-phase-timer', { durationSeconds });
   }
 
   async restoreSession(roomId: string, userId: string, username: string, token?: string): Promise<void> {

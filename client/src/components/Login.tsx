@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { observer } from 'mobx-react-lite';
 import {
+  Alert,
   Box,
   Button,
   CircularProgress,
@@ -52,6 +53,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
   const [joinRoomPassword, setJoinRoomPassword] = useState('');
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isJoinDialogOpen, setIsJoinDialogOpen] = useState(false);
+  const [joinRoomError, setJoinRoomError] = useState<string | null>(null);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [deleteRoomId, setDeleteRoomId] = useState('');
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
@@ -202,6 +204,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
   const handleOpenJoinDialog = (roomId: string) => {
     setSelectedRoomId(roomId);
     setJoinRoomPassword('');
+    setJoinRoomError(null);
     setIsJoinDialogOpen(true);
   };
 
@@ -230,12 +233,15 @@ const Login: React.FC<Props> = observer(({ store }) => {
     if (!store.authProfile || !selectedRoomId.trim() || !joinRoomPassword.trim()) return;
 
     setIsLoading(true);
+    setJoinRoomError(null);
     store.setError(null);
     try {
       await store.socketService?.joinRoom(selectedRoomId.trim(), joinRoomPassword.trim(), store.authProfile.name, store.authProfile.token);
       setIsJoinDialogOpen(false);
     } catch (error) {
-      store.setError(error instanceof Error ? error.message : 'Не удалось подключиться к комнате');
+      const message = error instanceof Error ? error.message : 'Не удалось подключиться к комнате';
+      setJoinRoomError(message);
+      store.setError(null);
     } finally {
       setIsLoading(false);
     }
@@ -461,6 +467,11 @@ const Login: React.FC<Props> = observer(({ store }) => {
       <Dialog open={isJoinDialogOpen} onClose={() => setIsJoinDialogOpen(false)} fullWidth maxWidth="xs">
         <DialogTitle>Войти в комнату {selectedRoomId}</DialogTitle>
         <DialogContent>
+          {joinRoomError && (
+            <Alert severity="error" sx={{ mb: 1 }}>
+              {joinRoomError}
+            </Alert>
+          )}
           <TextField
             autoFocus
             fullWidth
@@ -468,11 +479,21 @@ const Login: React.FC<Props> = observer(({ store }) => {
             label="Пароль комнаты"
             margin="normal"
             value={joinRoomPassword}
-            onChange={(event) => setJoinRoomPassword(event.target.value)}
+            onChange={(event) => {
+              setJoinRoomPassword(event.target.value);
+              if (joinRoomError) setJoinRoomError(null);
+            }}
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setIsJoinDialogOpen(false)}>Отмена</Button>
+          <Button
+            onClick={() => {
+              setIsJoinDialogOpen(false);
+              setJoinRoomError(null);
+            }}
+          >
+            Отмена
+          </Button>
           <Button variant="contained" onClick={handleJoinRoom} disabled={isLoading || !joinRoomPassword.trim()}>
             {isLoading ? <CircularProgress size={18} color="inherit" /> : 'Войти'}
           </Button>

@@ -1,5 +1,5 @@
 import { makeAutoObservable, runInAction } from 'mobx';
-import { AuthProfile, Card, Room, RoomState, User } from '../types';
+import { AuthProfile, Card, PhaseTimerState, Room, RoomState, User } from '../types';
 import { Socket } from 'socket.io-client';
 import { SocketService } from '../services/socket';
 
@@ -14,6 +14,7 @@ export class RetroStore {
   users: User[] = [];
   error: string | null = null;
   voteError: { cardId: string; message: string } | null = null;
+  phaseTimer: PhaseTimerState = { durationSeconds: 0, remainingSeconds: 0, running: false };
 
   constructor() {
     makeAutoObservable(this, {}, { autoBind: true });
@@ -106,6 +107,12 @@ export class RetroStore {
     });
   }
 
+  setPhaseTimer(timer: PhaseTimerState) {
+    runInAction(() => {
+      this.phaseTimer = timer;
+    });
+  }
+
   setAuthProfile(profile: AuthProfile | null) {
     runInAction(() => {
       this.authProfile = profile;
@@ -167,6 +174,7 @@ export class RetroStore {
         this.currentUser = null;
         this.clearSession();
         this.clearVoteError();
+        this.phaseTimer = { durationSeconds: 0, remainingSeconds: 0, running: false };
         console.log('Cleared room and session');
       }
     });

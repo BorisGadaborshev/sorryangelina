@@ -30,6 +30,13 @@ export interface RoomState {
   users: User[];
 } 
 
+export interface PhaseTimerState {
+  phase?: 'creation' | 'voting' | 'discussion';
+  durationSeconds: number;
+  remainingSeconds: number;
+  running: boolean;
+}
+
 export type AuthProfileType = 'fixed' | 'registered' | 'guest';
 
 export interface AuthProfile {
