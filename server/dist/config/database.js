@@ -43,6 +43,7 @@ const connectDB = () => __awaiter(void 0, void 0, void 0, function* () {
       room_id text not null references rooms(id) on delete cascade,
       role text not null check (role in ('admin','user')),
       is_ready boolean default false,
+      mood text,
       primary key (room_id, id)
     );
 
@@ -68,6 +69,7 @@ const connectDB = () => __awaiter(void 0, void 0, void 0, function* () {
     create unique index if not exists idx_accounts_name_ci on accounts ((lower(name)));
 
     alter table cards add column if not exists image_url text;
+    alter table room_users add column if not exists mood text;
   `);
     console.log('Connected to PostgreSQL and ensured schema');
 });

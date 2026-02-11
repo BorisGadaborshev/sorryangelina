@@ -1,5 +1,5 @@
 import { makeAutoObservable, runInAction } from 'mobx';
-import { AuthProfile, Card, PhaseTimerState, Room, RoomState, User } from '../types';
+import { AuthProfile, Card, ChatMessage, PhaseTimerState, Room, RoomState, User } from '../types';
 import { Socket } from 'socket.io-client';
 import { SocketService } from '../services/socket';
 
@@ -15,6 +15,7 @@ export class RetroStore {
   error: string | null = null;
   voteError: { cardId: string; message: string } | null = null;
   phaseTimer: PhaseTimerState = { durationSeconds: 0, remainingSeconds: 0, running: false };
+  chatMessages: ChatMessage[] = [];
 
   constructor() {
     makeAutoObservable(this, {}, { autoBind: true });
@@ -113,6 +114,21 @@ export class RetroStore {
     });
   }
 
+  setChatHistory(messages: ChatMessage[]) {
+    runInAction(() => {
+      this.chatMessages = messages;
+    });
+  }
+
+  addChatMessage(message: ChatMessage) {
+    runInAction(() => {
+      this.chatMessages.push(message);
+      if (this.chatMessages.length > 200) {
+        this.chatMessages = this.chatMessages.slice(-200);
+      }
+    });
+  }
+
   setAuthProfile(profile: AuthProfile | null) {
     runInAction(() => {
       this.authProfile = profile;
@@ -175,6 +191,7 @@ export class RetroStore {
         this.clearSession();
         this.clearVoteError();
         this.phaseTimer = { durationSeconds: 0, remainingSeconds: 0, running: false };
+        this.chatMessages = [];
         console.log('Cleared room and session');
       }
     });
@@ -197,6 +214,12 @@ export class RetroStore {
   setUsers(users: User[]) {
     runInAction(() => {
       this.users = this.normalizeUsers(users);
+      if (this.currentUser) {
+        const syncedUser = this.users.find((user) => user.name === this.currentUser?.name);
+        if (syncedUser) {
+          this.currentUser = syncedUser;
+        }
+      }
     });
   }
 
@@ -206,6 +229,12 @@ export class RetroStore {
       this.cards = state.cards;
       this.phase = state.phase;
       this.users = this.normalizeUsers(state.users);
+      if (this.currentUser) {
+        const syncedUser = this.users.find((user) => user.name === this.currentUser?.name);
+        if (syncedUser) {
+          this.currentUser = syncedUser;
+        }
+      }
     });
   }
 

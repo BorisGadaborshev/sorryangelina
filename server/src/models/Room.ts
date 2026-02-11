@@ -14,9 +14,9 @@ export const RoomModel = {
       );
       for (const user of doc.users || []) {
         await client.query(
-          `insert into room_users (id, name, room_id, role, is_ready) values ($1,$2,$3,$4,$5)
-           on conflict (room_id, id) do update set name = excluded.name, role = excluded.role, is_ready = excluded.is_ready`,
-          [user.id, user.name, doc.id, user.role, user.isReady ?? false]
+          `insert into room_users (id, name, room_id, role, is_ready, mood) values ($1,$2,$3,$4,$5,$6)
+           on conflict (room_id, id) do update set name = excluded.name, role = excluded.role, is_ready = excluded.is_ready, mood = excluded.mood`,
+          [user.id, user.name, doc.id, user.role, user.isReady ?? false, user.mood ?? null]
         );
       }
       await client.query('COMMIT');
@@ -33,7 +33,7 @@ export const RoomModel = {
     const { rows } = await pool.query('select id, password, owner, phase, created_at from rooms where id=$1', [where.id]);
     if (rows.length === 0) return null;
     const roomRow = rows[0] as { id: string; password: string; owner: string; phase: Room['phase']; created_at: string };
-    const usersRes = await pool.query('select id, name, role, is_ready from room_users where room_id=$1', [where.id]);
+    const usersRes = await pool.query('select id, name, role, is_ready, mood from room_users where room_id=$1', [where.id]);
     const cardsRes = await pool.query('select id, text, type, created_by, column_index, image_url from cards where room_id=$1', [where.id]);
     const cardRows = cardsRes.rows as Array<{ id: string; text: string; type: Card['type']; created_by: string; column_index: number; image_url: string | null }>;
     const votesRes = await pool.query('select card_id, user_id, vote from card_votes where card_id = any($1::text[])', [cardRows.map((r) => r.id)]);
@@ -43,8 +43,8 @@ export const RoomModel = {
       entry[v.vote === 'like' ? 'likes' : 'dislikes'].push(v.user_id);
       cardIdToVotes.set(v.card_id, entry);
     }
-    const userRows = usersRes.rows as Array<{ id: string; name: string; role: User['role']; is_ready: boolean }>;
-    const users: User[] = userRows.map((r) => ({ id: r.id, name: r.name, roomId: roomRow.id, role: r.role, isReady: r.is_ready }));
+    const userRows = usersRes.rows as Array<{ id: string; name: string; role: User['role']; is_ready: boolean; mood: User['mood'] | null }>;
+    const users: User[] = userRows.map((r) => ({ id: r.id, name: r.name, roomId: roomRow.id, role: r.role, isReady: r.is_ready, mood: r.mood ?? undefined }));
     const cards: Card[] = cardRows.map((r) => ({
       id: r.id,
       text: r.text,
@@ -85,17 +85,20 @@ export const RoomModel = {
           typeof update.$set['users.$.id'] !== 'undefined' ||
           typeof update.$set['users.$.role'] !== 'undefined' ||
           typeof update.$set['users.$.isReady'] !== 'undefined' ||
-          typeof update.$set['users.$.is_ready'] !== 'undefined'
+          typeof update.$set['users.$.is_ready'] !== 'undefined' ||
+          typeof update.$set['users.$.mood'] !== 'undefined'
         ) {
           if (filter['users.id']) {
             const newId = update.$set['users.$.id'];
             const role = update.$set['users.$.role'];
             const isReady = typeof update.$set['users.$.isReady'] !== 'undefined' ? update.$set['users.$.isReady'] : update.$set['users.$.is_ready'];
-            await client.query('update room_users set id = coalesce($1, id), role = coalesce($2, role), is_ready = coalesce($3, is_ready) where room_id=$4 and id=$5', [newId ?? null, role ?? null, typeof isReady === 'boolean' ? isReady : null, roomId, filter['users.id']]);
+            const mood = update.$set['users.$.mood'];
+            await client.query('update room_users set id = coalesce($1, id), role = coalesce($2, role), is_ready = coalesce($3, is_ready), mood = coalesce($4, mood) where room_id=$5 and id=$6', [newId ?? null, role ?? null, typeof isReady === 'boolean' ? isReady : null, mood ?? null, roomId, filter['users.id']]);
           } else if (filter['users.name']) {
             const newId = update.$set['users.$.id'];
             const role = update.$set['users.$.role'];
-            await client.query('update room_users set id = coalesce($1, id), role = coalesce($2, role) where room_id=$3 and name=$4', [newId ?? null, role ?? null, roomId, filter['users.name']]);
+            const mood = update.$set['users.$.mood'];
+            await client.query('update room_users set id = coalesce($1, id), role = coalesce($2, role), mood = coalesce($3, mood) where room_id=$4 and name=$5', [newId ?? null, role ?? null, mood ?? null, roomId, filter['users.name']]);
           }
         }
         if (
@@ -126,9 +129,9 @@ export const RoomModel = {
         if (update.$addToSet.users) {
           const u: User = update.$addToSet.users;
           await client.query(
-            `insert into room_users (id, name, room_id, role, is_ready) values ($1,$2,$3,$4,$5)
-             on conflict (room_id, id) do update set name = excluded.name, role = excluded.role, is_ready = excluded.is_ready`,
-            [u.id, u.name, roomId, u.role, u.isReady ?? false]
+            `insert into room_users (id, name, room_id, role, is_ready, mood) values ($1,$2,$3,$4,$5,$6)
+             on conflict (room_id, id) do update set name = excluded.name, role = excluded.role, is_ready = excluded.is_ready, mood = excluded.mood`,
+            [u.id, u.name, roomId, u.role, u.isReady ?? false, u.mood ?? null]
           );
         }
         if (update.$addToSet[`cards.$.likes`] || update.$addToSet[`cards.$.dislikes`]) {

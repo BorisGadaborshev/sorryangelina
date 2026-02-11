@@ -105,6 +105,7 @@ app.delete('/api/rooms/:roomId', (req, res) => __awaiter(void 0, void 0, void 0,
         rooms.delete(roomId);
         roomStates.delete(roomId);
         clearRoomTimer(roomId, false);
+        roomChats.delete(roomId);
         res.json({ message: 'Room deleted successfully' });
     }
     catch (error) {
@@ -227,9 +228,16 @@ const normalizeImageUrl = (value) => {
         return trimmed;
     return undefined;
 };
+const normalizeMood = (value) => {
+    if (typeof value !== 'string')
+        return undefined;
+    const allowed = ['great', 'good', 'neutral', 'bad', 'awful'];
+    return allowed.includes(value) ? value : undefined;
+};
 // Connection monitoring
 let connectionCount = 0;
 const roomTimers = new Map();
+const roomChats = new Map();
 const getRemainingSeconds = (endAt) => {
     return Math.max(0, Math.ceil((endAt - Date.now()) / 1000));
 };
@@ -275,6 +283,12 @@ const clearRoomTimer = (roomId, emitReset = true) => {
         emitTimerResetToRoom(roomId);
     }
 };
+const appendChatMessage = (roomId, message) => {
+    const history = roomChats.get(roomId) || [];
+    const next = [...history, message].slice(-200);
+    roomChats.set(roomId, next);
+    return next;
+};
 io.on('connection', (socket) => {
     connectionCount++;
     console.log(`Client connected (${connectionCount} total):`, socket.id);
@@ -314,6 +328,7 @@ io.on('connection', (socket) => {
                 }
             });
             emitTimerToSocket(socket, roomId);
+            socket.emit('chat-history', { messages: roomChats.get(roomId) || [] });
         }
         catch (error) {
             console.error('Error restoring session:', error);
@@ -358,6 +373,7 @@ io.on('connection', (socket) => {
                 userId: socket.id
             });
             emitTimerToSocket(socket, roomId);
+            socket.emit('chat-history', { messages: roomChats.get(roomId) || [] });
         }
         catch (error) {
             console.error('Error creating room:', error);
@@ -414,6 +430,7 @@ io.on('connection', (socket) => {
                 userId: user.id
             });
             emitTimerToSocket(socket, roomId);
+            socket.emit('chat-history', { messages: roomChats.get(roomId) || [] });
             if (!existingUser) {
                 socket.to(roomId).emit('user-joined', user);
             }
@@ -627,6 +644,30 @@ io.on('connection', (socket) => {
             console.error('Error updating ready state:', error);
         }
     }));
+    socket.on('set-user-mood', ({ mood }) => __awaiter(void 0, void 0, void 0, function* () {
+        if (!(currentUser === null || currentUser === void 0 ? void 0 : currentUser.roomId))
+            return;
+        const safeMood = normalizeMood(mood);
+        if (!safeMood) {
+            socket.emit('error', 'Invalid mood');
+            return;
+        }
+        try {
+            const room = yield RoomService_1.RoomService.updateUserMood(currentUser.roomId, currentUser.id, safeMood);
+            if (!room)
+                return;
+            currentUser = Object.assign(Object.assign({}, currentUser), { mood: safeMood });
+            io.to(currentUser.roomId).emit('state-updated', {
+                cards: room.cards,
+                phase: room.phase,
+                users: room.users
+            });
+        }
+        catch (error) {
+            console.error('Error updating user mood:', error);
+            socket.emit('error', 'Failed to update user mood');
+        }
+    }));
     socket.on('change-phase', ({ phase }) => __awaiter(void 0, void 0, void 0, function* () {
         if (!(currentUser === null || currentUser === void 0 ? void 0 : currentUser.roomId))
             return;
@@ -747,6 +788,22 @@ io.on('connection', (socket) => {
             socket.emit('error', 'Failed to reset timer');
         }
     }));
+    socket.on('send-chat-message', ({ text }) => {
+        if (!(currentUser === null || currentUser === void 0 ? void 0 : currentUser.roomId))
+            return;
+        const normalized = typeof text === 'string' ? text.trim() : '';
+        if (!normalized)
+            return;
+        const message = {
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            roomId: currentUser.roomId,
+            userName: currentUser.name,
+            text: normalized.slice(0, 500),
+            timestamp: Date.now()
+        };
+        appendChatMessage(currentUser.roomId, message);
+        io.to(currentUser.roomId).emit('chat-message', message);
+    });
     socket.on('delete-room', () => __awaiter(void 0, void 0, void 0, function* () {
         if (!(currentUser === null || currentUser === void 0 ? void 0 : currentUser.roomId)) {
             socket.emit('error', 'Room not found');
@@ -768,6 +825,7 @@ io.on('connection', (socket) => {
             rooms.delete(roomId);
             roomStates.delete(roomId);
             clearRoomTimer(roomId, false);
+            roomChats.delete(roomId);
             io.to(roomId).emit('room-deleted');
             io.in(roomId).socketsLeave(roomId);
             currentUser = null;

@@ -359,6 +359,21 @@ class RoomService {
             return this.convertToRoom(room);
         });
     }
+    static updateUserMood(roomId, userId, mood) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const room = yield Room_1.RoomModel.findOneAndUpdate({
+                id: roomId,
+                'users.id': userId
+            }, {
+                $set: {
+                    'users.$.mood': mood
+                }
+            }, { new: true });
+            if (!room)
+                return null;
+            return this.convertToRoom(room);
+        });
+    }
     static convertToRoom(doc) {
         const { id, owner, phase, createdAt, users, cards } = doc;
         const adminName = this.getAdminName(owner, (users || []).map((user) => user.name));
@@ -377,7 +392,8 @@ class RoomService {
                 name: user.name,
                 roomId: id,
                 role: user.name === adminName ? 'admin' : 'user',
-                isReady: user.isReady
+                isReady: user.isReady,
+                mood: user.mood
             })) : [],
             cards: cards || []
         };

@@ -1,9 +1,12 @@
+export type Mood = 'great' | 'good' | 'neutral' | 'bad' | 'awful';
+
 export interface User {
   id: string;
   name: string;
   roomId: string;
   role: 'admin' | 'user';
   isReady?: boolean;
+  mood?: Mood;
 }
 
 export interface Card {

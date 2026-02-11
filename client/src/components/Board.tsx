@@ -10,10 +10,13 @@ import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import DarkModeIcon from '@mui/icons-material/DarkMode';
 import LightModeIcon from '@mui/icons-material/LightMode';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
 import RetroColumn from './RetroColumn';
 import UserList from './UserList';
 import { RetroStore } from '../store/RetroStore';
 import DiscussionView from './DiscussionView';
+import ChatTerminal from './ChatTerminal';
+import { Mood } from '../types';
 
 interface Props {
   store: RetroStore;
@@ -21,9 +24,18 @@ interface Props {
   onToggleTheme: () => void;
 }
 
+const MOOD_OPTIONS: Array<{ value: Mood; emoji: string; label: string; color: string; labelColor: string }> = [
+  { value: 'great', emoji: '😀', label: 'Великолепно', color: '#34c759', labelColor: '#ffffff' },
+  { value: 'good', emoji: '🙂', label: 'Хорошо', color: '#8fd400', labelColor: '#1f1f1f' },
+  { value: 'neutral', emoji: '😐', label: 'Нормально', color: '#f2d000', labelColor: '#1f1f1f' },
+  { value: 'bad', emoji: '🙁', label: 'Плохо', color: '#e9b000', labelColor: '#1f1f1f' },
+  { value: 'awful', emoji: '😠', label: 'Злой', color: '#ff5b62', labelColor: '#ffffff' }
+];
+
 const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) => {
   const [isReady, setIsReady] = useState(false);
   const [isUserListVisible, setIsUserListVisible] = useState(true);
+  const [isChatVisible, setIsChatVisible] = useState(false);
   const isMobile = useMediaQuery('(max-width:600px)');
   const isCompactDesktop = useMediaQuery('(max-width:1280px)');
   const [mobileTab, setMobileTab] = useState<number>(0); // 0 - доска, 1 - участники
@@ -31,6 +43,8 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   const [selectedTimerSeconds, setSelectedTimerSeconds] = useState<number>(300);
   const [moreAnchorEl, setMoreAnchorEl] = useState<null | HTMLElement>(null);
   const [timerAnchorEl, setTimerAnchorEl] = useState<null | HTMLElement>(null);
+  const [isMoodDialogOpen, setIsMoodDialogOpen] = useState(false);
+  const [selectedMood, setSelectedMood] = useState<Mood | null>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -38,6 +52,23 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
     }, 100);
     return () => clearTimeout(timer);
   }, []);
+
+  const currentUserName = store.currentUser?.name;
+  const currentRoomId = store.room?.id;
+  const currentUserMood = currentUserName
+    ? store.users.find((user) => user.name === currentUserName)?.mood
+    : undefined;
+
+  useEffect(() => {
+    if (!currentRoomId || !currentUserName) return;
+    if (currentUserMood) {
+      setSelectedMood(currentUserMood);
+      setIsMoodDialogOpen(false);
+      return;
+    }
+    setSelectedMood(null);
+    setIsMoodDialogOpen(true);
+  }, [currentRoomId, currentUserName, currentUserMood]);
 
   const getPhaseTranslation = (phase: 'creation' | 'voting' | 'discussion'): string => {
     const translations = {
@@ -70,6 +101,12 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
     if (Number.isNaN(destinationColumn)) return;
 
     store.socketService?.moveCard(draggableId, destinationColumn);
+  };
+
+  const handleSaveMood = () => {
+    if (!selectedMood) return;
+    store.socketService?.setUserMood(selectedMood);
+    setIsMoodDialogOpen(false);
   };
 
   if (!store.room || !store.currentUser || !isReady) {
@@ -274,7 +311,16 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
           )}
           {isMobile ? (
             <Box sx={{ width: '100%' }}>
-              <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 0.5 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 0.5, gap: 0.5 }}>
+                <Tooltip title={isChatVisible ? 'Скрыть чат' : 'Показать чат'}>
+                  <IconButton
+                    color="inherit"
+                    onClick={() => setIsChatVisible(!isChatVisible)}
+                    size="small"
+                  >
+                    <ChatBubbleOutlineIcon />
+                  </IconButton>
+                </Tooltip>
                 <Tooltip title="Выйти из комнаты">
                   <IconButton
                     color="inherit"
@@ -383,42 +429,64 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
         overflow: 'hidden'
       }}>
         {isMobile ? (
-          mobileTab === 1 ? (
-            <Box sx={{ flexGrow: 1, overflowY: 'auto' }}>
-              <UserList 
-                users={store.users}
-                onlineUsers={store.users.map(u => u.id)}
-                currentUserId={store.currentUser.id}
-                currentPhase={store.phase}
-                onReadyStateChange={handleReadyStateChange}
-                store={store}
-              />
-            </Box>
-          ) : (
-            <Box sx={{ flexGrow: 1, overflowY: 'auto' }}>
-              {renderContent()}
-            </Box>
-          )
+          <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1, gap: 1 }}>
+            {mobileTab === 1 ? (
+              <Box sx={{ flexGrow: 1, overflowY: 'auto' }}>
+                <UserList 
+                  users={store.users}
+                  onlineUsers={store.users.map(u => u.id)}
+                  currentUserId={store.currentUser.id}
+                  currentPhase={store.phase}
+                  onReadyStateChange={handleReadyStateChange}
+                  store={store}
+                />
+              </Box>
+            ) : (
+              <Box sx={{ flexGrow: 1, overflowY: 'auto' }}>
+                {renderContent()}
+              </Box>
+            )}
+            {isChatVisible && (
+              <Box sx={{ flexShrink: 0 }}>
+                <ChatTerminal store={store} compact />
+              </Box>
+            )}
+          </Box>
         ) : (
           <>
             <Box sx={{ 
               width: isUserListVisible ? 300 : 0,
               flexShrink: 0,
-              overflowY: 'auto',
+              overflow: 'hidden',
               bgcolor: 'background.paper',
               borderRadius: 1,
               boxShadow: 1,
               transition: 'width 0.2s ease-in-out',
-              visibility: isUserListVisible ? 'visible' : 'hidden'
+              visibility: isUserListVisible ? 'visible' : 'hidden',
+              display: 'flex',
+              flexDirection: 'column'
             }}>
-              <UserList 
-                users={store.users}
-                onlineUsers={store.users.map(u => u.id)}
-                currentUserId={store.currentUser.id}
-                currentPhase={store.phase}
-                onReadyStateChange={handleReadyStateChange}
-                store={store}
-              />
+              <Box sx={{ flexGrow: 1, overflowY: 'auto' }}>
+                <UserList 
+                  users={store.users}
+                  onlineUsers={store.users.map(u => u.id)}
+                  currentUserId={store.currentUser.id}
+                  currentPhase={store.phase}
+                  onReadyStateChange={handleReadyStateChange}
+                  store={store}
+                />
+              </Box>
+              <Box sx={{ p: 0.75, borderTop: '1px solid', borderColor: 'divider', display: 'flex', justifyContent: 'center' }}>
+                <Tooltip title={isChatVisible ? 'Скрыть чат' : 'Показать чат'}>
+                  <IconButton
+                    size="small"
+                    color={isChatVisible ? 'primary' : 'default'}
+                    onClick={() => setIsChatVisible(!isChatVisible)}
+                  >
+                    <ChatBubbleOutlineIcon />
+                  </IconButton>
+                </Tooltip>
+              </Box>
             </Box>
             <Box sx={{ 
               flexGrow: 1,
@@ -426,6 +494,19 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
             }}>
               {renderContent()}
             </Box>
+            {isChatVisible && (
+              <Box
+                sx={{
+                  width: 330,
+                  flexShrink: 0,
+                  minWidth: 280,
+                  maxWidth: 380,
+                  overflow: 'hidden'
+                }}
+              >
+                <ChatTerminal store={store} />
+              </Box>
+            )}
           </>
         )}
       </Box>
@@ -448,6 +529,82 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
             }}
           >
             Удалить комнату
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={isMoodDialogOpen}
+        onClose={(_, reason) => {
+          if (reason === 'backdropClick' || reason === 'escapeKeyDown') return;
+          setIsMoodDialogOpen(false);
+        }}
+      >
+        <DialogTitle>Как ваше самочувствие?</DialogTitle>
+        <DialogContent>
+          <DialogContentText sx={{ mb: 2 }}>
+            Выберите смайлик, который отражает ваше самочувствие и отношение к спринту
+          </DialogContentText>
+          <Box sx={{ width: '100%', maxWidth: 520, mx: 'auto' }}>
+            <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', alignItems: 'center', mb: 1 }}>
+              {MOOD_OPTIONS.map((option) => {
+                const isActive = selectedMood === option.value;
+                return (
+                  <Box key={option.value} sx={{ display: 'flex', justifyContent: 'center' }}>
+                    <Button
+                      onClick={() => setSelectedMood(option.value)}
+                      sx={{
+                        minWidth: 56,
+                        width: 56,
+                        height: 56,
+                        borderRadius: '50%',
+                        fontSize: '1.65rem',
+                        bgcolor: option.color,
+                        border: isActive ? '3px solid' : '1px solid',
+                        borderColor: isActive ? 'text.primary' : 'transparent',
+                        lineHeight: 1
+                      }}
+                    >
+                      {option.emoji}
+                    </Button>
+                  </Box>
+                );
+              })}
+            </Box>
+            <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', borderRadius: 999, overflow: 'hidden' }}>
+              {MOOD_OPTIONS.map((option) => (
+                <Box
+                  key={option.value}
+                  sx={{
+                    height: 28,
+                    bgcolor: option.color,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    px: 0.5
+                  }}
+                >
+                  <Typography
+                    variant="caption"
+                    sx={{
+                      color: option.labelColor,
+                      fontSize: '0.68rem',
+                      lineHeight: 1.1,
+                      fontWeight: 600,
+                      textAlign: 'center',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    {option.label}
+                  </Typography>
+                </Box>
+              ))}
+            </Box>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button variant="contained" onClick={handleSaveMood} disabled={!selectedMood}>
+            Сохранить
           </Button>
         </DialogActions>
       </Dialog>

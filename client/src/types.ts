@@ -4,6 +4,7 @@ export interface User {
   roomId: string;
   role: 'admin' | 'user';
   isReady?: boolean;
+  mood?: Mood;
 }
 
 export interface Room {
@@ -37,6 +38,16 @@ export interface PhaseTimerState {
   remainingSeconds: number;
   running: boolean;
 }
+
+export interface ChatMessage {
+  id: string;
+  roomId: string;
+  userName: string;
+  text: string;
+  timestamp: number;
+}
+
+export type Mood = 'great' | 'good' | 'neutral' | 'bad' | 'awful';
 
 export type AuthProfileType = 'fixed' | 'registered' | 'guest';
 

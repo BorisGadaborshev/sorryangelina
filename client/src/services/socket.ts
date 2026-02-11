@@ -1,6 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { RetroStore } from '../store/RetroStore';
-import { Room, RoomState, User, Card, PhaseTimerState } from '../types';
+import { Room, RoomState, User, Card, PhaseTimerState, ChatMessage, Mood } from '../types';
 
 export class SocketService {
   private socket: Socket;
@@ -100,7 +100,8 @@ export class SocketService {
             id: userToUpdate.id,
             name: userToUpdate.name,
             roomId: room.id,
-            role: userToUpdate.role
+            role: userToUpdate.role,
+            mood: userToUpdate.mood
           });
         }
       } else if (userId) {
@@ -116,7 +117,8 @@ export class SocketService {
             id: userToUpdate.id,
             name: userToUpdate.name,
             roomId: room.id,
-            role: userToUpdate.role
+            role: userToUpdate.role,
+            mood: userToUpdate.mood
           });
         }
       }
@@ -186,6 +188,14 @@ export class SocketService {
 
     this.socket.on('timer-updated', (timer: PhaseTimerState) => {
       this.store.setPhaseTimer(timer);
+    });
+
+    this.socket.on('chat-history', ({ messages }: { messages: ChatMessage[] }) => {
+      this.store.setChatHistory(messages);
+    });
+
+    this.socket.on('chat-message', (message: ChatMessage) => {
+      this.store.addChatMessage(message);
     });
 
     this.socket.on('user-kicked', () => {
@@ -307,7 +317,8 @@ export class SocketService {
               id: currentUser.id,
               name: currentUser.name,
               roomId: room.id,
-              role: currentUser.role || 'admin' // Гарантируем, что создатель комнаты получит роль админа
+              role: currentUser.role || 'admin', // Гарантируем, что создатель комнаты получит роль админа
+              mood: currentUser.mood
             });
           }
           
@@ -439,6 +450,14 @@ export class SocketService {
 
   resetPhaseTimer(): void {
     this.socket.emit('reset-phase-timer');
+  }
+
+  sendChatMessage(text: string): void {
+    this.socket.emit('send-chat-message', { text });
+  }
+
+  setUserMood(mood: Mood): void {
+    this.socket.emit('set-user-mood', { mood });
   }
 
   async restoreSession(roomId: string, userId: string, username: string, token?: string): Promise<void> {

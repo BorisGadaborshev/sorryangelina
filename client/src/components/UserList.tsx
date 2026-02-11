@@ -8,12 +8,14 @@ import PersonRemoveIcon from '@mui/icons-material/PersonRemove';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import { RetroStore } from '../store/RetroStore';
+import { Mood } from '../types';
 
 interface User {
   id: string;
   name: string;
   role: 'admin' | 'user';
   isReady?: boolean;
+  mood?: Mood;
 }
 
 interface UserListProps {
@@ -65,6 +67,15 @@ const UserList: React.FC<UserListProps> = ({
     }
   };
 
+  const getMoodMeta = (mood?: Mood): { emoji: string; color: string } | null => {
+    if (mood === 'great') return { emoji: '😀', color: '#34c759' };
+    if (mood === 'good') return { emoji: '🙂', color: '#8fd400' };
+    if (mood === 'neutral') return { emoji: '😐', color: '#f2d000' };
+    if (mood === 'bad') return { emoji: '🙁', color: '#e9b000' };
+    if (mood === 'awful') return { emoji: '😠', color: '#ff5b62' };
+    return null;
+  };
+
   const getPhaseActionText = (phase: string): string => {
     switch (phase) {
       case 'creation':
@@ -111,7 +122,9 @@ const UserList: React.FC<UserListProps> = ({
         )}
       </Box>
       <List>
-        {users.map((user) => (
+        {users.map((user) => {
+          const moodMeta = getMoodMeta(user.mood);
+          return (
           <ListItem
             key={user.id}
             sx={{
@@ -126,10 +139,10 @@ const UserList: React.FC<UserListProps> = ({
             <Avatar
               sx={{
                 mr: 2,
-                bgcolor: onlineUsers.includes(user.id) ? 'success.main' : 'grey.400',
+                bgcolor: moodMeta?.color ?? (onlineUsers.includes(user.id) ? 'success.main' : 'grey.400'),
               }}
             >
-              {user.role === 'admin' ? <AdminPanelSettingsIcon /> : <PersonIcon />}
+              {moodMeta?.emoji ?? (user.role === 'admin' ? <AdminPanelSettingsIcon /> : <PersonIcon />)}
             </Avatar>
             <ListItemText
               primary={user.name}
@@ -168,7 +181,7 @@ const UserList: React.FC<UserListProps> = ({
               )}
             </Box>
           </ListItem>
-        ))}
+        )})}
       </List>
       {offlineFixedUsers.length > 0 && (
         <Box sx={{ px: 1, pb: 1 }}>

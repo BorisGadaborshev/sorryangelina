@@ -450,6 +450,24 @@ export class RoomService {
     return this.convertToRoom(room);
   }
 
+  static async updateUserMood(roomId: string, userId: string, mood: User['mood']): Promise<Room | null> {
+    const room = await RoomModel.findOneAndUpdate(
+      {
+        id: roomId,
+        'users.id': userId
+      },
+      {
+        $set: {
+          'users.$.mood': mood
+        }
+      },
+      { new: true }
+    );
+
+    if (!room) return null;
+    return this.convertToRoom(room);
+  }
+
   private static convertToRoom(doc: RoomDocument): Room {
     const { id, owner, phase, createdAt, users, cards } = doc;
     const adminName = this.getAdminName(owner, (users || []).map((user) => user.name));
@@ -469,7 +487,8 @@ export class RoomService {
         name: user.name,
         roomId: id,
         role: user.name === adminName ? ('admin' as const) : ('user' as const),
-        isReady: user.isReady
+        isReady: user.isReady,
+        mood: user.mood
       })) : [],
       cards: cards || []
     };
