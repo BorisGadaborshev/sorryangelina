@@ -386,23 +386,23 @@ export class SocketService {
     }
   }
 
-  addCard(text: string, type: 'liked' | 'disliked' | 'suggestion', column: number): void {
+  addCard(text: string, type: 'liked' | 'disliked' | 'suggestion', column: number, imageUrl?: string): void {
     const currentUser = this.store.currentUser;
     if (!currentUser) {
       console.error('Cannot add card: no current user');
       return;
     }
     console.log('Adding card with user:', currentUser);
-    this.socket.emit('add-card', { text, type, column });
+    this.socket.emit('add-card', { text, type, column, imageUrl });
   }
 
-  updateCard(cardId: string, text: string): void {
+  updateCard(cardId: string, text: string, imageUrl?: string): void {
     const currentUser = this.store.currentUser;
     if (!currentUser) {
       console.error('Cannot update card: no current user');
       return;
     }
-    this.socket.emit('update-card', { cardId, text });
+    this.socket.emit('update-card', { cardId, text, imageUrl });
   }
 
   deleteCard(cardId: string): void {

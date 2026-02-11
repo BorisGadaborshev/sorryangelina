@@ -34,8 +34,8 @@ export const RoomModel = {
     if (rows.length === 0) return null;
     const roomRow = rows[0] as { id: string; password: string; owner: string; phase: Room['phase']; created_at: string };
     const usersRes = await pool.query('select id, name, role, is_ready from room_users where room_id=$1', [where.id]);
-    const cardsRes = await pool.query('select id, text, type, created_by, column_index from cards where room_id=$1', [where.id]);
-    const cardRows = cardsRes.rows as Array<{ id: string; text: string; type: Card['type']; created_by: string; column_index: number }>;
+    const cardsRes = await pool.query('select id, text, type, created_by, column_index, image_url from cards where room_id=$1', [where.id]);
+    const cardRows = cardsRes.rows as Array<{ id: string; text: string; type: Card['type']; created_by: string; column_index: number; image_url: string | null }>;
     const votesRes = await pool.query('select card_id, user_id, vote from card_votes where card_id = any($1::text[])', [cardRows.map((r) => r.id)]);
     const cardIdToVotes = new Map<string, { likes: string[]; dislikes: string[] }>();
     for (const v of votesRes.rows as Array<{ card_id: string; user_id: string; vote: 'like' | 'dislike' }>) {
@@ -45,7 +45,16 @@ export const RoomModel = {
     }
     const userRows = usersRes.rows as Array<{ id: string; name: string; role: User['role']; is_ready: boolean }>;
     const users: User[] = userRows.map((r) => ({ id: r.id, name: r.name, roomId: roomRow.id, role: r.role, isReady: r.is_ready }));
-    const cards: Card[] = cardRows.map((r) => ({ id: r.id, text: r.text, type: r.type, createdBy: r.created_by, likes: cardIdToVotes.get(r.id)?.likes || [], dislikes: cardIdToVotes.get(r.id)?.dislikes || [], column: r.column_index }));
+    const cards: Card[] = cardRows.map((r) => ({
+      id: r.id,
+      text: r.text,
+      type: r.type,
+      createdBy: r.created_by,
+      likes: cardIdToVotes.get(r.id)?.likes || [],
+      dislikes: cardIdToVotes.get(r.id)?.dislikes || [],
+      column: r.column_index,
+      imageUrl: r.image_url ?? undefined
+    }));
     return {
       id: roomRow.id,
       password: roomRow.password,
@@ -91,16 +100,21 @@ export const RoomModel = {
         }
         if (
           typeof update.$set['cards.$.text'] !== 'undefined' ||
-          typeof update.$set['cards.$.column'] !== 'undefined'
+          typeof update.$set['cards.$.column'] !== 'undefined' ||
+          typeof update.$set['cards.$.imageUrl'] !== 'undefined'
         ) {
           const cardId = filter['cards.id'];
           const text = update.$set['cards.$.text'];
           const column = update.$set['cards.$.column'];
+          const imageUrl = update.$set['cards.$.imageUrl'];
           if (typeof text !== 'undefined') {
             await client.query('update cards set text=$1 where id=$2 and room_id=$3', [text, cardId, roomId]);
           }
           if (typeof column !== 'undefined') {
             await client.query('update cards set column_index=$1 where id=$2 and room_id=$3', [column, cardId, roomId]);
+          }
+          if (typeof imageUrl !== 'undefined') {
+            await client.query('update cards set image_url=$1 where id=$2 and room_id=$3', [imageUrl || null, cardId, roomId]);
           }
         }
         if (update.$set['users.$[].isReady'] === false || update.$set['users.$[].is_ready'] === false) {
@@ -128,8 +142,8 @@ export const RoomModel = {
       if (update.$push?.cards) {
         const c: Card = update.$push.cards;
         await client.query(
-          'insert into cards (id, room_id, text, type, created_by, column_index) values ($1,$2,$3,$4,$5,$6) on conflict (id) do nothing',
-          [c.id, roomId, c.text, c.type, c.createdBy, c.column]
+          'insert into cards (id, room_id, text, type, created_by, column_index, image_url) values ($1,$2,$3,$4,$5,$6,$7) on conflict (id) do nothing',
+          [c.id, roomId, c.text, c.type, c.createdBy, c.column, c.imageUrl || null]
         );
       }
 

@@ -123,6 +123,20 @@ const DiscussionView: React.FC<Props> = observer(({ store }) => {
           >
             {currentCard.text}
           </Typography>
+          {currentCard.imageUrl && (
+            <Box
+              component="img"
+              src={currentCard.imageUrl}
+              alt="card"
+              sx={{
+                width: '100%',
+                maxHeight: 320,
+                objectFit: 'contain',
+                borderRadius: 1,
+                border: '1px solid rgba(0,0,0,0.08)'
+              }}
+            />
+          )}
 
           <Box sx={{
             display: 'flex',
@@ -177,6 +191,19 @@ const DiscussionView: React.FC<Props> = observer(({ store }) => {
                   <Typography variant="body2" sx={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {card.text}
                   </Typography>
+                  {card.imageUrl && (
+                    <Box
+                      component="img"
+                      src={card.imageUrl}
+                      alt="thumb"
+                      sx={{
+                        width: '100%',
+                        height: 60,
+                        objectFit: 'cover',
+                        borderRadius: 1
+                      }}
+                    />
+                  )}
                   <Typography variant="caption" color="text.secondary">
                     🍑 {card.likes?.length || 0} | 🍅 {card.dislikes?.length || 0}
                   </Typography>

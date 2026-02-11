@@ -6,6 +6,7 @@ import { RetroStore } from '../store/RetroStore';
 import RetroCard from './RetroCard';
 import { Card } from '../types';
 import EmojiEmotionsIcon from '@mui/icons-material/EmojiEmotions';
+import ImageIcon from '@mui/icons-material/Image';
 
 interface Props {
   title: string;
@@ -35,11 +36,14 @@ const EMOJI_GROUPS = {
 
 const RetroColumn: React.FC<Props> = observer(({ title, type, columnIndex, store, enableDragDrop = false }) => {
   const [newCardText, setNewCardText] = useState('');
+  const [newCardImageUrl, setNewCardImageUrl] = useState('');
   const [selectedEmoji, setSelectedEmoji] = useState('');
   const [localCards, setLocalCards] = useState<Card[]>([]);
   const [anchorEl, setAnchorEl] = useState<HTMLButtonElement | null>(null);
+  const [imageAnchorEl, setImageAnchorEl] = useState<HTMLButtonElement | null>(null);
   const [cursorPosition, setCursorPosition] = useState<number>(0);
   const textFieldRef = useRef<HTMLTextAreaElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const isMobile = useMediaQuery('(max-width:600px)');
 
   useEffect(() => {
@@ -50,8 +54,9 @@ const RetroColumn: React.FC<Props> = observer(({ title, type, columnIndex, store
   const handleAddCard = () => {
     if (newCardText.trim() && store.socket && store.phase === 'creation') {
       const text = selectedEmoji ? `${selectedEmoji} ${newCardText.trim()}` : newCardText.trim();
-      store.socketService?.addCard(text, type, columnIndex);
+      store.socketService?.addCard(text, type, columnIndex, newCardImageUrl.trim() || undefined);
       setNewCardText('');
+      setNewCardImageUrl('');
       setSelectedEmoji('');
     }
   };
@@ -68,6 +73,26 @@ const RetroColumn: React.FC<Props> = observer(({ title, type, columnIndex, store
         textFieldRef.current.setSelectionRange(newCursorPos, newCursorPos);
       }
     }, 0);
+  };
+
+  const handleCursorTracking = (event: React.SyntheticEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const position = event.currentTarget.selectionStart ?? 0;
+    setCursorPosition(position);
+  };
+
+  const handleSelectImageFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : '';
+      if (result.startsWith('data:image/')) {
+        setNewCardImageUrl(result);
+      }
+    };
+    reader.readAsDataURL(file);
+    event.target.value = '';
   };
 
   const columnColor = {
@@ -107,14 +132,28 @@ const RetroColumn: React.FC<Props> = observer(({ title, type, columnIndex, store
               onChange={(e) => setNewCardText(e.target.value)}
               inputRef={textFieldRef}
               size="small"
+              inputProps={{
+                onClick: handleCursorTracking,
+                onKeyUp: handleCursorTracking,
+                onSelect: handleCursorTracking
+              }}
               InputProps={{
                 endAdornment: (
-                  <IconButton 
-                    onClick={(e) => setAnchorEl(e.currentTarget)}
-                    sx={{ p: 0.5, opacity: 0.6, '&:hover': { backgroundColor: 'transparent', opacity: 1 } }}
-                  >
-                    <EmojiEmotionsIcon fontSize="small" />
-                  </IconButton>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <IconButton 
+                      onClick={(e) => setAnchorEl(e.currentTarget)}
+                      sx={{ p: 0.5, opacity: 0.6, '&:hover': { backgroundColor: 'transparent', opacity: 1 } }}
+                    >
+                      <EmojiEmotionsIcon fontSize="small" />
+                    </IconButton>
+                    <IconButton
+                      onClick={(e) => setImageAnchorEl(e.currentTarget)}
+                      color={newCardImageUrl.trim() ? 'primary' : 'default'}
+                      sx={{ p: 0.5, opacity: 0.7, '&:hover': { backgroundColor: 'transparent', opacity: 1 } }}
+                    >
+                      <ImageIcon fontSize="small" />
+                    </IconButton>
+                  </Box>
                 )
               }}
             />
@@ -136,6 +175,66 @@ const RetroColumn: React.FC<Props> = observer(({ title, type, columnIndex, store
                   {emoji}
                 </IconButton>
               ))}
+            </Box>
+          </Popover>
+          <Popover
+            open={Boolean(imageAnchorEl)}
+            anchorEl={imageAnchorEl}
+            onClose={() => setImageAnchorEl(null)}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+          >
+            <Box sx={{ p: 1.5, width: 320 }}>
+              <TextField
+                fullWidth
+                variant="outlined"
+                size="small"
+                label="Ссылка на изображение"
+                placeholder="https://..."
+                value={newCardImageUrl}
+                onChange={(event) => setNewCardImageUrl(event.target.value)}
+                helperText="Можно вставить ссылку или выбрать файл"
+              />
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/*"
+                style={{ display: 'none' }}
+                onChange={handleSelectImageFile}
+              />
+              <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={() => imageInputRef.current?.click()}
+                >
+                  Выбрать файл
+                </Button>
+                {newCardImageUrl.trim() && (
+                  <Button
+                    size="small"
+                    color="error"
+                    onClick={() => setNewCardImageUrl('')}
+                  >
+                    Убрать
+                  </Button>
+                )}
+              </Box>
+              {newCardImageUrl.trim() && (
+                <Box
+                  component="img"
+                  src={newCardImageUrl.trim()}
+                  alt="preview"
+                  sx={{
+                    mt: 1,
+                    width: '100%',
+                    maxHeight: 140,
+                    objectFit: 'contain',
+                    borderRadius: 1,
+                    border: '1px solid rgba(0,0,0,0.1)'
+                  }}
+                />
+              )}
             </Box>
           </Popover>
           <Button

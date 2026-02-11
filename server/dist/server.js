@@ -208,6 +208,18 @@ io.engine.on("connection_error", (err) => {
 const getSortedCards = (cards) => {
     return [...cards].sort((a, b) => { var _a, _b, _c, _d; return ((((_a = b.likes) === null || _a === void 0 ? void 0 : _a.length) || 0) - (((_b = b.dislikes) === null || _b === void 0 ? void 0 : _b.length) || 0)) - ((((_c = a.likes) === null || _c === void 0 ? void 0 : _c.length) || 0) - (((_d = a.dislikes) === null || _d === void 0 ? void 0 : _d.length) || 0)); });
 };
+const normalizeImageUrl = (value) => {
+    if (typeof value !== 'string')
+        return undefined;
+    const trimmed = value.trim();
+    if (!trimmed)
+        return undefined;
+    if (/^https?:\/\//i.test(trimmed))
+        return trimmed;
+    if (/^data:image\/[a-zA-Z0-9.+-]+;base64,/i.test(trimmed))
+        return trimmed;
+    return undefined;
+};
 // Connection monitoring
 let connectionCount = 0;
 const roomTimers = new Map();
@@ -395,21 +407,31 @@ io.on('connection', (socket) => {
                 userId: user.id
             });
             emitTimerToSocket(socket, roomId);
-            socket.to(roomId).emit('user-joined', user);
+            if (!existingUser) {
+                socket.to(roomId).emit('user-joined', user);
+            }
+            else {
+                socket.to(roomId).emit('state-updated', {
+                    cards: room.cards,
+                    phase: room.phase,
+                    users: room.users
+                });
+            }
         }
         catch (error) {
             console.error('Error joining room:', error);
             socket.emit('error', 'Failed to join room');
         }
     }));
-    socket.on('add-card', ({ text, type, column }) => __awaiter(void 0, void 0, void 0, function* () {
+    socket.on('add-card', ({ text, type, column, imageUrl }) => __awaiter(void 0, void 0, void 0, function* () {
         if (!currentUser)
             return;
         try {
-            console.log('Received add-card event:', { text, type, column, userId: currentUser.id });
+            console.log('Received add-card event:', { text, type, column, imageUrl, userId: currentUser.id });
             const room = yield RoomService_1.RoomService.getRoom(currentUser.roomId);
             if (!room || room.phase !== 'creation')
                 return;
+            const safeImageUrl = normalizeImageUrl(imageUrl);
             const card = {
                 id: Date.now().toString(),
                 text,
@@ -417,7 +439,8 @@ io.on('connection', (socket) => {
                 createdBy: currentUser.name,
                 likes: [],
                 dislikes: [],
-                column
+                column,
+                imageUrl: safeImageUrl
             };
             const updatedRoom = yield RoomService_1.RoomService.addCard(currentUser.roomId, card);
             if (updatedRoom) {
@@ -442,7 +465,7 @@ io.on('connection', (socket) => {
             socket.emit('error', 'Failed to add card');
         }
     }));
-    socket.on('update-card', ({ cardId, text }) => __awaiter(void 0, void 0, void 0, function* () {
+    socket.on('update-card', ({ cardId, text, imageUrl }) => __awaiter(void 0, void 0, void 0, function* () {
         if (!currentUser)
             return;
         const currentUserName = currentUser.name;
@@ -456,9 +479,21 @@ io.on('connection', (socket) => {
             const isAdmin = room.users.some((user) => user.name === currentUserName && user.role === 'admin');
             if (!isAdmin && card.createdBy !== currentUserName)
                 return;
-            const updatedRoom = yield RoomService_1.RoomService.updateCard(currentUser.roomId, cardId, { text });
+            const updates = {};
+            if (typeof text === 'string') {
+                updates.text = text;
+            }
+            if (typeof imageUrl !== 'undefined') {
+                updates.imageUrl = normalizeImageUrl(imageUrl);
+            }
+            if (Object.keys(updates).length === 0)
+                return;
+            const updatedRoom = yield RoomService_1.RoomService.updateCard(currentUser.roomId, cardId, updates);
             if (updatedRoom) {
-                io.to(currentUser.roomId).emit('card-updated', { cardId, text });
+                const updatedCard = updatedRoom.cards.find((currentCard) => currentCard.id === cardId);
+                if (updatedCard) {
+                    io.to(currentUser.roomId).emit('card-updated', updatedCard);
+                }
                 io.to(currentUser.roomId).emit('state-updated', {
                     cards: updatedRoom.cards,
                     phase: updatedRoom.phase,

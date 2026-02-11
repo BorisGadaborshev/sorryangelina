@@ -58,6 +58,10 @@ const Login: React.FC<Props> = observer(({ store }) => {
   const [deleteRoomId, setDeleteRoomId] = useState('');
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [isDeletingRoom, setIsDeletingRoom] = useState(false);
+  const [isFixedUsersUnlocked, setIsFixedUsersUnlocked] = useState(false);
+  const [isSuboDialogOpen, setIsSuboDialogOpen] = useState(false);
+  const [suboInput, setSuboInput] = useState('');
+  const [suboError, setSuboError] = useState<string | null>(null);
 
   const fetchFixedUsers = useCallback(async () => {
     try {
@@ -274,10 +278,26 @@ const Login: React.FC<Props> = observer(({ store }) => {
     }
   };
 
+  const handleSuboSubmit = () => {
+    const normalized = suboInput.trim();
+    if (!/^\d{4}-\d$/.test(normalized)) {
+      setSuboError('Формат номера: NNNN-N');
+      return;
+    }
+    if (normalized !== '1395-5') {
+      setSuboError('Неверный номер СУБО');
+      return;
+    }
+    setIsFixedUsersUnlocked(true);
+    setIsSuboDialogOpen(false);
+    setSuboInput('');
+    setSuboError(null);
+  };
+
   const renderAuthBlock = () => (
     <>
       <Tabs value={authTab} onChange={(_, value) => setAuthTab(value)} variant="scrollable" allowScrollButtonsMobile sx={{ mb: 2 }}>
-        <Tab label="Фиксированные ФИО" />
+        <Tab label="Команда &quot;Карты и Партнеры&quot;" />
         <Tab label="Вход в учетку" />
         <Tab label="Новая учетка" />
         <Tab label="Гость" />
@@ -285,33 +305,46 @@ const Login: React.FC<Props> = observer(({ store }) => {
 
       {authTab === 0 && (
         <>
-          <TextField
-            fullWidth
-            select
-            label="Выберите ФИО"
-            margin="normal"
-            value={fixedName}
-            onChange={(event) => setFixedName(event.target.value)}
-            disabled={isLoading}
-          >
-            {fixedUsers.map((name) => (
-              <MenuItem key={name} value={name}>
-                {name}
-              </MenuItem>
-            ))}
-          </TextField>
-          <TextField
-            fullWidth
-            type="password"
-            label="Пароль (при первом входе будет создан)"
-            margin="normal"
-            value={fixedPassword}
-            onChange={(event) => setFixedPassword(event.target.value)}
-            disabled={isLoading}
-          />
-          <Button fullWidth variant="contained" sx={{ mt: 2 }} onClick={handleFixedLogin} disabled={isLoading || !fixedName || !fixedPassword}>
-            {isLoading ? <CircularProgress size={20} color="inherit" /> : 'Войти по ФИО'}
-          </Button>
+          {!isFixedUsersUnlocked ? (
+            <Box sx={{ mt: 1 }}>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                Для просмотра списка ФИО введите номер СУБО.
+              </Typography>
+              <Button fullWidth variant="outlined" onClick={() => setIsSuboDialogOpen(true)}>
+                Команда "Карты и Партнеры"
+              </Button>
+            </Box>
+          ) : (
+            <>
+              <TextField
+                fullWidth
+                select
+                label="Выберите ФИО"
+                margin="normal"
+                value={fixedName}
+                onChange={(event) => setFixedName(event.target.value)}
+                disabled={isLoading}
+              >
+                {fixedUsers.map((name) => (
+                  <MenuItem key={name} value={name}>
+                    {name}
+                  </MenuItem>
+                ))}
+              </TextField>
+              <TextField
+                fullWidth
+                type="password"
+                label="Пароль (при первом входе будет создан)"
+                margin="normal"
+                value={fixedPassword}
+                onChange={(event) => setFixedPassword(event.target.value)}
+                disabled={isLoading}
+              />
+              <Button fullWidth variant="contained" sx={{ mt: 2 }} onClick={handleFixedLogin} disabled={isLoading || !fixedName || !fixedPassword}>
+                {isLoading ? <CircularProgress size={20} color="inherit" /> : 'Войти по ФИО'}
+              </Button>
+            </>
+          )}
         </>
       )}
 
@@ -556,6 +589,46 @@ const Login: React.FC<Props> = observer(({ store }) => {
         )}
         {renderAuthBlock()}
       </Paper>
+      <Dialog
+        open={isSuboDialogOpen}
+        onClose={() => {
+          setIsSuboDialogOpen(false);
+          setSuboError(null);
+        }}
+        fullWidth
+        maxWidth="xs"
+      >
+        <DialogTitle>Введите номер СУБО</DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            margin="dense"
+            fullWidth
+            label="Номер СУБО"
+            placeholder="NNNN-N"
+            value={suboInput}
+            onChange={(event) => {
+              setSuboInput(event.target.value);
+              if (suboError) setSuboError(null);
+            }}
+            error={Boolean(suboError)}
+            helperText={suboError || 'Формат: NNNN-N'}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              setIsSuboDialogOpen(false);
+              setSuboError(null);
+            }}
+          >
+            Отмена
+          </Button>
+          <Button variant="contained" onClick={handleSuboSubmit}>
+            Подтвердить
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 });

@@ -22,6 +22,7 @@ export interface Card {
   likes: string[];
   dislikes: string[];
   column: number;
+  imageUrl?: string;
 }
 
 export interface RoomState {

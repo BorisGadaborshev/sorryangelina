@@ -46,7 +46,8 @@ export const connectDB = async (): Promise<void> => {
       text text not null,
       type text not null check (type in ('liked','disliked','suggestion')),
       created_by text not null,
-      column_index integer not null
+      column_index integer not null,
+      image_url text
     );
 
     create table if not exists card_votes (
@@ -59,6 +60,8 @@ export const connectDB = async (): Promise<void> => {
     create index if not exists idx_cards_room on cards(room_id);
     create index if not exists idx_users_room on room_users(room_id);
     create unique index if not exists idx_accounts_name_ci on accounts ((lower(name)));
+
+    alter table cards add column if not exists image_url text;
   `);
 
   console.log('Connected to PostgreSQL and ensured schema');

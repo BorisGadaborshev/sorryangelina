@@ -44,7 +44,7 @@ exports.RoomModel = {
                 return null;
             const roomRow = rows[0];
             const usersRes = yield database_1.pool.query('select id, name, role, is_ready from room_users where room_id=$1', [where.id]);
-            const cardsRes = yield database_1.pool.query('select id, text, type, created_by, column_index from cards where room_id=$1', [where.id]);
+            const cardsRes = yield database_1.pool.query('select id, text, type, created_by, column_index, image_url from cards where room_id=$1', [where.id]);
             const cardRows = cardsRes.rows;
             const votesRes = yield database_1.pool.query('select card_id, user_id, vote from card_votes where card_id = any($1::text[])', [cardRows.map((r) => r.id)]);
             const cardIdToVotes = new Map();
@@ -55,7 +55,19 @@ exports.RoomModel = {
             }
             const userRows = usersRes.rows;
             const users = userRows.map((r) => ({ id: r.id, name: r.name, roomId: roomRow.id, role: r.role, isReady: r.is_ready }));
-            const cards = cardRows.map((r) => { var _a, _b; return ({ id: r.id, text: r.text, type: r.type, createdBy: r.created_by, likes: ((_a = cardIdToVotes.get(r.id)) === null || _a === void 0 ? void 0 : _a.likes) || [], dislikes: ((_b = cardIdToVotes.get(r.id)) === null || _b === void 0 ? void 0 : _b.dislikes) || [], column: r.column_index }); });
+            const cards = cardRows.map((r) => {
+                var _a, _b, _c;
+                return ({
+                    id: r.id,
+                    text: r.text,
+                    type: r.type,
+                    createdBy: r.created_by,
+                    likes: ((_a = cardIdToVotes.get(r.id)) === null || _a === void 0 ? void 0 : _a.likes) || [],
+                    dislikes: ((_b = cardIdToVotes.get(r.id)) === null || _b === void 0 ? void 0 : _b.dislikes) || [],
+                    column: r.column_index,
+                    imageUrl: (_c = r.image_url) !== null && _c !== void 0 ? _c : undefined
+                });
+            });
             return {
                 id: roomRow.id,
                 password: roomRow.password,
@@ -99,15 +111,20 @@ exports.RoomModel = {
                         }
                     }
                     if (typeof update.$set['cards.$.text'] !== 'undefined' ||
-                        typeof update.$set['cards.$.column'] !== 'undefined') {
+                        typeof update.$set['cards.$.column'] !== 'undefined' ||
+                        typeof update.$set['cards.$.imageUrl'] !== 'undefined') {
                         const cardId = filter['cards.id'];
                         const text = update.$set['cards.$.text'];
                         const column = update.$set['cards.$.column'];
+                        const imageUrl = update.$set['cards.$.imageUrl'];
                         if (typeof text !== 'undefined') {
                             yield client.query('update cards set text=$1 where id=$2 and room_id=$3', [text, cardId, roomId]);
                         }
                         if (typeof column !== 'undefined') {
                             yield client.query('update cards set column_index=$1 where id=$2 and room_id=$3', [column, cardId, roomId]);
+                        }
+                        if (typeof imageUrl !== 'undefined') {
+                            yield client.query('update cards set image_url=$1 where id=$2 and room_id=$3', [imageUrl || null, cardId, roomId]);
                         }
                     }
                     if (update.$set['users.$[].isReady'] === false || update.$set['users.$[].is_ready'] === false) {
@@ -129,7 +146,7 @@ exports.RoomModel = {
                 }
                 if ((_b = update.$push) === null || _b === void 0 ? void 0 : _b.cards) {
                     const c = update.$push.cards;
-                    yield client.query('insert into cards (id, room_id, text, type, created_by, column_index) values ($1,$2,$3,$4,$5,$6) on conflict (id) do nothing', [c.id, roomId, c.text, c.type, c.createdBy, c.column]);
+                    yield client.query('insert into cards (id, room_id, text, type, created_by, column_index, image_url) values ($1,$2,$3,$4,$5,$6,$7) on conflict (id) do nothing', [c.id, roomId, c.text, c.type, c.createdBy, c.column, c.imageUrl || null]);
                 }
                 if ((_c = update.$pull) === null || _c === void 0 ? void 0 : _c.users) {
                     if (update.$pull.users.id) {

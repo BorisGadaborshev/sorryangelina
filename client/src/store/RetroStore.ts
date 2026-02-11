@@ -196,7 +196,7 @@ export class RetroStore {
 
   setUsers(users: User[]) {
     runInAction(() => {
-      this.users = users;
+      this.users = this.normalizeUsers(users);
     });
   }
 
@@ -205,7 +205,7 @@ export class RetroStore {
     runInAction(() => {
       this.cards = state.cards;
       this.phase = state.phase;
-      this.users = state.users;
+      this.users = this.normalizeUsers(state.users);
     });
   }
 
@@ -257,7 +257,15 @@ export class RetroStore {
   addUser(user: User) {
     console.log('Adding user:', user);
     runInAction(() => {
-      this.users.push(user);
+      const existingIndex = this.users.findIndex(
+        (currentUser) => currentUser.id === user.id || currentUser.name === user.name
+      );
+
+      if (existingIndex !== -1) {
+        this.users[existingIndex] = user;
+      } else {
+        this.users.push(user);
+      }
     });
   }
 
@@ -338,5 +346,13 @@ export class RetroStore {
       console.log('Updating user ready state:', isReady);
       this.socketService.updateReadyState(isReady);
     }
+  }
+
+  private normalizeUsers(users: User[]): User[] {
+    const uniqueByName = new Map<string, User>();
+    users.forEach((user) => {
+      uniqueByName.set(user.name, user);
+    });
+    return Array.from(uniqueByName.values());
   }
 } 
