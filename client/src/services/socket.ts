@@ -437,6 +437,10 @@ export class SocketService {
     this.socket.emit('set-phase-timer', { durationSeconds });
   }
 
+  resetPhaseTimer(): void {
+    this.socket.emit('reset-phase-timer');
+  }
+
   async restoreSession(roomId: string, userId: string, username: string, token?: string): Promise<void> {
     console.log('Attempting to restore session:', { roomId, userId, username });
     try {

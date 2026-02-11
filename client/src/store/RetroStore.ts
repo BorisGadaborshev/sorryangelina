@@ -239,6 +239,7 @@ export class RetroStore {
       const card = this.cards.find(c => c.id === cardId);
       if (card) {
         card.column = column;
+        card.type = column === 1 ? 'disliked' : column === 2 ? 'suggestion' : 'liked';
       }
     });
   }

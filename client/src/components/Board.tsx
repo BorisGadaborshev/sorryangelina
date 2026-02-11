@@ -1,12 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { observer } from 'mobx-react-lite';
-import { Box, AppBar, Toolbar, Typography, Button, ButtonGroup, CircularProgress, IconButton, Tooltip, Tabs, Tab, useMediaQuery, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, FormControl, Select, MenuItem } from '@mui/material';
+import { Box, AppBar, Toolbar, Typography, Button, ButtonGroup, CircularProgress, IconButton, Tooltip, Tabs, Tab, useMediaQuery, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, FormControl, Select, MenuItem, Menu } from '@mui/material';
 import { DragDropContext, DropResult } from '@hello-pangea/dnd';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import PeopleIcon from '@mui/icons-material/People';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
+import DarkModeIcon from '@mui/icons-material/DarkMode';
+import LightModeIcon from '@mui/icons-material/LightMode';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import RetroColumn from './RetroColumn';
 import UserList from './UserList';
 import { RetroStore } from '../store/RetroStore';
@@ -14,15 +17,20 @@ import DiscussionView from './DiscussionView';
 
 interface Props {
   store: RetroStore;
+  themeMode: 'light' | 'dark';
+  onToggleTheme: () => void;
 }
 
-const Board: React.FC<Props> = observer(({ store }) => {
+const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) => {
   const [isReady, setIsReady] = useState(false);
   const [isUserListVisible, setIsUserListVisible] = useState(true);
   const isMobile = useMediaQuery('(max-width:600px)');
+  const isCompactDesktop = useMediaQuery('(max-width:1280px)');
   const [mobileTab, setMobileTab] = useState<number>(0); // 0 - доска, 1 - участники
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [selectedTimerSeconds, setSelectedTimerSeconds] = useState<number>(300);
+  const [moreAnchorEl, setMoreAnchorEl] = useState<null | HTMLElement>(null);
+  const [timerAnchorEl, setTimerAnchorEl] = useState<null | HTMLElement>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -49,6 +57,8 @@ const Board: React.FC<Props> = observer(({ store }) => {
     const secs = seconds % 60;
     return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   };
+
+  const isTimerMenuOpen = Boolean(timerAnchorEl);
 
   const handleDragEnd = (result: DropResult) => {
     const { destination, source, draggableId } = result;
@@ -79,21 +89,21 @@ const Board: React.FC<Props> = observer(({ store }) => {
     const columns = (
       <Box sx={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 2, width: '100%' }}>
         <RetroColumn
-          title="Что прошло хорошо"
+          title="Было хорошо"
           type="liked"
           columnIndex={0}
           store={store}
           enableDragDrop={store.phase === 'creation'}
         />
         <RetroColumn
-          title="Что нужно улучшить"
+          title="Было не очень"
           type="disliked"
           columnIndex={1}
           store={store}
           enableDragDrop={store.phase === 'creation'}
         />
         <RetroColumn
-          title="План действий"
+          title="А давайте!:"
           type="suggestion"
           columnIndex={2}
           store={store}
@@ -122,12 +132,30 @@ const Board: React.FC<Props> = observer(({ store }) => {
 
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <AppBar position="static">
-        <Toolbar sx={{ gap: 1, flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
-          <Typography variant="h6" component="div" sx={{ flexGrow: 1, mt: '20px' }}>
-            Ретроспектива - Комната: {store.room?.id}
+      <AppBar position="static" color="default" elevation={1} sx={{ bgcolor: 'background.paper', color: 'text.primary' }}>
+        <Toolbar sx={{ gap: 1, flexWrap: isMobile ? 'wrap' : 'nowrap', alignItems: 'center', minHeight: 64 }}>
+          <Typography
+            variant="h6"
+            component="div"
+            sx={{ flexGrow: 1, whiteSpace: 'nowrap', lineHeight: 1.2, fontSize: { xs: '1.1rem', md: '1.35rem' } }}
+          >
+            {isCompactDesktop && !isMobile ? store.room?.id : `Ретроспектива - Комната: ${store.room?.id}`}
           </Typography>
-          <Typography variant="subtitle1" sx={{ mr: isMobile ? 0 : 2 }}>
+          {isCompactDesktop && !isMobile && (
+            <Box sx={{ display: 'flex', alignItems: 'center', mr: 1 }}>
+              <Typography variant="caption" sx={{ mr: 0.5, color: store.phaseTimer.running ? 'warning.main' : 'text.secondary', whiteSpace: 'nowrap' }}>
+                {formatDuration(store.phaseTimer.remainingSeconds)}
+              </Typography>
+              {store.currentUser?.role === 'admin' && (
+                <Tooltip title="Настройки таймера">
+                  <IconButton size="small" onClick={(event) => setTimerAnchorEl(event.currentTarget)}>
+                    <AccessTimeIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              )}
+            </Box>
+          )}
+          <Typography variant="subtitle1" sx={{ mr: isMobile ? 0 : 2, whiteSpace: 'nowrap' }}>
             Этап: {getPhaseTranslation(store.phase)}
           </Typography>
           {(() => {
@@ -136,6 +164,19 @@ const Board: React.FC<Props> = observer(({ store }) => {
             const totalCount = store.getTotalUserCount();
             const isAdmin = store.currentUser?.role === 'admin';
 
+            const timerControls = (
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mr: 2, whiteSpace: 'nowrap' }}>
+                <Typography variant="caption" sx={{ color: store.phaseTimer.running ? 'warning.light' : 'text.secondary', whiteSpace: 'nowrap' }}>
+                  Таймер: {formatDuration(store.phaseTimer.remainingSeconds)}
+                </Typography>
+                <Tooltip title="Настройки таймера">
+                  <IconButton size="small" onClick={(event) => setTimerAnchorEl(event.currentTarget)}>
+                    <AccessTimeIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </Box>
+            );
+
             return isAdmin ? (
               <Box sx={{ display: 'flex', alignItems: 'center' }}>
                 <Tooltip title={`${readyCount} из ${totalCount} участников готовы`}>
@@ -143,7 +184,8 @@ const Board: React.FC<Props> = observer(({ store }) => {
                     variant="caption" 
                     sx={{ 
                       mr: 2, 
-                      color: readyCount === totalCount ? 'success.light' : 'warning.light'
+                      color: readyCount === totalCount ? 'success.light' : 'warning.light',
+                      whiteSpace: 'nowrap'
                     }}
                   >
                     {readyCount}/{totalCount} готовы
@@ -172,40 +214,16 @@ const Board: React.FC<Props> = observer(({ store }) => {
                     Обсуждение
                   </Button>
                 </ButtonGroup>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mr: 2 }}>
-                  <Typography variant="caption" sx={{ color: store.phaseTimer.running ? 'warning.light' : 'text.secondary' }}>
-                    Таймер: {formatDuration(store.phaseTimer.remainingSeconds)}
-                  </Typography>
-                  <FormControl size="small" sx={{ minWidth: 110 }}>
-                    <Select
-                      value={selectedTimerSeconds}
-                      onChange={(event) => setSelectedTimerSeconds(Number(event.target.value))}
-                      sx={{ color: 'white', '.MuiSelect-icon': { color: 'white' }, height: 32 }}
-                    >
-                      <MenuItem value={60}>1 минута</MenuItem>
-                      <MenuItem value={180}>3 минуты</MenuItem>
-                      <MenuItem value={300}>5 минут</MenuItem>
-                      <MenuItem value={600}>10 минут</MenuItem>
-                      <MenuItem value={900}>15 минут</MenuItem>
-                    </Select>
-                  </FormControl>
-                  <Button
-                    variant="outlined"
-                    size="small"
-                    sx={{ color: 'white', borderColor: 'white' }}
-                    onClick={() => store.socketService?.setPhaseTimer(selectedTimerSeconds)}
-                  >
-                    {store.phaseTimer.running ? 'Перезапуск' : 'Старт'}
-                  </Button>
-                </Box>
+                {!isCompactDesktop ? timerControls : null}
               </Box>
-            ) : (
-              <Typography variant="caption" sx={{ mr: 2, color: store.phaseTimer.running ? 'warning.light' : 'text.secondary' }}>
+            ) : !isCompactDesktop ? (
+              <Typography variant="caption" sx={{ mr: 2, color: store.phaseTimer.running ? 'warning.light' : 'text.secondary', whiteSpace: 'nowrap' }}>
                 Таймер: {formatDuration(store.phaseTimer.remainingSeconds)}
               </Typography>
-            );
+            ) : null;
+            
           })()}
-          {store.currentUser?.role === 'admin' && (
+          {store.currentUser?.role === 'admin' && !isCompactDesktop && (
             <Tooltip title="Удалить комнату">
               <IconButton
                 color="inherit"
@@ -215,6 +233,44 @@ const Board: React.FC<Props> = observer(({ store }) => {
                 <DeleteForeverIcon />
               </IconButton>
             </Tooltip>
+          )}
+          {!isCompactDesktop && (
+            <Tooltip title={themeMode === 'dark' ? 'Включить светлую тему' : 'Включить темную тему'}>
+              <IconButton color="inherit" onClick={onToggleTheme} size="small">
+                {themeMode === 'dark' ? <LightModeIcon /> : <DarkModeIcon />}
+              </IconButton>
+            </Tooltip>
+          )}
+          {!isMobile && isCompactDesktop && (
+            <>
+              <IconButton size="small" onClick={(event) => setMoreAnchorEl(event.currentTarget)} aria-label="more actions">
+                <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                  {'>>'}
+                </Typography>
+              </IconButton>
+              <Menu
+                anchorEl={moreAnchorEl}
+                open={Boolean(moreAnchorEl)}
+                onClose={() => setMoreAnchorEl(null)}
+                anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+              >
+                {store.currentUser?.role === 'admin' && (
+                  <MenuItem onClick={() => { setMoreAnchorEl(null); setIsDeleteDialogOpen(true); }}>
+                    Удалить комнату
+                  </MenuItem>
+                )}
+                <MenuItem onClick={() => { setMoreAnchorEl(null); onToggleTheme(); }}>
+                  {themeMode === 'dark' ? 'Светлая тема' : 'Темная тема'}
+                </MenuItem>
+                <MenuItem onClick={() => { setMoreAnchorEl(null); setIsUserListVisible(!isUserListVisible); }}>
+                  {isUserListVisible ? 'Скрыть участников' : 'Показать участников'}
+                </MenuItem>
+                <MenuItem onClick={() => { setMoreAnchorEl(null); store.socketService?.leaveRoom(); }}>
+                  Выйти из комнаты
+                </MenuItem>
+              </Menu>
+            </>
           )}
           {isMobile ? (
             <Box sx={{ width: '100%' }}>
@@ -234,7 +290,7 @@ const Board: React.FC<Props> = observer(({ store }) => {
                 <Tab label={`Участники (${store.users.length})`} />
               </Tabs>
             </Box>
-          ) : (
+          ) : !isCompactDesktop ? (
             <Box sx={{ ml: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
               <IconButton
                 color="inherit"
@@ -259,7 +315,61 @@ const Board: React.FC<Props> = observer(({ store }) => {
                 </IconButton>
               </Tooltip>
             </Box>
+          ) : (
+            <Box sx={{ ml: 1 }} />
           )}
+          <Menu
+            anchorEl={timerAnchorEl}
+            open={isTimerMenuOpen}
+            onClose={() => setTimerAnchorEl(null)}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+          >
+            <Box sx={{ p: 1.5, minWidth: 220 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                Осталось: {formatDuration(store.phaseTimer.remainingSeconds)}
+              </Typography>
+              <FormControl size="small" fullWidth sx={{ mb: 1 }}>
+                <Select
+                  value={selectedTimerSeconds}
+                  onChange={(event) => setSelectedTimerSeconds(Number(event.target.value))}
+                  sx={{ height: 32 }}
+                >
+                  <MenuItem value={60}>1 минута</MenuItem>
+                  <MenuItem value={180}>3 минуты</MenuItem>
+                  <MenuItem value={300}>5 минут</MenuItem>
+                  <MenuItem value={600}>10 минут</MenuItem>
+                  <MenuItem value={900}>15 минут</MenuItem>
+                </Select>
+              </FormControl>
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  fullWidth
+                  onClick={() => {
+                    store.socketService?.setPhaseTimer(selectedTimerSeconds);
+                    setTimerAnchorEl(null);
+                  }}
+                  disabled={store.currentUser?.role !== 'admin'}
+                >
+                  {store.phaseTimer.running ? 'Перезапуск' : 'Старт'}
+                </Button>
+                <Button
+                  size="small"
+                  color="error"
+                  fullWidth
+                  onClick={() => {
+                    store.socketService?.resetPhaseTimer();
+                    setTimerAnchorEl(null);
+                  }}
+                  disabled={store.currentUser?.role !== 'admin' || !store.phaseTimer.running}
+                >
+                  Сброс
+                </Button>
+              </Box>
+            </Box>
+          </Menu>
         </Toolbar>
       </AppBar>
 
@@ -267,8 +377,8 @@ const Board: React.FC<Props> = observer(({ store }) => {
       <Box sx={{ 
         display: 'flex', 
         flexGrow: 1, 
-        p: 2, 
-        gap: 2,
+        p: 1.25, 
+        gap: 1.25,
         height: 'calc(100vh - 64px)',
         overflow: 'hidden'
       }}>

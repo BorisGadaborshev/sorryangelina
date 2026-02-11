@@ -58,6 +58,10 @@ const Login: React.FC<Props> = observer(({ store }) => {
   const [deleteRoomId, setDeleteRoomId] = useState('');
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [isDeletingRoom, setIsDeletingRoom] = useState(false);
+  const [isInviteDialogOpen, setIsInviteDialogOpen] = useState(false);
+  const [inviteRoomId, setInviteRoomId] = useState('');
+  const [inviteRoomPassword, setInviteRoomPassword] = useState('');
+  const [inviteCopySuccess, setInviteCopySuccess] = useState(false);
   const [isFixedUsersUnlocked, setIsFixedUsersUnlocked] = useState(false);
   const [isSuboDialogOpen, setIsSuboDialogOpen] = useState(false);
   const [suboInput, setSuboInput] = useState('');
@@ -218,6 +222,13 @@ const Login: React.FC<Props> = observer(({ store }) => {
     setIsDeleteDialogOpen(true);
   };
 
+  const handleOpenInviteDialog = (roomId: string) => {
+    setInviteRoomId(roomId);
+    setInviteRoomPassword('');
+    setInviteCopySuccess(false);
+    setIsInviteDialogOpen(true);
+  };
+
   const handleCreateRoom = async () => {
     if (!store.authProfile || !createRoomId.trim() || !createRoomPassword.trim()) return;
 
@@ -277,6 +288,52 @@ const Login: React.FC<Props> = observer(({ store }) => {
       setIsDeletingRoom(false);
     }
   };
+
+  const publicAuthUrl = (process.env.REACT_APP_PUBLIC_AUTH_URL || '').trim();
+  const authLink = publicAuthUrl
+    ? new URL(publicAuthUrl).toString()
+    : typeof window !== 'undefined'
+      ? new URL('/', window.location.href).toString()
+      : '';
+
+  const inviteTelegramText = inviteRoomPassword.trim()
+    ? [
+        'Привет! Зову вас на ретро.',
+        '',
+        `Комната: ${inviteRoomId}`,
+        `Пароль: ${inviteRoomPassword.trim()}`,
+        '',
+        'Заходите, будем разбирать итоги спринта.'
+      ].join('\n')
+    : '';
+
+  const inviteMessage = inviteRoomPassword.trim()
+    ? [
+        'Привет! Зову вас на ретро.',
+        '',
+        `Комната: ${inviteRoomId}`,
+        `Пароль: ${inviteRoomPassword.trim()}`,
+        '🔗 Вход:',
+        authLink,
+        '',
+        'Заходите, будем разбирать итоги спринта.'
+      ].join('\n')
+    : '';
+
+  const handleCopyInvite = async () => {
+    if (!inviteMessage) return;
+    try {
+      await navigator.clipboard.writeText(inviteMessage);
+      setInviteCopySuccess(true);
+      setTimeout(() => setInviteCopySuccess(false), 2000);
+    } catch (error) {
+      store.setError('Не удалось скопировать приглашение');
+    }
+  };
+
+  const telegramShareLink = `https://t.me/share/url?url=${encodeURIComponent(authLink)}&text=${encodeURIComponent(
+    inviteTelegramText || `Привет! Зову вас на ретро.\nКомната: ${inviteRoomId}`
+  )}`;
 
   const handleSuboSubmit = () => {
     const normalized = suboInput.trim();
@@ -422,7 +479,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
       sx={{
         minHeight: '100vh',
         width: '100%',
-        bgcolor: '#f5f5f5',
+        bgcolor: 'background.default',
         display: 'flex',
         flexDirection: 'column',
         p: { xs: 2, md: 3 }
@@ -461,6 +518,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
             onRoomClick={handleOpenJoinDialog}
             onCreateClick={handleOpenCreateDialog}
             onDeleteClick={handleOpenDeleteDialog}
+            onInviteClick={handleOpenInviteDialog}
           />
         )}
       </Box>
@@ -560,6 +618,62 @@ const Login: React.FC<Props> = observer(({ store }) => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <Dialog open={isInviteDialogOpen} onClose={() => setIsInviteDialogOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle>Приглашение в комнату {inviteRoomId}</DialogTitle>
+        <DialogContent>
+          <DialogContentText sx={{ mb: 1.5 }}>
+            Введите пароль комнаты, чтобы сформировать приглашение для Telegram.
+          </DialogContentText>
+          <TextField
+            autoFocus
+            fullWidth
+            label="Пароль комнаты"
+            margin="normal"
+            value={inviteRoomPassword}
+            onChange={(event) => {
+              setInviteRoomPassword(event.target.value);
+              if (inviteCopySuccess) setInviteCopySuccess(false);
+            }}
+          />
+          {inviteRoomPassword.trim() && (
+            <TextField
+              fullWidth
+              margin="normal"
+              multiline
+              minRows={6}
+              label="Текст приглашения (Telegram)"
+              value={inviteMessage}
+              InputProps={{ readOnly: true }}
+            />
+          )}
+          {inviteCopySuccess && (
+            <Alert severity="success" sx={{ mt: 1 }}>
+              Приглашение скопировано.
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setIsInviteDialogOpen(false)}>Закрыть</Button>
+          <Button
+            variant="outlined"
+            onClick={handleCopyInvite}
+            disabled={!inviteRoomPassword.trim()}
+          >
+            Скопировать
+          </Button>
+          <Button
+            variant="contained"
+            component="a"
+            href={telegramShareLink}
+            target="_blank"
+            rel="noopener noreferrer"
+            disabled={!inviteRoomPassword.trim()}
+          >
+            Открыть в Telegram
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 
@@ -574,7 +688,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        bgcolor: '#f5f5f5',
+        bgcolor: 'background.default',
         p: 2
       }}
     >

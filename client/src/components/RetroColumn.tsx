@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { observer } from 'mobx-react-lite';
-import { Paper, Typography, Box, TextField, Button, IconButton, Popover, useMediaQuery } from '@mui/material';
+import { Paper, Typography, Box, TextField, Button, IconButton, Popover, Tooltip, useMediaQuery } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
 import { Droppable, Draggable } from '@hello-pangea/dnd';
 import { RetroStore } from '../store/RetroStore';
 import RetroCard from './RetroCard';
 import { Card } from '../types';
 import EmojiEmotionsIcon from '@mui/icons-material/EmojiEmotions';
 import ImageIcon from '@mui/icons-material/Image';
+import AddIcon from '@mui/icons-material/Add';
 
 interface Props {
   title: string;
@@ -39,12 +41,14 @@ const RetroColumn: React.FC<Props> = observer(({ title, type, columnIndex, store
   const [newCardImageUrl, setNewCardImageUrl] = useState('');
   const [selectedEmoji, setSelectedEmoji] = useState('');
   const [localCards, setLocalCards] = useState<Card[]>([]);
+  const [addCardAnchorEl, setAddCardAnchorEl] = useState<HTMLButtonElement | null>(null);
   const [anchorEl, setAnchorEl] = useState<HTMLButtonElement | null>(null);
   const [imageAnchorEl, setImageAnchorEl] = useState<HTMLButtonElement | null>(null);
   const [cursorPosition, setCursorPosition] = useState<number>(0);
   const textFieldRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const isMobile = useMediaQuery('(max-width:600px)');
+  const theme = useTheme();
 
   useEffect(() => {
     const filteredCards = store.cards.filter(card => card.column === columnIndex);
@@ -58,6 +62,9 @@ const RetroColumn: React.FC<Props> = observer(({ title, type, columnIndex, store
       setNewCardText('');
       setNewCardImageUrl('');
       setSelectedEmoji('');
+      setAnchorEl(null);
+      setImageAnchorEl(null);
+      setAddCardAnchorEl(null);
     }
   };
 
@@ -95,11 +102,29 @@ const RetroColumn: React.FC<Props> = observer(({ title, type, columnIndex, store
     event.target.value = '';
   };
 
-  const columnColor = {
-    liked: '#e8f5e9',
-    disliked: '#ffebee',
-    suggestion: '#e3f2fd'
-  }[type];
+  const columnColor = theme.palette.mode === 'dark'
+    ? {
+        liked: '#1f2a23',
+        disliked: '#2a1f23',
+        suggestion: '#1d2530'
+      }[type]
+    : {
+        liked: '#e0f2ef',
+        disliked: '#fce4ec',
+        suggestion: '#f3e5f5'
+      }[type];
+
+  const columnAccent = theme.palette.mode === 'dark'
+    ? {
+        liked: '#26a69a',
+        disliked: '#ec407a',
+        suggestion: '#ab47bc'
+      }[type]
+    : {
+        liked: '#009688',
+        disliked: '#e91e63',
+        suggestion: '#9c27b0'
+      }[type];
 
   return (
     <Paper 
@@ -108,56 +133,87 @@ const RetroColumn: React.FC<Props> = observer(({ title, type, columnIndex, store
         width: '100%',
         minWidth: isMobile ? '100%' : '300px',
         minHeight: isMobile ? 'auto' : '70vh',
-        p: 2,
+        p: 1.25,
         backgroundColor: columnColor,
+        color: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.92)' : 'inherit',
         display: 'flex',
         flexDirection: 'column',
-        gap: 1
+        gap: 0.75
       }}
     >
-      <Typography variant="h6" gutterBottom align="center">
+      <Typography variant="h6" align="center" sx={{ mb: 0.5 }}>
         {title}
       </Typography>
+      <Box sx={{ height: 4, borderRadius: 999, backgroundColor: columnAccent, mb: 0.5 }} />
 
       {store.phase === 'creation' && (
-        <Box sx={{ mb: 1 }}>
-          <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
-            <TextField
-              fullWidth
-              multiline
-              rows={isMobile ? 1 : 2}
-              variant="outlined"
-              placeholder="Добавить новую карточку..."
-              value={newCardText}
-              onChange={(e) => setNewCardText(e.target.value)}
-              inputRef={textFieldRef}
-              size="small"
-              inputProps={{
-                onClick: handleCursorTracking,
-                onKeyUp: handleCursorTracking,
-                onSelect: handleCursorTracking
-              }}
-              InputProps={{
-                endAdornment: (
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <IconButton 
-                      onClick={(e) => setAnchorEl(e.currentTarget)}
-                      sx={{ p: 0.5, opacity: 0.6, '&:hover': { backgroundColor: 'transparent', opacity: 1 } }}
-                    >
-                      <EmojiEmotionsIcon fontSize="small" />
-                    </IconButton>
-                    <IconButton
-                      onClick={(e) => setImageAnchorEl(e.currentTarget)}
-                      color={newCardImageUrl.trim() ? 'primary' : 'default'}
-                      sx={{ p: 0.5, opacity: 0.7, '&:hover': { backgroundColor: 'transparent', opacity: 1 } }}
-                    >
-                      <ImageIcon fontSize="small" />
-                    </IconButton>
-                  </Box>
-                )
-              }}
-            />
+        <Box sx={{ mb: 0.5 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'center', mb: 0.5 }}>
+            <Tooltip title="Добавить карточку">
+              <IconButton
+                color="primary"
+                onClick={(event) => setAddCardAnchorEl(event.currentTarget)}
+                sx={{ border: '1px solid', borderColor: 'divider' }}
+              >
+                <AddIcon />
+              </IconButton>
+            </Tooltip>
           </Box>
+          <Popover
+            open={Boolean(addCardAnchorEl)}
+            anchorEl={addCardAnchorEl}
+            onClose={() => setAddCardAnchorEl(null)}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'center' }}
+          >
+            <Box sx={{ p: 1.5, width: 360, maxWidth: '92vw' }}>
+              <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
+                <TextField
+                  fullWidth
+                  multiline
+                  rows={isMobile ? 2 : 3}
+                  variant="outlined"
+                  placeholder="Добавить новую карточку..."
+                  value={newCardText}
+                  onChange={(e) => setNewCardText(e.target.value)}
+                  inputRef={textFieldRef}
+                  size="small"
+                  inputProps={{
+                    onClick: handleCursorTracking,
+                    onKeyUp: handleCursorTracking,
+                    onSelect: handleCursorTracking
+                  }}
+                  InputProps={{
+                    endAdornment: (
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        <IconButton 
+                          onClick={(e) => setAnchorEl(e.currentTarget)}
+                          sx={{ p: 0.5, opacity: 0.6, '&:hover': { backgroundColor: 'transparent', opacity: 1 } }}
+                        >
+                          <EmojiEmotionsIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton
+                          onClick={(e) => setImageAnchorEl(e.currentTarget)}
+                          color={newCardImageUrl.trim() ? 'primary' : 'default'}
+                          sx={{ p: 0.5, opacity: 0.7, '&:hover': { backgroundColor: 'transparent', opacity: 1 } }}
+                        >
+                          <ImageIcon fontSize="small" />
+                        </IconButton>
+                      </Box>
+                    )
+                  }}
+                />
+              </Box>
+              <Button
+                fullWidth
+                variant="contained"
+                onClick={handleAddCard}
+                disabled={!newCardText.trim()}
+              >
+                Добавить
+              </Button>
+            </Box>
+          </Popover>
           <Popover
             open={Boolean(anchorEl)}
             anchorEl={anchorEl}
@@ -237,14 +293,6 @@ const RetroColumn: React.FC<Props> = observer(({ title, type, columnIndex, store
               )}
             </Box>
           </Popover>
-          <Button
-            fullWidth
-            variant="contained"
-            onClick={handleAddCard}
-            disabled={!newCardText.trim()}
-          >
-            Добавить
-          </Button>
         </Box>
       )}
 

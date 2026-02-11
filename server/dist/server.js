@@ -208,6 +208,13 @@ io.engine.on("connection_error", (err) => {
 const getSortedCards = (cards) => {
     return [...cards].sort((a, b) => { var _a, _b, _c, _d; return ((((_a = b.likes) === null || _a === void 0 ? void 0 : _a.length) || 0) - (((_b = b.dislikes) === null || _b === void 0 ? void 0 : _b.length) || 0)) - ((((_c = a.likes) === null || _c === void 0 ? void 0 : _c.length) || 0) - (((_d = a.dislikes) === null || _d === void 0 ? void 0 : _d.length) || 0)); });
 };
+const getCardTypeByColumn = (column) => {
+    if (column === 1)
+        return 'disliked';
+    if (column === 2)
+        return 'suggestion';
+    return 'liked';
+};
 const normalizeImageUrl = (value) => {
     if (typeof value !== 'string')
         return undefined;
@@ -545,7 +552,8 @@ io.on('connection', (socket) => {
             const card = room.cards.find((currentCard) => currentCard.id === cardId);
             if (!card)
                 return;
-            const updatedRoom = yield RoomService_1.RoomService.updateCard(currentUser.roomId, cardId, { column });
+            const nextType = getCardTypeByColumn(column);
+            const updatedRoom = yield RoomService_1.RoomService.updateCard(currentUser.roomId, cardId, { column, type: nextType });
             if (!updatedRoom)
                 return;
             io.to(currentUser.roomId).emit('card-moved', { cardId, column });
@@ -718,6 +726,25 @@ io.on('connection', (socket) => {
         catch (error) {
             console.error('Error setting phase timer:', error);
             socket.emit('error', 'Failed to start timer');
+        }
+    }));
+    socket.on('reset-phase-timer', () => __awaiter(void 0, void 0, void 0, function* () {
+        if (!(currentUser === null || currentUser === void 0 ? void 0 : currentUser.roomId))
+            return;
+        try {
+            const room = yield RoomService_1.RoomService.getRoom(currentUser.roomId);
+            if (!room)
+                return;
+            const isAdmin = room.users.some((user) => user.name === (currentUser === null || currentUser === void 0 ? void 0 : currentUser.name) && user.role === 'admin');
+            if (!isAdmin) {
+                socket.emit('error', 'Only admin can reset timer');
+                return;
+            }
+            clearRoomTimer(currentUser.roomId, true);
+        }
+        catch (error) {
+            console.error('Error resetting phase timer:', error);
+            socket.emit('error', 'Failed to reset timer');
         }
     }));
     socket.on('delete-room', () => __awaiter(void 0, void 0, void 0, function* () {

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { observer } from 'mobx-react-lite';
 import { Box, Paper, Typography, IconButton, Tooltip } from '@mui/material';
 import { NavigateBefore, NavigateNext } from '@mui/icons-material';
+import { useTheme } from '@mui/material/styles';
 import { RetroStore } from '../store/RetroStore';
 import { Card as CardType } from '../types';
 
@@ -14,6 +15,7 @@ const DiscussionView: React.FC<Props> = observer(({ store }) => {
   const [carouselStartIndex, setCarouselStartIndex] = useState(0);
   const carouselSize = 3;
   const sortedCards = store.sortedCards;
+  const theme = useTheme();
 
   useEffect(() => {
     setCurrentIndex((prev) => {
@@ -55,10 +57,17 @@ const DiscussionView: React.FC<Props> = observer(({ store }) => {
   };
 
   const getCardColor = (card: CardType) => {
+    if (theme.palette.mode === 'dark') {
+      return {
+        liked: '#28372d',
+        disliked: '#3a2b30',
+        suggestion: '#253344'
+      }[card.type];
+    }
     return {
-      liked: '#e8f5e9',
-      disliked: '#ffebee',
-      suggestion: '#e3f2fd'
+      liked: '#b2dfdb',
+      disliked: '#f8bbd0',
+      suggestion: '#e1bee7'
     }[card.type];
   };
 
@@ -107,6 +116,7 @@ const DiscussionView: React.FC<Props> = observer(({ store }) => {
             maxWidth: '600px',
             p: 4,
             backgroundColor: getCardColor(currentCard),
+            color: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.92)' : 'inherit',
             minHeight: '250px',
             display: 'flex',
             flexDirection: 'column',
@@ -185,7 +195,8 @@ const DiscussionView: React.FC<Props> = observer(({ store }) => {
                     display: 'flex',
                     flexDirection: 'column',
                     justifyContent: 'space-between',
-                    backgroundColor: getCardColor(card)
+                    backgroundColor: getCardColor(card),
+                    color: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.92)' : 'inherit'
                   }}
                 >
                   <Typography variant="body2" sx={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>

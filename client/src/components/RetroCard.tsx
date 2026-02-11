@@ -3,6 +3,7 @@ import { observer } from 'mobx-react-lite';
 import { Card as CardType } from '../types';
 import { Card, CardContent, Typography, IconButton, TextField, Box, Tooltip, Alert, Button } from '@mui/material';
 import { Delete, Edit } from '@mui/icons-material';
+import { useTheme } from '@mui/material/styles';
 import { RetroStore } from '../store/RetroStore';
 
 interface Props {
@@ -16,6 +17,7 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
   const [text, setText] = useState(card.text);
   const [imageUrl, setImageUrl] = useState(card.imageUrl || '');
   const [imageLoadError, setImageLoadError] = useState(false);
+  const theme = useTheme();
 
   useEffect(() => {
     setImageLoadError(false);
@@ -63,11 +65,17 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
     }
   };
 
-  const cardColor = {
-    liked: '#e8f5e9',
-    disliked: '#ffebee',
-    suggestion: '#e3f2fd'
-  }[card.type];
+  const cardColor = theme.palette.mode === 'dark'
+    ? {
+        liked: '#28372d',
+        disliked: '#3a2b30',
+        suggestion: '#253344'
+      }[card.type]
+    : {
+        liked: '#b2dfdb',
+        disliked: '#f8bbd0',
+        suggestion: '#e1bee7'
+      }[card.type];
 
   const isEditingAllowed = (store.phase === 'creation' || (store.phase === 'discussion' && store.canEditCard(card)));
   const currentUserId = store.currentUser?.id || '';
@@ -78,8 +86,9 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
   return (
     <Card
       sx={{ 
-        margin: 1,
+        margin: 0.6,
         backgroundColor: cardColor,
+        color: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.92)' : 'inherit',
         position: 'relative'
       }}
     >

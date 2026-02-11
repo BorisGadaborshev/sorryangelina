@@ -226,6 +226,12 @@ const getSortedCards = (cards: Card[]): Card[] => {
   return [...cards].sort((a, b) => ((b.likes?.length || 0) - (b.dislikes?.length || 0)) - ((a.likes?.length || 0) - (a.dislikes?.length || 0)));
 };
 
+const getCardTypeByColumn = (column: number): Card['type'] => {
+  if (column === 1) return 'disliked';
+  if (column === 2) return 'suggestion';
+  return 'liked';
+};
+
 const normalizeImageUrl = (value: unknown): string | undefined => {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
@@ -592,7 +598,8 @@ io.on('connection', (socket) => {
       const card = room.cards.find((currentCard) => currentCard.id === cardId);
       if (!card) return;
 
-      const updatedRoom = await RoomService.updateCard(currentUser.roomId, cardId, { column });
+      const nextType = getCardTypeByColumn(column);
+      const updatedRoom = await RoomService.updateCard(currentUser.roomId, cardId, { column, type: nextType });
       if (!updatedRoom) return;
 
       io.to(currentUser.roomId).emit('card-moved', { cardId, column });
@@ -772,6 +779,28 @@ io.on('connection', (socket) => {
     } catch (error) {
       console.error('Error setting phase timer:', error);
       socket.emit('error', 'Failed to start timer');
+    }
+  });
+
+  socket.on('reset-phase-timer', async () => {
+    if (!currentUser?.roomId) return;
+
+    try {
+      const room = await RoomService.getRoom(currentUser.roomId);
+      if (!room) return;
+
+      const isAdmin = room.users.some(
+        (user) => user.name === currentUser?.name && user.role === 'admin'
+      );
+      if (!isAdmin) {
+        socket.emit('error', 'Only admin can reset timer');
+        return;
+      }
+
+      clearRoomTimer(currentUser.roomId, true);
+    } catch (error) {
+      console.error('Error resetting phase timer:', error);
+      socket.emit('error', 'Failed to reset timer');
     }
   });
 
