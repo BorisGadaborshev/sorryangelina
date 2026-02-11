@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { observer } from 'mobx-react-lite';
 import { Paper, Typography, Box, TextField, Button, IconButton, Popover, useMediaQuery } from '@mui/material';
+import { Droppable, Draggable } from '@hello-pangea/dnd';
 import { RetroStore } from '../store/RetroStore';
 import RetroCard from './RetroCard';
 import { Card } from '../types';
@@ -11,6 +12,7 @@ interface Props {
   type: 'liked' | 'disliked' | 'suggestion';
   columnIndex: number;
   store: RetroStore;
+  enableDragDrop?: boolean;
 }
 
 const EMOJI_GROUPS = {
@@ -31,7 +33,7 @@ const EMOJI_GROUPS = {
   ]
 };
 
-const RetroColumn: React.FC<Props> = observer(({ title, type, columnIndex, store }) => {
+const RetroColumn: React.FC<Props> = observer(({ title, type, columnIndex, store, enableDragDrop = false }) => {
   const [newCardText, setNewCardText] = useState('');
   const [selectedEmoji, setSelectedEmoji] = useState('');
   const [localCards, setLocalCards] = useState<Card[]>([]);
@@ -147,11 +149,50 @@ const RetroColumn: React.FC<Props> = observer(({ title, type, columnIndex, store
         </Box>
       )}
 
-      <Box sx={{ flexGrow: 1, minHeight: '100px', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
-        {localCards.map((card, index) => (
-          <RetroCard key={card.id} card={card} index={index} store={store} />
-        ))}
-      </Box>
+      {enableDragDrop ? (
+        <Droppable droppableId={`column-${columnIndex}`}>
+          {(provided, snapshot) => (
+            <Box
+              ref={provided.innerRef}
+              {...provided.droppableProps}
+              sx={{
+                flexGrow: 1,
+                minHeight: '100px',
+                overflowY: 'auto',
+                display: 'flex',
+                flexDirection: 'column',
+                borderRadius: 1,
+                backgroundColor: snapshot.isDraggingOver ? 'rgba(25, 118, 210, 0.08)' : 'transparent',
+                transition: 'background-color 0.2s ease'
+              }}
+            >
+              {localCards.map((card, index) => (
+                <Draggable key={card.id} draggableId={card.id} index={index}>
+                  {(dragProvided, dragSnapshot) => (
+                    <Box
+                      ref={dragProvided.innerRef}
+                      {...dragProvided.draggableProps}
+                      {...dragProvided.dragHandleProps}
+                      sx={{
+                        opacity: dragSnapshot.isDragging ? 0.85 : 1
+                      }}
+                    >
+                      <RetroCard card={card} index={index} store={store} />
+                    </Box>
+                  )}
+                </Draggable>
+              ))}
+              {provided.placeholder}
+            </Box>
+          )}
+        </Droppable>
+      ) : (
+        <Box sx={{ flexGrow: 1, minHeight: '100px', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+          {localCards.map((card, index) => (
+            <RetroCard key={card.id} card={card} index={index} store={store} />
+          ))}
+        </Box>
+      )}
     </Paper>
   );
 });

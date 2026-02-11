@@ -89,7 +89,10 @@ export const RoomModel = {
             await client.query('update room_users set id = coalesce($1, id), role = coalesce($2, role) where room_id=$3 and name=$4', [newId ?? null, role ?? null, roomId, filter['users.name']]);
           }
         }
-        if (update.$set['cards.$.text'] || update.$set['cards.$.column']) {
+        if (
+          typeof update.$set['cards.$.text'] !== 'undefined' ||
+          typeof update.$set['cards.$.column'] !== 'undefined'
+        ) {
           const cardId = filter['cards.id'];
           const text = update.$set['cards.$.text'];
           const column = update.$set['cards.$.column'];

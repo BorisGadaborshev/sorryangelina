@@ -450,18 +450,31 @@ io.on('connection', (socket) => {
             socket.emit('error', 'Failed to delete card');
         }
     }));
-    socket.on('move-card', ({ cardId, column }) => {
+    socket.on('move-card', ({ cardId, column }) => __awaiter(void 0, void 0, void 0, function* () {
         if (!currentUser)
             return;
-        const roomState = roomStates.get(currentUser.roomId);
-        if (!roomState)
-            return;
-        const card = roomState.cards.find(c => c.id === cardId);
-        if (!card)
-            return;
-        card.column = column;
-        io.to(currentUser.roomId).emit('card-moved', { cardId, column });
-    });
+        try {
+            const room = yield RoomService_1.RoomService.getRoom(currentUser.roomId);
+            if (!room || room.phase !== 'creation')
+                return;
+            const card = room.cards.find((currentCard) => currentCard.id === cardId);
+            if (!card)
+                return;
+            const updatedRoom = yield RoomService_1.RoomService.updateCard(currentUser.roomId, cardId, { column });
+            if (!updatedRoom)
+                return;
+            io.to(currentUser.roomId).emit('card-moved', { cardId, column });
+            io.to(currentUser.roomId).emit('state-updated', {
+                cards: updatedRoom.cards,
+                phase: updatedRoom.phase,
+                users: updatedRoom.users
+            });
+        }
+        catch (error) {
+            console.error('Error moving card:', error);
+            socket.emit('error', 'Failed to move card');
+        }
+    }));
     socket.on('vote-card', ({ cardId, voteType }) => __awaiter(void 0, void 0, void 0, function* () {
         if (!currentUser)
             return;

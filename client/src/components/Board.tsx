@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { observer } from 'mobx-react-lite';
 import { Box, AppBar, Toolbar, Typography, Button, ButtonGroup, CircularProgress, IconButton, Tooltip, Tabs, Tab, useMediaQuery, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions } from '@mui/material';
+import { DragDropContext, DropResult } from '@hello-pangea/dnd';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import PeopleIcon from '@mui/icons-material/People';
@@ -42,6 +43,18 @@ const Board: React.FC<Props> = observer(({ store }) => {
     store.socketService?.updateReadyState(isReady);
   };
 
+  const handleDragEnd = (result: DropResult) => {
+    const { destination, source, draggableId } = result;
+    if (!destination) return;
+    if (store.phase !== 'creation') return;
+    if (destination.droppableId === source.droppableId) return;
+
+    const destinationColumn = Number(destination.droppableId.replace('column-', ''));
+    if (Number.isNaN(destinationColumn)) return;
+
+    store.socketService?.moveCard(draggableId, destinationColumn);
+  };
+
   if (!store.room || !store.currentUser || !isReady) {
     return (
       <Box sx={{ 
@@ -55,28 +68,39 @@ const Board: React.FC<Props> = observer(({ store }) => {
     );
   }
 
-  const renderColumns = () => (
-    <Box sx={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 2, width: '100%' }}>
-      <RetroColumn
-        title="Что прошло хорошо"
-        type="liked"
-        columnIndex={0}
-        store={store}
-      />
-      <RetroColumn
-        title="Что нужно улучшить"
-        type="disliked"
-        columnIndex={1}
-        store={store}
-      />
-      <RetroColumn
-        title="План действий"
-        type="suggestion"
-        columnIndex={2}
-        store={store}
-      />
-    </Box>
-  );
+  const renderColumns = () => {
+    const columns = (
+      <Box sx={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 2, width: '100%' }}>
+        <RetroColumn
+          title="Что прошло хорошо"
+          type="liked"
+          columnIndex={0}
+          store={store}
+          enableDragDrop={store.phase === 'creation'}
+        />
+        <RetroColumn
+          title="Что нужно улучшить"
+          type="disliked"
+          columnIndex={1}
+          store={store}
+          enableDragDrop={store.phase === 'creation'}
+        />
+        <RetroColumn
+          title="План действий"
+          type="suggestion"
+          columnIndex={2}
+          store={store}
+          enableDragDrop={store.phase === 'creation'}
+        />
+      </Box>
+    );
+
+    if (store.phase !== 'creation') {
+      return columns;
+    }
+
+    return <DragDropContext onDragEnd={handleDragEnd}>{columns}</DragDropContext>;
+  };
 
   const renderContent = () => {
     switch (store.phase) {
@@ -156,10 +180,23 @@ const Board: React.FC<Props> = observer(({ store }) => {
             </Tooltip>
           )}
           {isMobile ? (
-            <Tabs value={mobileTab} onChange={(_, v) => setMobileTab(v)} textColor="inherit" indicatorColor="secondary" sx={{ width: '100%' }}>
-              <Tab label="Доска" />
-              <Tab label={`Участники (${store.users.length})`} />
-            </Tabs>
+            <Box sx={{ width: '100%' }}>
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 0.5 }}>
+                <Tooltip title="Выйти из комнаты">
+                  <IconButton
+                    color="inherit"
+                    onClick={() => store.socketService?.leaveRoom()}
+                    size="small"
+                  >
+                    <ExitToAppIcon />
+                  </IconButton>
+                </Tooltip>
+              </Box>
+              <Tabs value={mobileTab} onChange={(_, v) => setMobileTab(v)} textColor="inherit" indicatorColor="secondary" sx={{ width: '100%' }}>
+                <Tab label="Доска" />
+                <Tab label={`Участники (${store.users.length})`} />
+              </Tabs>
+            </Box>
           ) : (
             <Box sx={{ ml: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
               <IconButton

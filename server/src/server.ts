@@ -485,17 +485,29 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('move-card', ({ cardId, column }) => {
+  socket.on('move-card', async ({ cardId, column }) => {
     if (!currentUser) return;
 
-    const roomState = roomStates.get(currentUser.roomId);
-    if (!roomState) return;
+    try {
+      const room = await RoomService.getRoom(currentUser.roomId);
+      if (!room || room.phase !== 'creation') return;
 
-    const card = roomState.cards.find(c => c.id === cardId);
-    if (!card) return;
+      const card = room.cards.find((currentCard) => currentCard.id === cardId);
+      if (!card) return;
 
-    card.column = column;
-    io.to(currentUser.roomId).emit('card-moved', { cardId, column });
+      const updatedRoom = await RoomService.updateCard(currentUser.roomId, cardId, { column });
+      if (!updatedRoom) return;
+
+      io.to(currentUser.roomId).emit('card-moved', { cardId, column });
+      io.to(currentUser.roomId).emit('state-updated', {
+        cards: updatedRoom.cards,
+        phase: updatedRoom.phase,
+        users: updatedRoom.users
+      });
+    } catch (error) {
+      console.error('Error moving card:', error);
+      socket.emit('error', 'Failed to move card');
+    }
   });
 
   socket.on('vote-card', async ({ cardId, voteType }) => {
