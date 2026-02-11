@@ -13,6 +13,15 @@ export const connectDB = async (): Promise<void> => {
   await pool.connect();
 
   await pool.query(`
+    create table if not exists accounts (
+      id bigserial primary key,
+      name text not null,
+      password_hash text not null,
+      type text not null check (type in ('fixed', 'registered')),
+      created_at timestamptz default now(),
+      updated_at timestamptz default now()
+    );
+
     create table if not exists rooms (
       id text primary key,
       password text not null,
@@ -49,6 +58,7 @@ export const connectDB = async (): Promise<void> => {
 
     create index if not exists idx_cards_room on cards(room_id);
     create index if not exists idx_users_room on room_users(room_id);
+    create unique index if not exists idx_accounts_name_ci on accounts ((lower(name)));
   `);
 
   console.log('Connected to PostgreSQL and ensured schema');

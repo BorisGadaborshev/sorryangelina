@@ -22,6 +22,7 @@ export interface RoomDocument {
   password: string;
   owner: string;
   phase: 'creation' | 'voting' | 'discussion';
+  createdAt?: string;
   users: User[];
   cards: Card[];
 }
@@ -31,6 +32,7 @@ export interface Room {
   id: string;
   owner: string;
   phase: 'creation' | 'voting' | 'discussion';
+  createdAt?: string;
   users: User[];
   cards: Card[];
 }
@@ -39,4 +41,6 @@ export interface RoomState {
   cards: Card[];
   phase: 'creation' | 'voting' | 'discussion';
   users: User[];
-} 
+}
+
+export type AuthProfileType = 'fixed' | 'registered' | 'guest';

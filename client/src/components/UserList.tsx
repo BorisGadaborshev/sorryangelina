@@ -1,11 +1,12 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Box, List, ListItem, ListItemText, Typography, Avatar, Button, Tooltip, IconButton } from '@mui/material';
 import PersonIcon from '@mui/icons-material/Person';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
-import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import PersonRemoveIcon from '@mui/icons-material/PersonRemove';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import { RetroStore } from '../store/RetroStore';
 
 interface User {
@@ -32,18 +33,36 @@ const UserList: React.FC<UserListProps> = ({
   onReadyStateChange,
   store
 }) => {
+  const [fixedUsers, setFixedUsers] = useState<string[]>([]);
+  const [isOfflineExpanded, setIsOfflineExpanded] = useState(false);
   const currentUser = users.find(u => u.id === currentUserId);
-  const readyCount = users.filter(u => u.isReady).length;
   const isAdmin = currentUser?.role === 'admin';
+
+  useEffect(() => {
+    const fetchFixedUsers = async () => {
+      try {
+        const apiBase = process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3001';
+        const response = await fetch(`${apiBase}/api/auth/fixed-users`);
+        if (!response.ok) return;
+        const data = (await response.json()) as { users: string[] };
+        setFixedUsers(data.users || []);
+      } catch (error) {
+        // Silent fail: participant list should still work.
+      }
+    };
+
+    fetchFixedUsers();
+  }, []);
+
+  const offlineFixedUsers = useMemo(() => {
+    const onlineNames = new Set(users.map((user) => user.name));
+    return fixedUsers.filter((name) => !onlineNames.has(name));
+  }, [fixedUsers, users]);
 
   const handleKickUser = (userId: string) => {
     if (isAdmin && userId !== currentUserId) {
       store.socketService?.kickUser(userId);
     }
-  };
-
-  const handleLeaveRoom = () => {
-    store.socketService?.leaveRoom();
   };
 
   const getPhaseActionText = (phase: string): string => {
@@ -151,6 +170,43 @@ const UserList: React.FC<UserListProps> = ({
           </ListItem>
         ))}
       </List>
+      {offlineFixedUsers.length > 0 && (
+        <Box sx={{ px: 1, pb: 1 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
+            <Typography variant="subtitle2" color="text.secondary">
+              Оффлайн (фиксированные) ({offlineFixedUsers.length})
+            </Typography>
+            <IconButton size="small" onClick={() => setIsOfflineExpanded((prev) => !prev)}>
+              {isOfflineExpanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+            </IconButton>
+          </Box>
+          {isOfflineExpanded && (
+            <List dense>
+              {offlineFixedUsers.map((name) => (
+                <ListItem key={name} sx={{ borderRadius: 1, opacity: 0.7 }}>
+                  <Avatar
+                    sx={{
+                      mr: 2,
+                      bgcolor: 'grey.400'
+                    }}
+                  >
+                    <PersonIcon />
+                  </Avatar>
+                  <ListItemText
+                    primary={name}
+                    secondary="Оффлайн"
+                    sx={{
+                      '& .MuiListItemText-secondary': {
+                        color: 'text.disabled'
+                      }
+                    }}
+                  />
+                </ListItem>
+              ))}
+            </List>
+          )}
+        </Box>
+      )}
     </Box>
   );
 };

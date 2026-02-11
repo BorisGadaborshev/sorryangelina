@@ -30,9 +30,9 @@ export const RoomModel = {
   },
 
   async findOne(where: { id: string }): Promise<RoomDocument | null> {
-    const { rows } = await pool.query('select id, password, owner, phase from rooms where id=$1', [where.id]);
+    const { rows } = await pool.query('select id, password, owner, phase, created_at from rooms where id=$1', [where.id]);
     if (rows.length === 0) return null;
-    const roomRow = rows[0] as { id: string; password: string; owner: string; phase: Room['phase'] };
+    const roomRow = rows[0] as { id: string; password: string; owner: string; phase: Room['phase']; created_at: string };
     const usersRes = await pool.query('select id, name, role, is_ready from room_users where room_id=$1', [where.id]);
     const cardsRes = await pool.query('select id, text, type, created_by, column_index from cards where room_id=$1', [where.id]);
     const cardRows = cardsRes.rows as Array<{ id: string; text: string; type: Card['type']; created_by: string; column_index: number }>;
@@ -46,7 +46,15 @@ export const RoomModel = {
     const userRows = usersRes.rows as Array<{ id: string; name: string; role: User['role']; is_ready: boolean }>;
     const users: User[] = userRows.map((r) => ({ id: r.id, name: r.name, roomId: roomRow.id, role: r.role, isReady: r.is_ready }));
     const cards: Card[] = cardRows.map((r) => ({ id: r.id, text: r.text, type: r.type, createdBy: r.created_by, likes: cardIdToVotes.get(r.id)?.likes || [], dislikes: cardIdToVotes.get(r.id)?.dislikes || [], column: r.column_index }));
-    return { id: roomRow.id, password: roomRow.password, owner: roomRow.owner, phase: roomRow.phase, users, cards };
+    return {
+      id: roomRow.id,
+      password: roomRow.password,
+      owner: roomRow.owner,
+      phase: roomRow.phase,
+      createdAt: roomRow.created_at,
+      users,
+      cards
+    };
   },
 
   async findOneAndUpdate(filter: any, update: any, options?: { new?: boolean }): Promise<RoomDocument | null> {
@@ -64,7 +72,12 @@ export const RoomModel = {
         if (typeof update.$set.phase !== 'undefined') {
           await client.query('update rooms set phase=$1, updated_at=now() where id=$2', [update.$set.phase, roomId]);
         }
-        if (update.$set['users.$.id'] || update.$set['users.$.role'] || update.$set['users.$.isReady'] || update.$set['users.$.is_ready']) {
+        if (
+          typeof update.$set['users.$.id'] !== 'undefined' ||
+          typeof update.$set['users.$.role'] !== 'undefined' ||
+          typeof update.$set['users.$.isReady'] !== 'undefined' ||
+          typeof update.$set['users.$.is_ready'] !== 'undefined'
+        ) {
           if (filter['users.id']) {
             const newId = update.$set['users.$.id'];
             const role = update.$set['users.$.role'];

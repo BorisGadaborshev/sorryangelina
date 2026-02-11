@@ -5,6 +5,8 @@ import cors from 'cors';
 import { Room, User, Card, RoomState } from './types';
 import bcrypt from 'bcryptjs';
 import { RoomService } from './services/RoomService';
+import { AccountService } from './services/AccountService';
+import { signAuthToken, verifyAuthToken } from './config/jwt';
 import dotenv from 'dotenv';
 import path from 'path';
 import { connectDB } from './config/database';
@@ -19,13 +21,15 @@ connectDB().catch((err) => {
 
 const app = express();
 const httpServer = createServer(app);
+const rooms = new Map<string, Room>();
+const roomStates = new Map<string, RoomState>();
 
 // Настраиваем CORS для Express с учетом Vercel
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' 
     ? ['https://sorryangelina.vercel.app', 'https://sorryangelina-git-main-borisgadaborshevs-projects.vercel.app']
     : "http://localhost:3000",
-  methods: ['GET', 'POST'],
+  methods: ['GET', 'POST', 'DELETE'],
   credentials: true
 }));
 
@@ -64,11 +68,130 @@ app.get('/api/rooms', async (req, res) => {
     res.json(rooms.map(room => ({
       id: room.id,
       usersCount: room.users.length,
-      phase: room.phase
+      phase: room.phase,
+      owner: room.owner,
+      createdAt: room.createdAt
     })));
   } catch (error) {
     console.error('Error getting rooms:', error);
     res.status(500).json({ error: 'Failed to get rooms' });
+  }
+});
+
+app.delete('/api/rooms/:roomId', async (req, res) => {
+  const roomId = req.params.roomId;
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
+  const auth = verifyAuthToken(token);
+
+  if (!auth) {
+    res.status(401).json({ error: 'Unauthorized: token is invalid or expired' });
+    return;
+  }
+
+  try {
+    const room = await RoomService.getRoom(roomId);
+    if (!room) {
+      res.status(404).json({ error: 'Room not found' });
+      return;
+    }
+
+    if (room.owner !== auth.name) {
+      res.status(403).json({ error: 'Only room creator can delete the room' });
+      return;
+    }
+
+    await RoomService.deleteRoom(roomId);
+    rooms.delete(roomId);
+    roomStates.delete(roomId);
+
+    res.json({ message: 'Room deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting room via API:', error);
+    res.status(500).json({ error: 'Failed to delete room' });
+  }
+});
+
+app.get('/api/auth/fixed-users', (req, res) => {
+  res.json({ users: AccountService.getFixedUsers() });
+});
+
+const buildAuthResponse = (profile: { name: string; type: 'fixed' | 'registered' | 'guest' }) => {
+  const { token, expiresAt } = signAuthToken(profile.name, profile.type);
+  return {
+    profile: {
+      ...profile,
+      token,
+      expiresAt
+    }
+  };
+};
+
+app.post('/api/auth/fixed-login', async (req, res) => {
+  const { name, password } = req.body as { name?: string; password?: string };
+
+  if (!name || !password) {
+    res.status(400).json({ error: 'Name and password are required' });
+    return;
+  }
+
+  try {
+    const result = await AccountService.fixedLogin(name, password);
+    res.json({
+      ...buildAuthResponse(result.profile),
+      isFirstLogin: result.isFirstLogin
+    });
+  } catch (error) {
+    console.error('Fixed login error:', error);
+    res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to login' });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  const { name, password } = req.body as { name?: string; password?: string };
+
+  if (!name || !password) {
+    res.status(400).json({ error: 'Name and password are required' });
+    return;
+  }
+
+  try {
+    const profile = await AccountService.login(name, password);
+    res.json(buildAuthResponse(profile));
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to login' });
+  }
+});
+
+app.post('/api/auth/register', async (req, res) => {
+  const { name, password } = req.body as { name?: string; password?: string };
+
+  if (!name || !password) {
+    res.status(400).json({ error: 'Name and password are required' });
+    return;
+  }
+
+  try {
+    const profile = await AccountService.register(name, password);
+    res.json(buildAuthResponse(profile));
+  } catch (error) {
+    console.error('Register error:', error);
+    res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to register' });
+  }
+});
+
+app.post('/api/auth/guest', (req, res) => {
+  const { name } = req.body as { name?: string };
+  if (!name || !name.trim()) {
+    res.status(400).json({ error: 'Name is required' });
+    return;
+  }
+  try {
+    const profile = AccountService.guestLogin(name);
+    res.json(buildAuthResponse(profile));
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to login as guest' });
   }
 });
 
@@ -97,9 +220,6 @@ io.engine.on("connection_error", (err) => {
   console.log('Connection error:', err);
 });
 
-const rooms = new Map<string, Room>();
-const roomStates = new Map<string, RoomState>();
-
 // Helper function to get sorted cards by votes
 const getSortedCards = (cards: Card[]): Card[] => {
   return [...cards].sort((a, b) => ((b.likes?.length || 0) - (b.dislikes?.length || 0)) - ((a.likes?.length || 0) - (a.dislikes?.length || 0)));
@@ -119,14 +239,23 @@ io.on('connection', (socket) => {
   
   let currentUser: User | null = null;
 
-  socket.on('restore-session', async ({ roomId, userId }) => {
+  socket.on('restore-session', async ({ roomId, userId, token }) => {
     console.log('Attempting to restore session:', { roomId, userId });
+    const auth = verifyAuthToken(token);
+    if (!auth) {
+      socket.emit('session-expired');
+      return;
+    }
     
     try {
       const { room, user } = await RoomService.restoreSession(roomId, userId, socket.id);
       
       if (!room || !user) {
         console.log('Failed to restore session:', { roomId, userId });
+        socket.emit('session-expired');
+        return;
+      }
+      if (user.name !== auth.name) {
         socket.emit('session-expired');
         return;
       }
@@ -149,8 +278,18 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('create-room', async ({ roomId, password, username }) => {
-    console.log('Attempting to create room:', { roomId, username });
+  socket.on('create-room', async ({ roomId, password, username, token }) => {
+    const auth = verifyAuthToken(token);
+    if (!auth) {
+      socket.emit('error', 'Unauthorized: token is invalid or expired');
+      return;
+    }
+    if (username && auth.name !== username) {
+      socket.emit('error', 'Unauthorized: token does not match user');
+      return;
+    }
+    const effectiveUsername = auth.name;
+    console.log('Attempting to create room:', { roomId, username: effectiveUsername });
     
     try {
       const existingRoom = await RoomService.getRoom(roomId);
@@ -160,11 +299,11 @@ io.on('connection', (socket) => {
         return;
       }
 
-      const room = await RoomService.createRoom(roomId, password, socket.id, username);
+      const room = await RoomService.createRoom(roomId, password, socket.id, effectiveUsername);
       socket.join(roomId);
       currentUser = { 
         id: socket.id, 
-        name: username, 
+        name: effectiveUsername, 
         roomId,
         role: 'admin'
       };
@@ -185,8 +324,18 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('join-room', async ({ roomId, password, username }) => {
-    console.log('Attempting to join room:', { roomId, username });
+  socket.on('join-room', async ({ roomId, password, username, token }) => {
+    const auth = verifyAuthToken(token);
+    if (!auth) {
+      socket.emit('error', 'Unauthorized: token is invalid or expired');
+      return;
+    }
+    if (username && auth.name !== username) {
+      socket.emit('error', 'Unauthorized: token does not match user');
+      return;
+    }
+    const effectiveUsername = auth.name;
+    console.log('Attempting to join room:', { roomId, username: effectiveUsername });
     
     try {
       const isValid = await RoomService.validatePassword(roomId, password);
@@ -197,17 +346,17 @@ io.on('connection', (socket) => {
       }
 
       // Check for existing user first
-      const existingUser = await RoomService.findExistingUser(roomId, username);
+      const existingUser = await RoomService.findExistingUser(roomId, effectiveUsername);
       const user: User = {
         id: socket.id,
-        name: username,
+        name: effectiveUsername,
         roomId,
         role: 'user'
       };
 
       // If user exists, we'll reuse their original ID for card ownership
       if (existingUser) {
-        console.log('User rejoining room:', { roomId, username });
+        console.log('User rejoining room:', { roomId, username: effectiveUsername });
         user.id = existingUser.id;
       }
 
@@ -221,7 +370,7 @@ io.on('connection', (socket) => {
       socket.join(roomId);
       currentUser = user;
       
-      console.log('User joined room successfully:', { roomId, username, isRejoin: !!existingUser });
+      console.log('User joined room successfully:', { roomId, username: effectiveUsername, isRejoin: !!existingUser });
       socket.emit('room-joined', { 
         room, 
         state: { 
@@ -282,13 +431,16 @@ io.on('connection', (socket) => {
 
   socket.on('update-card', async ({ cardId, text }) => {
     if (!currentUser) return;
+    const currentUserName = currentUser.name;
 
     try {
       const room = await RoomService.getRoom(currentUser.roomId);
-      if (!room || room.phase !== 'creation') return;
+      if (!room || (room.phase !== 'creation' && room.phase !== 'discussion')) return;
 
       const card = room.cards.find(c => c.id === cardId);
-      if (!card || card.createdBy !== currentUser.name) return;
+      if (!card) return;
+      const isAdmin = room.users.some((user) => user.name === currentUserName && user.role === 'admin');
+      if (!isAdmin && card.createdBy !== currentUserName) return;
 
       const updatedRoom = await RoomService.updateCard(currentUser.roomId, cardId, { text });
       if (updatedRoom) {
@@ -307,13 +459,16 @@ io.on('connection', (socket) => {
 
   socket.on('delete-card', async ({ cardId }) => {
     if (!currentUser) return;
+    const currentUserName = currentUser.name;
 
     try {
       const room = await RoomService.getRoom(currentUser.roomId);
-      if (!room || room.phase !== 'creation') return;
+      if (!room || (room.phase !== 'creation' && room.phase !== 'discussion')) return;
 
       const card = room.cards.find(c => c.id === cardId);
-      if (!card || card.createdBy !== currentUser.name) return;
+      if (!card) return;
+      const isAdmin = room.users.some((user) => user.name === currentUserName && user.role === 'admin');
+      if (!isAdmin && card.createdBy !== currentUserName) return;
 
       const updatedRoom = await RoomService.deleteCard(currentUser.roomId, cardId);
       if (updatedRoom) {
@@ -371,7 +526,12 @@ io.on('connection', (socket) => {
       }
     } catch (error) {
       console.error('Error voting for card:', error);
-      socket.emit('error', 'Failed to vote for card');
+      const message = error instanceof Error ? error.message : 'Failed to vote for card';
+      if (error instanceof Error && message.includes('не более 3')) {
+        socket.emit('vote-error', { cardId, message });
+        return;
+      }
+      socket.emit('error', message);
     }
   });
 
@@ -446,6 +606,39 @@ io.on('connection', (socket) => {
     } catch (error) {
       console.error('Error changing phase:', error);
       socket.emit('error', 'Failed to change phase');
+    }
+  });
+
+  socket.on('delete-room', async () => {
+    if (!currentUser?.roomId) {
+      socket.emit('error', 'Room not found');
+      return;
+    }
+
+    try {
+      const room = await RoomService.getRoom(currentUser.roomId);
+      if (!room) {
+        socket.emit('error', 'Room not found');
+        return;
+      }
+
+      const isOwner = room.owner === currentUser.name;
+      if (!isOwner) {
+        socket.emit('error', 'Only room creator can delete the room');
+        return;
+      }
+
+      const roomId = currentUser.roomId;
+      await RoomService.deleteRoom(roomId);
+      rooms.delete(roomId);
+      roomStates.delete(roomId);
+
+      io.to(roomId).emit('room-deleted');
+      io.in(roomId).socketsLeave(roomId);
+      currentUser = null;
+    } catch (error) {
+      console.error('Error deleting room:', error);
+      socket.emit('error', 'Failed to delete room');
     }
   });
 

@@ -39,7 +39,7 @@ exports.RoomModel = {
     },
     findOne(where) {
         return __awaiter(this, void 0, void 0, function* () {
-            const { rows } = yield database_1.pool.query('select id, password, owner, phase from rooms where id=$1', [where.id]);
+            const { rows } = yield database_1.pool.query('select id, password, owner, phase, created_at from rooms where id=$1', [where.id]);
             if (rows.length === 0)
                 return null;
             const roomRow = rows[0];
@@ -56,7 +56,15 @@ exports.RoomModel = {
             const userRows = usersRes.rows;
             const users = userRows.map((r) => ({ id: r.id, name: r.name, roomId: roomRow.id, role: r.role, isReady: r.is_ready }));
             const cards = cardRows.map((r) => { var _a, _b; return ({ id: r.id, text: r.text, type: r.type, createdBy: r.created_by, likes: ((_a = cardIdToVotes.get(r.id)) === null || _a === void 0 ? void 0 : _a.likes) || [], dislikes: ((_b = cardIdToVotes.get(r.id)) === null || _b === void 0 ? void 0 : _b.dislikes) || [], column: r.column_index }); });
-            return { id: roomRow.id, password: roomRow.password, owner: roomRow.owner, phase: roomRow.phase, users, cards };
+            return {
+                id: roomRow.id,
+                password: roomRow.password,
+                owner: roomRow.owner,
+                phase: roomRow.phase,
+                createdAt: roomRow.created_at,
+                users,
+                cards
+            };
         });
     },
     findOneAndUpdate(filter, update, options) {
@@ -74,7 +82,10 @@ exports.RoomModel = {
                     if (typeof update.$set.phase !== 'undefined') {
                         yield client.query('update rooms set phase=$1, updated_at=now() where id=$2', [update.$set.phase, roomId]);
                     }
-                    if (update.$set['users.$.id'] || update.$set['users.$.role'] || update.$set['users.$.isReady'] || update.$set['users.$.is_ready']) {
+                    if (typeof update.$set['users.$.id'] !== 'undefined' ||
+                        typeof update.$set['users.$.role'] !== 'undefined' ||
+                        typeof update.$set['users.$.isReady'] !== 'undefined' ||
+                        typeof update.$set['users.$.is_ready'] !== 'undefined') {
                         if (filter['users.id']) {
                             const newId = update.$set['users.$.id'];
                             const role = update.$set['users.$.role'];

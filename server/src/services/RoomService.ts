@@ -2,6 +2,8 @@ import { RoomModel } from '../models/Room';
 import { Room, RoomDocument, User, Card } from '../types';
 import bcrypt from 'bcryptjs';
 
+const PRIORITY_ADMIN_NAME = 'Коваль Ангелина Константиновна';
+
 export class RoomService {
   static async createRoom(roomId: string, password: string, owner: string, username: string): Promise<Room> {
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -50,24 +52,17 @@ export class RoomService {
     
     const existingUser = room.users.find(user => user.name === username);
     if (existingUser) {
-      // Находим первого пользователя (создателя) комнаты
-      const creatorUser = room.users[0];
-      
-      // Проверяем, является ли пользователь создателем комнаты по имени
-      const isCreator = username === creatorUser.name;
+      const adminName = this.getAdminName(room.owner, room.users.map((user) => user.name));
       
       console.log('Found existing user check:', { 
         username,
-        creatorUsername: creatorUser.name,
-        isCreator,
-        roomOwner: room.owner,
-        firstUser: room.users[0].name
+        adminName,
+        roomOwner: room.owner
       });
 
-      // Если имя совпадает с именем создателя - даём права админа
       return {
         ...existingUser,
-        role: isCreator ? 'admin' as const : 'user' as const
+        role: username === adminName ? 'admin' as const : 'user' as const
       };
     }
     return null;
@@ -77,23 +72,20 @@ export class RoomService {
     const room = await RoomModel.findOne({ id: roomId });
     if (!room) return null;
 
-    // Проверяем, существует ли пользователь с таким именем
+    const userNamesAfterJoin = Array.from(new Set([...room.users.map((existingUser) => existingUser.name), user.name]));
+    const adminName = this.getAdminName(room.owner, userNamesAfterJoin);
+
     const existingUser = await this.findExistingUser(roomId, user.name);
     
     if (existingUser) {
-      // Находим создателя комнаты
-      const creatorUser = room.users[0];
-      const isCreator = user.name === creatorUser.name;
-      
       const userWithRole = { 
         ...user, 
-        role: isCreator ? 'admin' as const : 'user' as const 
+        role: user.name === adminName ? 'admin' as const : 'user' as const 
       };
       
       console.log('Updating existing user:', {
         user: userWithRole,
-        isCreator,
-        creatorName: creatorUser.name
+        adminName
       });
       
       const updatedRoom = await RoomModel.findOneAndUpdate(
@@ -112,16 +104,14 @@ export class RoomService {
       return updatedRoom ? this.convertToRoom(updatedRoom) : null;
     }
 
-    // Если пользователь новый, проверяем не является ли он первым в комнате
-    const isFirstUser = room.users.length === 0;
     const userWithRole = { 
       ...user, 
-      role: isFirstUser ? 'admin' as const : 'user' as const
+      role: user.name === adminName ? 'admin' as const : 'user' as const
     };
     
     console.log('Adding new user:', {
       user: userWithRole,
-      isFirstUser,
+      adminName,
       existingUsersCount: room.users.length
     });
 
@@ -211,14 +201,13 @@ export class RoomService {
       return null;
     }
 
-    // Проверяем право: админ по роли, или владелец комнаты по имени, или первый пользователь
-    const isOwnerByName = userName ? userName === room.owner : false;
-    const isFirstUser = room.users.length > 0 && room.users[0].name === user.name;
-    const hasAdminRole = user.role === 'admin' || isOwnerByName || isFirstUser;
+    const adminName = this.getAdminName(room.owner, room.users.map((roomUser) => roomUser.name));
+    const hasAdminRole = user.name === adminName;
     
     console.log('Checking phase update permissions:', {
       userName: user.name,
       userRole: user.role,
+      adminName,
       hasAdminRole,
       currentPhase: room.phase,
       requestedPhase: phase
@@ -261,8 +250,29 @@ export class RoomService {
     const card = current.cards.find(c => c.id === cardId);
     if (!card) return null;
 
+    const likesUsed = current.cards.reduce((acc, currentCard) => {
+      return acc + ((currentCard.likes || []).includes(userId) ? 1 : 0);
+    }, 0);
+    const dislikesUsed = current.cards.reduce((acc, currentCard) => {
+      return acc + ((currentCard.dislikes || []).includes(userId) ? 1 : 0);
+    }, 0);
+
     const alreadyLiked = (card.likes || []).includes(userId);
     const alreadyDisliked = (card.dislikes || []).includes(userId);
+
+    // Vote limits per user across the room.
+    if (voteType === 'like' && !alreadyLiked) {
+      const nextLikesUsed = likesUsed + 1;
+      if (nextLikesUsed > 3) {
+        throw new Error('Вы можете поставить не более 3 лайков');
+      }
+    }
+    if (voteType === 'dislike' && !alreadyDisliked) {
+      const nextDislikesUsed = dislikesUsed + 1;
+      if (nextDislikesUsed > 3) {
+        throw new Error('Вы можете поставить не более 3 дизлайков');
+      }
+    }
 
     // If user clicks the same vote again → toggle off (remove only)
     if ((voteType === 'like' && alreadyLiked) || (voteType === 'dislike' && alreadyDisliked)) {
@@ -326,17 +336,12 @@ export class RoomService {
 
     console.log('Found existing user:', existingUser);
 
-    // Находим создателя комнаты
-    const creatorUser = room.users[0];
-    
-    // Проверяем, является ли пользователь создателем комнаты по имени
-    const isCreator = existingUser.name === creatorUser.name;
-    const role = isCreator ? 'admin' as const : 'user' as const;
+    const adminName = this.getAdminName(room.owner, room.users.map((roomUser) => roomUser.name));
+    const role = existingUser.name === adminName ? 'admin' as const : 'user' as const;
 
     console.log('Role determination during restore:', {
       username: existingUser.name,
-      creatorUsername: creatorUser.name,
-      isCreator,
+      adminName,
       assignedRole: role,
       currentRole: existingUser.role
     });
@@ -446,9 +451,11 @@ export class RoomService {
   }
 
   private static convertToRoom(doc: RoomDocument): Room {
-    const { id, owner, phase, users, cards } = doc;
+    const { id, owner, phase, createdAt, users, cards } = doc;
+    const adminName = this.getAdminName(owner, (users || []).map((user) => user.name));
     console.log('Converting room document:', {
       owner,
+      adminName,
       originalUsers: users?.map(u => ({ name: u.name, role: u.role }))
     });
     
@@ -456,11 +463,12 @@ export class RoomService {
       id,
       owner,
       phase,
+      createdAt,
       users: users ? users.map(user => ({
         id: user.id,
         name: user.name,
         roomId: id,
-        role: user.role || 'user',
+        role: user.name === adminName ? ('admin' as const) : ('user' as const),
         isReady: user.isReady
       })) : [],
       cards: cards || []
@@ -471,5 +479,9 @@ export class RoomService {
     });
 
     return convertedRoom;
+  }
+
+  private static getAdminName(roomOwner: string, userNames: string[]): string {
+    return userNames.includes(PRIORITY_ADMIN_NAME) ? PRIORITY_ADMIN_NAME : roomOwner;
   }
 } 

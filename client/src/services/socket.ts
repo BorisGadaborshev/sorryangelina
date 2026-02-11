@@ -171,6 +171,11 @@ export class SocketService {
     this.socket.on('card-voted', ({ cardId, likes, dislikes }: { cardId: string; likes: string[]; dislikes: string[] }) => {
       console.log('Card voted:', { cardId, likes, dislikes });
       this.store.updateVotes(cardId, likes, dislikes);
+      this.store.clearVoteError();
+    });
+
+    this.socket.on('vote-error', ({ cardId, message }: { cardId: string; message: string }) => {
+      this.store.setVoteError(cardId, message);
     });
 
     this.socket.on('phase-changed', ({ phase, cards }: { phase: 'creation' | 'voting' | 'discussion'; cards: Card[] }) => {
@@ -254,7 +259,7 @@ export class SocketService {
     });
   }
 
-  async createRoom(roomId: string, password: string, username: string): Promise<void> {
+  async createRoom(roomId: string, password: string, username: string, token: string): Promise<void> {
     console.log('Attempting to create room:', roomId);
     try {
       await this.ensureConnection();
@@ -318,7 +323,7 @@ export class SocketService {
 
         this.socket.once('error', handleError);
         this.socket.once('room-joined', handleSuccess);
-        this.socket.emit('create-room', { roomId, password, username });
+        this.socket.emit('create-room', { roomId, password, username, token });
       });
     } catch (error) {
       console.error('Failed to connect to server:', error);
@@ -326,7 +331,7 @@ export class SocketService {
     }
   }
 
-  async joinRoom(roomId: string, password: string, username: string): Promise<void> {
+  async joinRoom(roomId: string, password: string, username: string, token: string): Promise<void> {
     console.log('Attempting to join room:', roomId);
     try {
       await this.ensureConnection();
@@ -369,7 +374,7 @@ export class SocketService {
 
         this.socket.once('error', handleError);
         this.socket.once('room-joined', handleSuccess);
-        this.socket.emit('join-room', { roomId, password, username });
+        this.socket.emit('join-room', { roomId, password, username, token });
       });
     } catch (error) {
       console.error('Failed to connect to server:', error);
@@ -424,7 +429,7 @@ export class SocketService {
     this.socket.emit('update-ready-state', { isReady });
   }
 
-  async restoreSession(roomId: string, userId: string, username: string): Promise<void> {
+  async restoreSession(roomId: string, userId: string, username: string, token?: string): Promise<void> {
     console.log('Attempting to restore session:', { roomId, userId, username });
     try {
       await this.ensureConnection();
@@ -475,7 +480,7 @@ export class SocketService {
         this.socket.once('error', handleError);
         this.socket.once('room-joined', handleSuccess);
         this.socket.once('session-expired', handleExpired);
-        this.socket.emit('restore-session', { roomId, userId, username });
+        this.socket.emit('restore-session', { roomId, userId, username, token });
       });
     } catch (error) {
       console.error('Failed to connect to server:', error);

@@ -1,5 +1,5 @@
 import { makeAutoObservable, runInAction } from 'mobx';
-import { Card, Room, RoomState, User } from '../types';
+import { AuthProfile, Card, Room, RoomState, User } from '../types';
 import { Socket } from 'socket.io-client';
 import { SocketService } from '../services/socket';
 
@@ -7,15 +7,18 @@ export class RetroStore {
   socket: Socket | null = null;
   socketService: SocketService | null = null;
   currentUser: User | null = null;
+  authProfile: AuthProfile | null = null;
   room: Room | null = null;
   cards: Card[] = [];
   phase: 'creation' | 'voting' | 'discussion' = 'creation';
   users: User[] = [];
   error: string | null = null;
+  voteError: { cardId: string; message: string } | null = null;
 
   constructor() {
     makeAutoObservable(this, {}, { autoBind: true });
     this.socketService = new SocketService(this);
+    this.tryRestoreAuth();
     this.tryRestoreSession();
 
     // Обработка закрытия окна/вкладки
@@ -39,6 +42,28 @@ export class RetroStore {
     localStorage.removeItem('username');
   }
 
+  private saveAuth(profile: AuthProfile) {
+    localStorage.setItem('authProfile', JSON.stringify(profile));
+  }
+
+  private tryRestoreAuth() {
+    const raw = localStorage.getItem('authProfile');
+    if (!raw) return;
+
+    try {
+      const parsed = JSON.parse(raw) as AuthProfile;
+      if (parsed?.name && parsed?.type && parsed?.token && parsed?.expiresAt) {
+        if (parsed.expiresAt <= Date.now()) {
+          localStorage.removeItem('authProfile');
+          return;
+        }
+        this.authProfile = parsed;
+      }
+    } catch (error) {
+      localStorage.removeItem('authProfile');
+    }
+  }
+
   private async tryRestoreSession() {
     const userId = localStorage.getItem('userId');
     const roomId = localStorage.getItem('roomId');
@@ -47,7 +72,7 @@ export class RetroStore {
     if (userId && roomId && username && this.socketService) {
       try {
         console.log('Attempting to restore session with:', { userId, roomId, username });
-        await this.socketService.restoreSession(roomId, userId, username);
+        await this.socketService.restoreSession(roomId, userId, username, this.authProfile?.token);
       } catch (error) {
         console.error('Failed to restore session:', error);
         this.clearSession();
@@ -67,6 +92,35 @@ export class RetroStore {
     runInAction(() => {
       this.error = error;
     });
+  }
+
+  setVoteError(cardId: string, message: string) {
+    runInAction(() => {
+      this.voteError = { cardId, message };
+    });
+  }
+
+  clearVoteError() {
+    runInAction(() => {
+      this.voteError = null;
+    });
+  }
+
+  setAuthProfile(profile: AuthProfile | null) {
+    runInAction(() => {
+      this.authProfile = profile;
+      if (profile) {
+        this.saveAuth(profile);
+      } else {
+        localStorage.removeItem('authProfile');
+      }
+    });
+  }
+
+  clearAuthProfile() {
+    this.setAuthProfile(null);
+    this.setRoom(null);
+    this.setError(null);
   }
 
   setCurrentUser(user: User | null) {
@@ -112,6 +166,7 @@ export class RetroStore {
       } else {
         this.currentUser = null;
         this.clearSession();
+        this.clearVoteError();
         console.log('Cleared room and session');
       }
     });
@@ -250,7 +305,7 @@ export class RetroStore {
   }
 
   canEditCard(card: Card): boolean {
-    return this.currentUser?.name === card.createdBy;
+    return this.currentUser?.role === 'admin' || this.currentUser?.name === card.createdBy;
   }
 
   canChangePhase(): boolean {

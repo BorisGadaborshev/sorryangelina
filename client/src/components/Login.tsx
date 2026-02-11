@@ -1,98 +1,517 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { observer } from 'mobx-react-lite';
 import {
   Box,
-  Paper,
-  Tabs,
-  Tab,
-  TextField,
   Button,
   CircularProgress,
-  Typography,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemButton,
-  Divider,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
+  MenuItem,
+  Paper,
+  Tab,
+  Tabs,
+  TextField,
+  Typography
 } from '@mui/material';
 import { RetroStore } from '../store/RetroStore';
+import { AuthProfile, AvailableRoom } from '../types';
+import RoomTiles from './RoomTiles';
 
 interface Props {
   store: RetroStore;
 }
 
-interface AvailableRoom {
-  id: string;
-  usersCount: number;
-  phase: string;
+interface FixedLoginResponse {
+  profile: AuthProfile;
+  isFirstLogin: boolean;
 }
 
+const getApiBase = (): string => (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3001');
+
 const Login: React.FC<Props> = observer(({ store }) => {
-  const [tab, setTab] = useState(0);
-  const [roomId, setRoomId] = useState('');
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
+  const [authTab, setAuthTab] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const [isRoomsLoading, setIsRoomsLoading] = useState(false);
+  const [fixedUsers, setFixedUsers] = useState<string[]>([]);
   const [availableRooms, setAvailableRooms] = useState<AvailableRoom[]>([]);
 
-  useEffect(() => {
-    if (tab === 1) {
-      fetchAvailableRooms();
-    }
-  }, [tab]);
+  const [fixedName, setFixedName] = useState('');
+  const [fixedPassword, setFixedPassword] = useState('');
+  const [accountName, setAccountName] = useState('');
+  const [accountPassword, setAccountPassword] = useState('');
+  const [registerName, setRegisterName] = useState('');
+  const [registerPassword, setRegisterPassword] = useState('');
+  const [guestName, setGuestName] = useState('');
 
-  const fetchAvailableRooms = async () => {
+  const [selectedRoomId, setSelectedRoomId] = useState('');
+  const [createRoomId, setCreateRoomId] = useState('');
+  const [createRoomPassword, setCreateRoomPassword] = useState('');
+  const [joinRoomPassword, setJoinRoomPassword] = useState('');
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [isJoinDialogOpen, setIsJoinDialogOpen] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [deleteRoomId, setDeleteRoomId] = useState('');
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [isDeletingRoom, setIsDeletingRoom] = useState(false);
+
+  const fetchFixedUsers = useCallback(async () => {
     try {
-      const isProd = process.env.NODE_ENV === 'production';
-      const apiBase = isProd ? '' : 'http://localhost:3001';
-      const response = await fetch(`${apiBase}/api/rooms`);
-      const rooms = await response.json();
+      const response = await fetch(`${getApiBase()}/api/auth/fixed-users`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch fixed users');
+      }
+      const data = (await response.json()) as { users: string[] };
+      setFixedUsers(data.users);
+      setFixedName((prev) => (prev || data.users[0] || ''));
+    } catch (error) {
+      store.setError('Не удалось загрузить фиксированные ФИО');
+    }
+  }, [store]);
+
+  const fetchAvailableRooms = useCallback(async () => {
+    setIsRoomsLoading(true);
+    try {
+      const response = await fetch(`${getApiBase()}/api/rooms`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch rooms');
+      }
+      const rooms = (await response.json()) as AvailableRoom[];
       setAvailableRooms(rooms);
     } catch (error) {
-      console.error('Failed to fetch rooms:', error);
-      store.setError('Failed to load available rooms');
+      store.setError('Не удалось загрузить список комнат');
+    } finally {
+      setIsRoomsLoading(false);
     }
+  }, [store]);
+
+  useEffect(() => {
+    fetchFixedUsers();
+  }, [fetchFixedUsers]);
+
+  useEffect(() => {
+    if (store.authProfile) {
+      fetchAvailableRooms();
+    }
+  }, [fetchAvailableRooms, store.authProfile]);
+
+  const handleAuthSuccess = (profile: AuthProfile) => {
+    store.setAuthProfile(profile);
+    store.setError(null);
+    setAccountPassword('');
+    setRegisterPassword('');
+    setFixedPassword('');
   };
 
-  const handleRoomSelect = (selectedRoomId: string) => {
-    setRoomId(selectedRoomId);
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!roomId || !username || !password) return;
-
+  const handleFixedLogin = async () => {
+    if (!fixedName || !fixedPassword) return;
     setIsLoading(true);
     store.setError(null);
-
     try {
-      console.log('Attempting to handle room submission:', { tab, roomId, username });
-      if (tab === 0) {
-        await store.socketService?.createRoom(roomId, password, username);
-      } else {
-        await store.socketService?.joinRoom(roomId, password, username);
-      }
-      console.log('Room operation successful, current store state:', {
-        room: store.room,
-        currentUser: store.currentUser,
-        users: store.users
+      const response = await fetch(`${getApiBase()}/api/auth/fixed-login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: fixedName, password: fixedPassword })
       });
+      const data = (await response.json()) as FixedLoginResponse | { error: string };
+      if (!response.ok) {
+        throw new Error('error' in data ? data.error : 'Не удалось войти');
+      }
+      handleAuthSuccess((data as FixedLoginResponse).profile);
     } catch (error) {
-      console.error('Room operation failed:', error);
-      store.setError(error instanceof Error ? error.message : 'An error occurred');
+      store.setError(error instanceof Error ? error.message : 'Не удалось войти');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const getPhaseTranslation = (phase: string) => {
-    const translations = {
-      'creation': 'Создание',
-      'voting': 'Голосование',
-      'discussion': 'Обсуждение'
-    };
-    return translations[phase as keyof typeof translations] || phase;
+  const handleAccountLogin = async () => {
+    if (!accountName || !accountPassword) return;
+    setIsLoading(true);
+    store.setError(null);
+    try {
+      const response = await fetch(`${getApiBase()}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: accountName, password: accountPassword })
+      });
+      const data = (await response.json()) as { profile?: AuthProfile; error?: string };
+      if (!response.ok || !data.profile) {
+        throw new Error(data.error || 'Не удалось войти в учетку');
+      }
+      handleAuthSuccess(data.profile);
+    } catch (error) {
+      store.setError(error instanceof Error ? error.message : 'Не удалось войти в учетку');
+    } finally {
+      setIsLoading(false);
+    }
   };
+
+  const handleRegister = async () => {
+    if (!registerName || !registerPassword) return;
+    setIsLoading(true);
+    store.setError(null);
+    try {
+      const response = await fetch(`${getApiBase()}/api/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: registerName, password: registerPassword })
+      });
+      const data = (await response.json()) as { profile?: AuthProfile; error?: string };
+      if (!response.ok || !data.profile) {
+        throw new Error(data.error || 'Не удалось создать учетку');
+      }
+      handleAuthSuccess(data.profile);
+    } catch (error) {
+      store.setError(error instanceof Error ? error.message : 'Не удалось создать учетку');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleGuestLogin = async () => {
+    if (!guestName.trim()) return;
+    setIsLoading(true);
+    store.setError(null);
+    try {
+      const response = await fetch(`${getApiBase()}/api/auth/guest`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: guestName.trim() })
+      });
+      const data = (await response.json()) as { profile?: AuthProfile; error?: string };
+      if (!response.ok || !data.profile) {
+        throw new Error(data.error || 'Не удалось войти гостем');
+      }
+      handleAuthSuccess(data.profile);
+    } catch (error) {
+      store.setError(error instanceof Error ? error.message : 'Не удалось войти гостем');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleOpenCreateDialog = () => {
+    setCreateRoomId('');
+    setCreateRoomPassword('');
+    setIsCreateDialogOpen(true);
+  };
+
+  const handleOpenJoinDialog = (roomId: string) => {
+    setSelectedRoomId(roomId);
+    setJoinRoomPassword('');
+    setIsJoinDialogOpen(true);
+  };
+
+  const handleOpenDeleteDialog = (roomId: string) => {
+    setDeleteRoomId(roomId);
+    setDeleteConfirmText('');
+    setIsDeleteDialogOpen(true);
+  };
+
+  const handleCreateRoom = async () => {
+    if (!store.authProfile || !createRoomId.trim() || !createRoomPassword.trim()) return;
+
+    setIsLoading(true);
+    store.setError(null);
+    try {
+      await store.socketService?.createRoom(createRoomId.trim(), createRoomPassword.trim(), store.authProfile.name, store.authProfile.token);
+      setIsCreateDialogOpen(false);
+    } catch (error) {
+      store.setError(error instanceof Error ? error.message : 'Не удалось создать комнату');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleJoinRoom = async () => {
+    if (!store.authProfile || !selectedRoomId.trim() || !joinRoomPassword.trim()) return;
+
+    setIsLoading(true);
+    store.setError(null);
+    try {
+      await store.socketService?.joinRoom(selectedRoomId.trim(), joinRoomPassword.trim(), store.authProfile.name, store.authProfile.token);
+      setIsJoinDialogOpen(false);
+    } catch (error) {
+      store.setError(error instanceof Error ? error.message : 'Не удалось подключиться к комнате');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDeleteRoomFromTile = async () => {
+    if (!store.authProfile || !deleteRoomId || deleteConfirmText.trim() !== deleteRoomId) return;
+
+    setIsDeletingRoom(true);
+    store.setError(null);
+    try {
+      const response = await fetch(`${getApiBase()}/api/rooms/${encodeURIComponent(deleteRoomId)}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${store.authProfile.token}`
+        }
+      });
+      const data = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось удалить комнату');
+      }
+      setIsDeleteDialogOpen(false);
+      setDeleteRoomId('');
+      setDeleteConfirmText('');
+      await fetchAvailableRooms();
+    } catch (error) {
+      store.setError(error instanceof Error ? error.message : 'Не удалось удалить комнату');
+    } finally {
+      setIsDeletingRoom(false);
+    }
+  };
+
+  const renderAuthBlock = () => (
+    <>
+      <Tabs value={authTab} onChange={(_, value) => setAuthTab(value)} variant="scrollable" allowScrollButtonsMobile sx={{ mb: 2 }}>
+        <Tab label="Фиксированные ФИО" />
+        <Tab label="Вход в учетку" />
+        <Tab label="Новая учетка" />
+        <Tab label="Гость" />
+      </Tabs>
+
+      {authTab === 0 && (
+        <>
+          <TextField
+            fullWidth
+            select
+            label="Выберите ФИО"
+            margin="normal"
+            value={fixedName}
+            onChange={(event) => setFixedName(event.target.value)}
+            disabled={isLoading}
+          >
+            {fixedUsers.map((name) => (
+              <MenuItem key={name} value={name}>
+                {name}
+              </MenuItem>
+            ))}
+          </TextField>
+          <TextField
+            fullWidth
+            type="password"
+            label="Пароль (при первом входе будет создан)"
+            margin="normal"
+            value={fixedPassword}
+            onChange={(event) => setFixedPassword(event.target.value)}
+            disabled={isLoading}
+          />
+          <Button fullWidth variant="contained" sx={{ mt: 2 }} onClick={handleFixedLogin} disabled={isLoading || !fixedName || !fixedPassword}>
+            {isLoading ? <CircularProgress size={20} color="inherit" /> : 'Войти по ФИО'}
+          </Button>
+        </>
+      )}
+
+      {authTab === 1 && (
+        <>
+          <TextField
+            fullWidth
+            label="ФИО"
+            margin="normal"
+            value={accountName}
+            onChange={(event) => setAccountName(event.target.value)}
+            disabled={isLoading}
+          />
+          <TextField
+            fullWidth
+            type="password"
+            label="Пароль"
+            margin="normal"
+            value={accountPassword}
+            onChange={(event) => setAccountPassword(event.target.value)}
+            disabled={isLoading}
+          />
+          <Button fullWidth variant="contained" sx={{ mt: 2 }} onClick={handleAccountLogin} disabled={isLoading || !accountName || !accountPassword}>
+            {isLoading ? <CircularProgress size={20} color="inherit" /> : 'Войти'}
+          </Button>
+        </>
+      )}
+
+      {authTab === 2 && (
+        <>
+          <TextField
+            fullWidth
+            label="ФИО"
+            margin="normal"
+            value={registerName}
+            onChange={(event) => setRegisterName(event.target.value)}
+            disabled={isLoading}
+          />
+          <TextField
+            fullWidth
+            type="password"
+            label="Пароль"
+            margin="normal"
+            value={registerPassword}
+            onChange={(event) => setRegisterPassword(event.target.value)}
+            disabled={isLoading}
+          />
+          <Button fullWidth variant="contained" sx={{ mt: 2 }} onClick={handleRegister} disabled={isLoading || !registerName || !registerPassword}>
+            {isLoading ? <CircularProgress size={20} color="inherit" /> : 'Создать учетку'}
+          </Button>
+        </>
+      )}
+
+      {authTab === 3 && (
+        <>
+          <TextField
+            fullWidth
+            label="ФИО гостя"
+            margin="normal"
+            value={guestName}
+            onChange={(event) => setGuestName(event.target.value)}
+            disabled={isLoading}
+            required
+          />
+          <Button fullWidth variant="contained" sx={{ mt: 2 }} onClick={handleGuestLogin} disabled={isLoading || !guestName.trim()}>
+            {isLoading ? <CircularProgress size={20} color="inherit" /> : 'Войти гостем'}
+          </Button>
+        </>
+      )}
+    </>
+  );
+
+  const renderRoomsBlock = () => (
+    <Box
+      sx={{
+        minHeight: '100vh',
+        width: '100%',
+        bgcolor: '#f5f5f5',
+        display: 'flex',
+        flexDirection: 'column',
+        p: { xs: 2, md: 3 }
+      }}
+    >
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 1, mb: 2 }}>
+        <Box>
+          <Typography variant="h5">Выбор комнаты</Typography>
+          <Typography variant="body2" color="text.secondary">
+            Вы вошли как: <b>{store.authProfile?.name}</b>
+          </Typography>
+        </Box>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button variant="outlined" onClick={fetchAvailableRooms} disabled={isRoomsLoading}>
+            Обновить
+          </Button>
+          <Button onClick={() => store.clearAuthProfile()}>Сменить аккаунт</Button>
+        </Box>
+      </Box>
+
+      {store.error && (
+        <Typography color="error" sx={{ mb: 2 }}>
+          {store.error}
+        </Typography>
+      )}
+
+      <Box sx={{ flex: 1 }}>
+        {isRoomsLoading ? (
+          <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <CircularProgress />
+          </Box>
+        ) : (
+          <RoomTiles
+            rooms={availableRooms}
+            currentUserName={store.authProfile?.name || ''}
+            onRoomClick={handleOpenJoinDialog}
+            onCreateClick={handleOpenCreateDialog}
+            onDeleteClick={handleOpenDeleteDialog}
+          />
+        )}
+      </Box>
+
+      <Dialog open={isCreateDialogOpen} onClose={() => setIsCreateDialogOpen(false)} fullWidth maxWidth="xs">
+        <DialogTitle>Создать комнату</DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            fullWidth
+            label="ID комнаты"
+            margin="normal"
+            value={createRoomId}
+            onChange={(event) => setCreateRoomId(event.target.value)}
+          />
+          <TextField
+            fullWidth
+            type="password"
+            label="Пароль комнаты"
+            margin="normal"
+            value={createRoomPassword}
+            onChange={(event) => setCreateRoomPassword(event.target.value)}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setIsCreateDialogOpen(false)}>Отмена</Button>
+          <Button
+            variant="contained"
+            onClick={handleCreateRoom}
+            disabled={isLoading || !createRoomId.trim() || !createRoomPassword.trim()}
+          >
+            {isLoading ? <CircularProgress size={18} color="inherit" /> : 'Создать'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={isJoinDialogOpen} onClose={() => setIsJoinDialogOpen(false)} fullWidth maxWidth="xs">
+        <DialogTitle>Войти в комнату {selectedRoomId}</DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            fullWidth
+            type="password"
+            label="Пароль комнаты"
+            margin="normal"
+            value={joinRoomPassword}
+            onChange={(event) => setJoinRoomPassword(event.target.value)}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setIsJoinDialogOpen(false)}>Отмена</Button>
+          <Button variant="contained" onClick={handleJoinRoom} disabled={isLoading || !joinRoomPassword.trim()}>
+            {isLoading ? <CircularProgress size={18} color="inherit" /> : 'Войти'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={isDeleteDialogOpen} onClose={() => setIsDeleteDialogOpen(false)} fullWidth maxWidth="xs">
+        <DialogTitle>Точное подтверждение удаления</DialogTitle>
+        <DialogContent>
+          <DialogContentText sx={{ mb: 1.5 }}>
+            Чтобы удалить комнату, введите ее ID точно как показано: <b>{deleteRoomId}</b>
+          </DialogContentText>
+          <TextField
+            autoFocus
+            fullWidth
+            label="Введите ID комнаты"
+            value={deleteConfirmText}
+            onChange={(event) => setDeleteConfirmText(event.target.value)}
+            margin="normal"
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setIsDeleteDialogOpen(false)}>Отмена</Button>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={handleDeleteRoomFromTile}
+            disabled={isDeletingRoom || deleteConfirmText.trim() !== deleteRoomId}
+          >
+            {isDeletingRoom ? <CircularProgress size={18} color="inherit" /> : 'Удалить комнату'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
+  );
+
+  if (store.authProfile) {
+    return renderRoomsBlock();
+  }
 
   return (
     <Box
@@ -102,109 +521,22 @@ const Login: React.FC<Props> = observer(({ store }) => {
         alignItems: 'center',
         justifyContent: 'center',
         bgcolor: '#f5f5f5',
+        p: 2
       }}
     >
-      <Paper
-        elevation={3}
-        sx={{
-          p: 4,
-          width: '100%',
-          maxWidth: 400,
-        }}
-      >
-        <Tabs
-          value={tab}
-          onChange={(_, newValue) => setTab(newValue)}
-          variant="fullWidth"
-          sx={{ mb: 3 }}
-        >
-          <Tab label="Создать комнату" />
-          <Tab label="Присоединиться" />
-        </Tabs>
-
+      <Paper elevation={3} sx={{ p: 3, width: '100%', maxWidth: 720 }}>
+        <Typography variant="h5" sx={{ mb: 2 }}>
+          Retro Board
+        </Typography>
         {store.error && (
           <Typography color="error" sx={{ mb: 2 }}>
             {store.error}
           </Typography>
         )}
-
-        <form onSubmit={handleSubmit}>
-          {tab === 1 && availableRooms.length > 0 && (
-            <Box sx={{ mb: 2 }}>
-              <Typography variant="subtitle1" sx={{ mb: 1 }}>
-                Доступные комнаты:
-              </Typography>
-              <List>
-                {availableRooms.map((room) => (
-                  <React.Fragment key={room.id}>
-                    <ListItemButton
-                      selected={roomId === room.id}
-                      onClick={() => handleRoomSelect(room.id)}
-                    >
-                      <ListItemText
-                        primary={`Комната: ${room.id}`}
-                        secondary={`Участников: ${room.usersCount} | Фаза: ${getPhaseTranslation(room.phase)}`}
-                      />
-                    </ListItemButton>
-                    <Divider />
-                  </React.Fragment>
-                ))}
-              </List>
-            </Box>
-          )}
-
-          {tab === 1 && availableRooms.length === 0 && (
-            <Typography color="text.secondary" sx={{ mb: 2 }}>
-              Нет доступных комнат
-            </Typography>
-          )}
-
-          <TextField
-            fullWidth
-            label="ID комнаты"
-            value={roomId}
-            onChange={(e) => setRoomId(e.target.value)}
-            margin="normal"
-            required
-            disabled={isLoading}
-          />
-          <TextField
-            fullWidth
-            label="Ваше имя"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            margin="normal"
-            required
-            disabled={isLoading}
-          />
-          <TextField
-            fullWidth
-            label={tab === 0 ? "Установить пароль" : "Пароль комнаты"}
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            margin="normal"
-            required
-            disabled={isLoading}
-          />
-          <Button
-            type="submit"
-            variant="contained"
-            fullWidth
-            size="large"
-            sx={{ mt: 3 }}
-            disabled={isLoading || !roomId || !username || !password}
-          >
-            {isLoading ? (
-              <CircularProgress size={24} color="inherit" />
-            ) : (
-              tab === 0 ? 'Создать комнату' : 'Присоединиться'
-            )}
-          </Button>
-        </form>
+        {renderAuthBlock()}
       </Paper>
     </Box>
   );
 });
 
-export default Login; 
+export default Login;

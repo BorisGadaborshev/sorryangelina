@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { observer } from 'mobx-react-lite';
-import { Box, AppBar, Toolbar, Typography, Button, ButtonGroup, CircularProgress, IconButton, Tooltip, Tabs, Tab, useMediaQuery } from '@mui/material';
+import { Box, AppBar, Toolbar, Typography, Button, ButtonGroup, CircularProgress, IconButton, Tooltip, Tabs, Tab, useMediaQuery, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions } from '@mui/material';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import PeopleIcon from '@mui/icons-material/People';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
+import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import RetroColumn from './RetroColumn';
 import UserList from './UserList';
 import { RetroStore } from '../store/RetroStore';
@@ -19,6 +20,7 @@ const Board: React.FC<Props> = observer(({ store }) => {
   const [isUserListVisible, setIsUserListVisible] = useState(true);
   const isMobile = useMediaQuery('(max-width:600px)');
   const [mobileTab, setMobileTab] = useState<number>(0); // 0 - доска, 1 - участники
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -142,6 +144,17 @@ const Board: React.FC<Props> = observer(({ store }) => {
               </Box>
             ) : null;
           })()}
+          {store.currentUser?.role === 'admin' && (
+            <Tooltip title="Удалить комнату">
+              <IconButton
+                color="inherit"
+                onClick={() => setIsDeleteDialogOpen(true)}
+                size="small"
+              >
+                <DeleteForeverIcon />
+              </IconButton>
+            </Tooltip>
+          )}
           {isMobile ? (
             <Tabs value={mobileTab} onChange={(_, v) => setMobileTab(v)} textColor="inherit" indicatorColor="secondary" sx={{ width: '100%' }}>
               <Tab label="Доска" />
@@ -232,6 +245,28 @@ const Board: React.FC<Props> = observer(({ store }) => {
           </>
         )}
       </Box>
+
+      <Dialog open={isDeleteDialogOpen} onClose={() => setIsDeleteDialogOpen(false)}>
+        <DialogTitle>Удалить комнату?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Комната будет удалена для всех участников. Это действие нельзя отменить.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setIsDeleteDialogOpen(false)}>Отмена</Button>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={() => {
+              setIsDeleteDialogOpen(false);
+              store.socketService?.deleteRoom();
+            }}
+          >
+            Удалить комнату
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 });

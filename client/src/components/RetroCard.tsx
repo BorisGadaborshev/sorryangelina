@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { observer } from 'mobx-react-lite';
 import { Card as CardType } from '../types';
-import { Card, CardContent, Typography, IconButton, TextField, Box, Tooltip } from '@mui/material';
-import { Delete, Edit, ThumbUp, ThumbDown } from '@mui/icons-material';
+import { Card, CardContent, Typography, IconButton, TextField, Box, Tooltip, Alert } from '@mui/material';
+import { Delete, Edit } from '@mui/icons-material';
 import { RetroStore } from '../store/RetroStore';
 
 interface Props {
@@ -90,14 +90,16 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
             }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                  <Tooltip title="Нравится">
+                  <Tooltip title="Персик">
                     <IconButton
                       size="small"
                       onClick={() => handleVote('like')}
                       color={hasLiked ? 'primary' : 'default'}
                       disabled={store.phase !== 'voting'}
                     >
-                      <ThumbUp />
+                      <Typography component="span" sx={{ fontSize: '1.05rem', lineHeight: 1 }}>
+                        🍑
+                      </Typography>
                     </IconButton>
                   </Tooltip>
                   <Typography variant="body2" sx={{ ml: 0.5 }}>
@@ -105,14 +107,16 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
                   </Typography>
                 </Box>
                 <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                  <Tooltip title="Не нравится">
+                  <Tooltip title="Тухлый помидор">
                     <IconButton
                       size="small"
                       onClick={() => handleVote('dislike')}
                       color={hasDisliked ? 'error' : 'default'}
                       disabled={store.phase !== 'voting'}
                     >
-                      <ThumbDown />
+                      <Typography component="span" sx={{ fontSize: '1.05rem', lineHeight: 1 }}>
+                        🍅
+                      </Typography>
                     </IconButton>
                   </Tooltip>
                   <Typography variant="body2" sx={{ ml: 0.5 }}>
@@ -131,6 +135,11 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
                 </Box>
               )}
             </Box>
+            {store.voteError?.cardId === card.id && (
+              <Alert severity="warning" sx={{ mt: 1 }}>
+                {store.voteError.message}
+              </Alert>
+            )}
           </>
         )}
       </CardContent>

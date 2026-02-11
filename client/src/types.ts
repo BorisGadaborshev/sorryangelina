@@ -29,3 +29,20 @@ export interface RoomState {
   phase: 'creation' | 'voting' | 'discussion';
   users: User[];
 } 
+
+export type AuthProfileType = 'fixed' | 'registered' | 'guest';
+
+export interface AuthProfile {
+  name: string;
+  type: AuthProfileType;
+  token: string;
+  expiresAt: number;
+}
+
+export interface AvailableRoom {
+  id: string;
+  usersCount: number;
+  phase: string;
+  owner: string;
+  createdAt?: string;
+}
