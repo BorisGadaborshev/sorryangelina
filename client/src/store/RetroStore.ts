@@ -1,5 +1,5 @@
 import { makeAutoObservable, runInAction } from 'mobx';
-import { AuthProfile, Card, ChatMessage, PhaseTimerState, Room, RoomState, User } from '../types';
+import { AuthProfile, Card, ChatMessage, PhaseTimerState, Room, RoomState, User, WhiteboardStroke } from '../types';
 import { Socket } from 'socket.io-client';
 import { SocketService } from '../services/socket';
 
@@ -16,6 +16,7 @@ export class RetroStore {
   voteError: { cardId: string; message: string } | null = null;
   phaseTimer: PhaseTimerState = { durationSeconds: 0, remainingSeconds: 0, running: false };
   chatMessages: ChatMessage[] = [];
+  whiteboardStrokes: WhiteboardStroke[] = [];
 
   constructor() {
     makeAutoObservable(this, {}, { autoBind: true });
@@ -129,6 +130,30 @@ export class RetroStore {
     });
   }
 
+  setWhiteboardHistory(strokes: WhiteboardStroke[]) {
+    runInAction(() => {
+      this.whiteboardStrokes = strokes;
+    });
+  }
+
+  addWhiteboardStroke(stroke: WhiteboardStroke) {
+    runInAction(() => {
+      if (this.whiteboardStrokes.some((current) => current.id === stroke.id)) {
+        return;
+      }
+      this.whiteboardStrokes.push(stroke);
+      if (this.whiteboardStrokes.length > 5000) {
+        this.whiteboardStrokes = this.whiteboardStrokes.slice(-5000);
+      }
+    });
+  }
+
+  clearWhiteboard() {
+    runInAction(() => {
+      this.whiteboardStrokes = [];
+    });
+  }
+
   setAuthProfile(profile: AuthProfile | null) {
     runInAction(() => {
       this.authProfile = profile;
@@ -192,6 +217,7 @@ export class RetroStore {
         this.clearVoteError();
         this.phaseTimer = { durationSeconds: 0, remainingSeconds: 0, running: false };
         this.chatMessages = [];
+        this.whiteboardStrokes = [];
         console.log('Cleared room and session');
       }
     });

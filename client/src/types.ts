@@ -47,6 +47,20 @@ export interface ChatMessage {
   timestamp: number;
 }
 
+export interface WhiteboardPoint {
+  x: number;
+  y: number;
+}
+
+export interface WhiteboardStroke {
+  id: string;
+  userId: string;
+  color: string;
+  width: number;
+  tool: 'pen' | 'eraser';
+  points: WhiteboardPoint[];
+}
+
 export type Mood = 'great' | 'good' | 'neutral' | 'bad' | 'awful';
 
 export type AuthProfileType = 'fixed' | 'registered' | 'guest';

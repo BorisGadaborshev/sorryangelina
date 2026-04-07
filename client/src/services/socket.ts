@@ -1,6 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { RetroStore } from '../store/RetroStore';
-import { Room, RoomState, User, Card, PhaseTimerState, ChatMessage, Mood } from '../types';
+import { Room, RoomState, User, Card, PhaseTimerState, ChatMessage, Mood, WhiteboardStroke } from '../types';
 
 export class SocketService {
   private socket: Socket;
@@ -196,6 +196,18 @@ export class SocketService {
 
     this.socket.on('chat-message', (message: ChatMessage) => {
       this.store.addChatMessage(message);
+    });
+
+    this.socket.on('whiteboard-history', ({ strokes }: { strokes: WhiteboardStroke[] }) => {
+      this.store.setWhiteboardHistory(strokes);
+    });
+
+    this.socket.on('whiteboard-stroke', (stroke: WhiteboardStroke) => {
+      this.store.addWhiteboardStroke(stroke);
+    });
+
+    this.socket.on('whiteboard-cleared', () => {
+      this.store.clearWhiteboard();
     });
 
     this.socket.on('user-kicked', () => {
@@ -458,6 +470,14 @@ export class SocketService {
 
   setUserMood(mood: Mood): void {
     this.socket.emit('set-user-mood', { mood });
+  }
+
+  sendWhiteboardStroke(stroke: WhiteboardStroke): void {
+    this.socket.emit('whiteboard-stroke', stroke);
+  }
+
+  clearWhiteboard(): void {
+    this.socket.emit('clear-whiteboard');
   }
 
   async restoreSession(roomId: string, userId: string, username: string, token?: string): Promise<void> {

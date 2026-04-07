@@ -106,6 +106,7 @@ app.delete('/api/rooms/:roomId', async (req, res) => {
     roomStates.delete(roomId);
     clearRoomTimer(roomId, false);
     roomChats.delete(roomId);
+    roomWhiteboards.delete(roomId);
 
     res.json({ message: 'Room deleted successfully' });
   } catch (error) {
@@ -267,8 +268,23 @@ interface ChatMessage {
   timestamp: number;
 }
 
+interface WhiteboardPoint {
+  x: number;
+  y: number;
+}
+
+interface WhiteboardStroke {
+  id: string;
+  userId: string;
+  color: string;
+  width: number;
+  tool: 'pen' | 'eraser';
+  points: WhiteboardPoint[];
+}
+
 const roomTimers = new Map<string, RoomTimerSession>();
 const roomChats = new Map<string, ChatMessage[]>();
+const roomWhiteboards = new Map<string, WhiteboardStroke[]>();
 
 const getRemainingSeconds = (endAt: number): number => {
   return Math.max(0, Math.ceil((endAt - Date.now()) / 1000));
@@ -328,6 +344,33 @@ const appendChatMessage = (roomId: string, message: ChatMessage): ChatMessage[] 
   return next;
 };
 
+const normalizeWhiteboardStroke = (value: unknown): WhiteboardStroke | null => {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Partial<WhiteboardStroke>;
+  if (
+    typeof raw.id !== 'string' ||
+    typeof raw.userId !== 'string' ||
+    typeof raw.color !== 'string' ||
+    typeof raw.width !== 'number' ||
+    (raw.tool !== 'pen' && raw.tool !== 'eraser') ||
+    !Array.isArray(raw.points)
+  ) {
+    return null;
+  }
+  const points = raw.points
+    .filter((point): point is WhiteboardPoint => !!point && typeof point.x === 'number' && typeof point.y === 'number')
+    .slice(0, 1000);
+  if (points.length < 2) return null;
+  return {
+    id: raw.id.slice(0, 100),
+    userId: raw.userId.slice(0, 100),
+    color: raw.color.slice(0, 30),
+    width: Math.max(1, Math.min(40, raw.width)),
+    tool: raw.tool,
+    points
+  };
+};
+
 io.on('connection', (socket) => {
   connectionCount++;
   console.log(`Client connected (${connectionCount} total):`, socket.id);
@@ -374,6 +417,7 @@ io.on('connection', (socket) => {
       });
       emitTimerToSocket(socket, roomId);
       socket.emit('chat-history', { messages: roomChats.get(roomId) || [] });
+      socket.emit('whiteboard-history', { strokes: roomWhiteboards.get(roomId) || [] });
     } catch (error) {
       console.error('Error restoring session:', error);
       socket.emit('session-expired');
@@ -422,6 +466,7 @@ io.on('connection', (socket) => {
       });
       emitTimerToSocket(socket, roomId);
       socket.emit('chat-history', { messages: roomChats.get(roomId) || [] });
+      socket.emit('whiteboard-history', { strokes: roomWhiteboards.get(roomId) || [] });
     } catch (error) {
       console.error('Error creating room:', error);
       socket.emit('error', 'Failed to create room');
@@ -486,6 +531,7 @@ io.on('connection', (socket) => {
       });
       emitTimerToSocket(socket, roomId);
       socket.emit('chat-history', { messages: roomChats.get(roomId) || [] });
+      socket.emit('whiteboard-history', { strokes: roomWhiteboards.get(roomId) || [] });
       if (!existingUser) {
         socket.to(roomId).emit('user-joined', user);
       } else {
@@ -873,6 +919,22 @@ io.on('connection', (socket) => {
     io.to(currentUser.roomId).emit('chat-message', message);
   });
 
+  socket.on('whiteboard-stroke', (payload) => {
+    if (!currentUser?.roomId) return;
+    const stroke = normalizeWhiteboardStroke(payload);
+    if (!stroke) return;
+    const current = roomWhiteboards.get(currentUser.roomId) || [];
+    const next = [...current, stroke].slice(-5000);
+    roomWhiteboards.set(currentUser.roomId, next);
+    io.to(currentUser.roomId).emit('whiteboard-stroke', stroke);
+  });
+
+  socket.on('clear-whiteboard', () => {
+    if (!currentUser?.roomId) return;
+    roomWhiteboards.set(currentUser.roomId, []);
+    io.to(currentUser.roomId).emit('whiteboard-cleared');
+  });
+
   socket.on('delete-room', async () => {
     if (!currentUser?.roomId) {
       socket.emit('error', 'Room not found');
@@ -898,6 +960,7 @@ io.on('connection', (socket) => {
       roomStates.delete(roomId);
       clearRoomTimer(roomId, false);
       roomChats.delete(roomId);
+      roomWhiteboards.delete(roomId);
 
       io.to(roomId).emit('room-deleted');
       io.in(roomId).socketsLeave(roomId);

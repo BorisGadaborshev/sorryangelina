@@ -11,49 +11,60 @@ interface Props {
 }
 
 const DiscussionView: React.FC<Props> = observer(({ store }) => {
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [carouselStartIndex, setCarouselStartIndex] = useState(0);
+  const [unviewedCardIds, setUnviewedCardIds] = useState<string[]>([]);
+  const [viewedCardIds, setViewedCardIds] = useState<string[]>([]);
   const carouselSize = 3;
   const sortedCards = store.sortedCards;
   const theme = useTheme();
 
   useEffect(() => {
-    setCurrentIndex((prev) => {
-      if (sortedCards.length === 0) return 0;
-      return Math.min(prev, sortedCards.length - 1);
+    const availableIds = sortedCards.map((card) => card.id);
+    setUnviewedCardIds((prev) => {
+      if (prev.length === 0) {
+        return availableIds;
+      }
+      const filtered = prev.filter((id) => availableIds.includes(id));
+      const appended = availableIds.filter((id) => !filtered.includes(id));
+      return [...filtered, ...appended];
     });
-  }, [sortedCards.length]);
+    setViewedCardIds((prev) => prev.filter((id) => availableIds.includes(id)));
+  }, [sortedCards]);
 
-  const remainingCards = useMemo(
-    () => sortedCards.filter((_, index) => index !== currentIndex),
-    [sortedCards, currentIndex]
+  const cardsById = useMemo(
+    () => new Map(sortedCards.map((card) => [card.id, card])),
+    [sortedCards]
   );
 
-  useEffect(() => {
-    setCarouselStartIndex((prev) => {
-      const maxStart = Math.max(0, remainingCards.length - carouselSize);
-      return Math.min(prev, maxStart);
-    });
-  }, [remainingCards.length]);
+  const unviewedCards = useMemo(
+    () => unviewedCardIds.map((id) => cardsById.get(id)).filter(Boolean) as CardType[],
+    [unviewedCardIds, cardsById]
+  );
 
-  const visibleCarouselCards = remainingCards.slice(carouselStartIndex, carouselStartIndex + carouselSize);
-  const canSlideLeft = carouselStartIndex > 0;
-  const canSlideRight = carouselStartIndex + carouselSize < remainingCards.length;
+  const currentCard = unviewedCards[0];
+  const remainingCards = unviewedCards.slice(1);
+  const visibleCarouselCards = remainingCards.slice(0, carouselSize);
 
-  const handleCarouselLeft = () => {
-    setCarouselStartIndex((prev) => Math.max(0, prev - 1));
+  const handleNextCard = () => {
+    if (!currentCard) return;
+    setViewedCardIds((prev) => [...prev, currentCard.id]);
+    setUnviewedCardIds((prev) => prev.slice(1));
   };
 
-  const handleCarouselRight = () => {
-    setCarouselStartIndex((prev) => Math.min(prev + 1, Math.max(0, remainingCards.length - carouselSize)));
+  const handlePreviousCard = () => {
+    setViewedCardIds((prevViewed) => {
+      if (prevViewed.length === 0) return prevViewed;
+      const previousCardId = prevViewed[prevViewed.length - 1];
+      setUnviewedCardIds((prevUnviewed) => [previousCardId, ...prevUnviewed]);
+      return prevViewed.slice(0, -1);
+    });
   };
 
   const handleCardSelect = (card: CardType) => {
-    const nextIndex = sortedCards.findIndex((current) => current.id === card.id);
-    if (nextIndex !== -1) {
-      setCurrentIndex(nextIndex);
-      setCarouselStartIndex(0);
-    }
+    setUnviewedCardIds((prev) => {
+      const index = prev.indexOf(card.id);
+      if (index <= 0) return prev;
+      return [card.id, ...prev.slice(0, index), ...prev.slice(index + 1)];
+    });
   };
 
   const getCardColor = (card: CardType) => {
@@ -71,8 +82,6 @@ const DiscussionView: React.FC<Props> = observer(({ store }) => {
     }[card.type];
   };
 
-  const currentCard = sortedCards[currentIndex];
-
   if (!currentCard) {
     return (
       <Box sx={{ 
@@ -82,7 +91,7 @@ const DiscussionView: React.FC<Props> = observer(({ store }) => {
         height: '100%',
         width: '100%'
       }}>
-        <Typography variant="h6">Нет карточек для обсуждения</Typography>
+        <Typography variant="h6">Все карточки просмотрены</Typography>
       </Box>
     );
   }
@@ -105,9 +114,25 @@ const DiscussionView: React.FC<Props> = observer(({ store }) => {
         alignItems: 'center',
         gap: 4
       }}>
-        <Typography variant="h6">
-          Карточка {currentIndex + 1} из {sortedCards.length}
-        </Typography>
+        <Box sx={{ width: '100%', maxWidth: '600px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Tooltip title="Вернуть предыдущую карточку">
+            <span>
+              <IconButton onClick={handlePreviousCard} disabled={viewedCardIds.length === 0}>
+                <NavigateBefore />
+              </IconButton>
+            </span>
+          </Tooltip>
+          <Typography variant="h6">
+            Осталось {unviewedCards.length} из {sortedCards.length}
+          </Typography>
+          <Tooltip title="Следующая карточка (текущая будет убрана из списка)">
+            <span>
+              <IconButton onClick={handleNextCard} disabled={!currentCard}>
+                <NavigateNext />
+              </IconButton>
+            </span>
+          </Tooltip>
+        </Box>
 
         <Paper
           elevation={3}
@@ -173,66 +198,48 @@ const DiscussionView: React.FC<Props> = observer(({ store }) => {
           <Typography variant="subtitle2" sx={{ mb: 1.5 }}>
             Остальные карточки
           </Typography>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Tooltip title="Предыдущие карточки">
-              <span>
-                <IconButton onClick={handleCarouselLeft} disabled={!canSlideLeft}>
-                  <NavigateBefore />
-                </IconButton>
-              </span>
-            </Tooltip>
+          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 1, width: '100%' }}>
+            {visibleCarouselCards.map((card) => (
+              <Paper
+                key={card.id}
+                elevation={2}
+                onClick={() => handleCardSelect(card)}
+                sx={{
+                  p: 1.5,
+                  cursor: 'pointer',
+                  minHeight: 120,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  backgroundColor: getCardColor(card),
+                  color: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.92)' : 'inherit'
+                }}
+              >
+                <Typography variant="body2" sx={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {card.text}
+                </Typography>
+                {card.imageUrl && (
+                  <Box
+                    component="img"
+                    src={card.imageUrl}
+                    alt="thumb"
+                    sx={{
+                      width: '100%',
+                      height: 60,
+                      objectFit: 'cover',
+                      borderRadius: 1
+                    }}
+                  />
+                )}
+                <Typography variant="caption" color="text.secondary">
+                  🍑 {card.likes?.length || 0} | 🍅 {card.dislikes?.length || 0}
+                </Typography>
+              </Paper>
+            ))}
 
-            <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 1, width: '100%' }}>
-              {visibleCarouselCards.map((card) => (
-                <Paper
-                  key={card.id}
-                  elevation={2}
-                  onClick={() => handleCardSelect(card)}
-                  sx={{
-                    p: 1.5,
-                    cursor: 'pointer',
-                    minHeight: 120,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'space-between',
-                    backgroundColor: getCardColor(card),
-                    color: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.92)' : 'inherit'
-                  }}
-                >
-                  <Typography variant="body2" sx={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {card.text}
-                  </Typography>
-                  {card.imageUrl && (
-                    <Box
-                      component="img"
-                      src={card.imageUrl}
-                      alt="thumb"
-                      sx={{
-                        width: '100%',
-                        height: 60,
-                        objectFit: 'cover',
-                        borderRadius: 1
-                      }}
-                    />
-                  )}
-                  <Typography variant="caption" color="text.secondary">
-                    🍑 {card.likes?.length || 0} | 🍅 {card.dislikes?.length || 0}
-                  </Typography>
-                </Paper>
-              ))}
-
-              {Array.from({ length: Math.max(0, carouselSize - visibleCarouselCards.length) }).map((_, idx) => (
-                <Box key={`empty-${idx}`} />
-              ))}
-            </Box>
-
-            <Tooltip title="Следующие карточки">
-              <span>
-                <IconButton onClick={handleCarouselRight} disabled={!canSlideRight}>
-                  <NavigateNext />
-                </IconButton>
-              </span>
-            </Tooltip>
+            {Array.from({ length: Math.max(0, carouselSize - visibleCarouselCards.length) }).map((_, idx) => (
+              <Box key={`empty-${idx}`} />
+            ))}
           </Box>
         </Box>
       </Box>

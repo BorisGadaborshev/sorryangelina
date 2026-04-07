@@ -11,11 +11,15 @@ import DarkModeIcon from '@mui/icons-material/DarkMode';
 import LightModeIcon from '@mui/icons-material/LightMode';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
+import BrushIcon from '@mui/icons-material/Brush';
+import CleaningServicesIcon from '@mui/icons-material/CleaningServices';
+import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import RetroColumn from './RetroColumn';
 import UserList from './UserList';
 import { RetroStore } from '../store/RetroStore';
 import DiscussionView from './DiscussionView';
 import ChatTerminal from './ChatTerminal';
+import CollaborativeWhiteboard from './CollaborativeWhiteboard';
 import { Mood } from '../types';
 
 interface Props {
@@ -31,11 +35,15 @@ const MOOD_OPTIONS: Array<{ value: Mood; emoji: string; label: string; color: st
   { value: 'bad', emoji: '🙁', label: 'Плохо', color: '#e9b000', labelColor: '#1f1f1f' },
   { value: 'awful', emoji: '😠', label: 'Злой', color: '#ff5b62', labelColor: '#ffffff' }
 ];
+const WHITEBOARD_COLORS = ['#111111', '#006dff', '#00a878', '#ff6b00', '#e11d48', '#7c3aed'];
 
 const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) => {
   const [isReady, setIsReady] = useState(false);
   const [isUserListVisible, setIsUserListVisible] = useState(true);
   const [isChatVisible, setIsChatVisible] = useState(false);
+  const [isDrawEnabled, setIsDrawEnabled] = useState(false);
+  const [whiteboardTool, setWhiteboardTool] = useState<'pen' | 'eraser'>('pen');
+  const [whiteboardColor, setWhiteboardColor] = useState(WHITEBOARD_COLORS[0]);
   const isMobile = useMediaQuery('(max-width:600px)');
   const isCompactDesktop = useMediaQuery('(max-width:1280px)');
   const [mobileTab, setMobileTab] = useState<number>(0); // 0 - доска, 1 - участники
@@ -90,6 +98,13 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   };
 
   const isTimerMenuOpen = Boolean(timerAnchorEl);
+  const canDrawOnBoard = !isMobile && (store.phase === 'creation' || store.phase === 'voting');
+
+  useEffect(() => {
+    if (!canDrawOnBoard && isDrawEnabled) {
+      setIsDrawEnabled(false);
+    }
+  }, [canDrawOnBoard, isDrawEnabled]);
 
   const handleDragEnd = (result: DropResult) => {
     const { destination, source, draggableId } = result;
@@ -477,22 +492,107 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                 />
               </Box>
               <Box sx={{ p: 0.75, borderTop: '1px solid', borderColor: 'divider', display: 'flex', justifyContent: 'center' }}>
-                <Tooltip title={isChatVisible ? 'Скрыть чат' : 'Показать чат'}>
-                  <IconButton
-                    size="small"
-                    color={isChatVisible ? 'primary' : 'default'}
-                    onClick={() => setIsChatVisible(!isChatVisible)}
-                  >
-                    <ChatBubbleOutlineIcon />
-                  </IconButton>
-                </Tooltip>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap', justifyContent: 'center' }}>
+                  <Tooltip title={isChatVisible ? 'Скрыть чат' : 'Показать чат'}>
+                    <IconButton
+                      size="small"
+                      color={isChatVisible ? 'primary' : 'default'}
+                      onClick={() => setIsChatVisible(!isChatVisible)}
+                    >
+                      <ChatBubbleOutlineIcon />
+                    </IconButton>
+                  </Tooltip>
+                  {canDrawOnBoard && (
+                    <>
+                      <Tooltip title={isDrawEnabled ? 'Выключить рисование' : 'Включить рисование'}>
+                        <IconButton
+                          size="small"
+                          color={isDrawEnabled ? 'primary' : 'default'}
+                          onClick={() => setIsDrawEnabled((prev) => !prev)}
+                        >
+                          <BrushIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      {isDrawEnabled && (
+                        <>
+                          <Tooltip title="Перо">
+                            <IconButton
+                              size="small"
+                              color={whiteboardTool === 'pen' ? 'primary' : 'default'}
+                              onClick={() => {
+                                setWhiteboardTool('pen');
+                                if (!isDrawEnabled) setIsDrawEnabled(true);
+                              }}
+                            >
+                              <BrushIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Ластик">
+                            <IconButton
+                              size="small"
+                              color={whiteboardTool === 'eraser' ? 'primary' : 'default'}
+                              onClick={() => {
+                                setWhiteboardTool('eraser');
+                                if (!isDrawEnabled) setIsDrawEnabled(true);
+                              }}
+                            >
+                              <CleaningServicesIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          {WHITEBOARD_COLORS.map((item) => (
+                            <Button
+                              key={item}
+                              onClick={() => {
+                                setWhiteboardColor(item);
+                                setWhiteboardTool('pen');
+                                if (!isDrawEnabled) setIsDrawEnabled(true);
+                              }}
+                              sx={{
+                                minWidth: 16,
+                                width: 16,
+                                height: 16,
+                                p: 0,
+                                borderRadius: '50%',
+                                bgcolor: item,
+                                border: whiteboardColor === item && whiteboardTool === 'pen' ? '2px solid #111' : '1px solid rgba(0,0,0,0.2)'
+                              }}
+                            />
+                          ))}
+                          <Tooltip title="Очистить">
+                            <IconButton
+                              size="small"
+                              color="error"
+                              onClick={() => {
+                                store.clearWhiteboard();
+                                store.socketService?.clearWhiteboard();
+                              }}
+                            >
+                              <DeleteSweepIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </>
+                      )}
+                    </>
+                  )}
+                </Box>
               </Box>
             </Box>
             <Box sx={{ 
               flexGrow: 1,
-              overflowY: 'auto'
+              overflowY: 'auto',
+              position: 'relative'
             }}>
               {renderContent()}
+              {canDrawOnBoard && (
+                <>
+                  <CollaborativeWhiteboard
+                    store={store}
+                    enabled={isDrawEnabled}
+                    tool={whiteboardTool}
+                    color={whiteboardColor}
+                  />
+                </>
+              )}
             </Box>
             {isChatVisible && (
               <Box

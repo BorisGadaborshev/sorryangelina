@@ -395,6 +395,12 @@ const Login: React.FC<Props> = observer(({ store }) => {
                 margin="normal"
                 value={fixedPassword}
                 onChange={(event) => setFixedPassword(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    handleFixedLogin();
+                  }
+                }}
                 disabled={isLoading}
               />
               <Button fullWidth variant="contained" sx={{ mt: 2 }} onClick={handleFixedLogin} disabled={isLoading || !fixedName || !fixedPassword}>
@@ -422,6 +428,12 @@ const Login: React.FC<Props> = observer(({ store }) => {
             margin="normal"
             value={accountPassword}
             onChange={(event) => setAccountPassword(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                handleAccountLogin();
+              }
+            }}
             disabled={isLoading}
           />
           <Button fullWidth variant="contained" sx={{ mt: 2 }} onClick={handleAccountLogin} disabled={isLoading || !accountName || !accountPassword}>
@@ -447,6 +459,12 @@ const Login: React.FC<Props> = observer(({ store }) => {
             margin="normal"
             value={registerPassword}
             onChange={(event) => setRegisterPassword(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                handleRegister();
+              }
+            }}
             disabled={isLoading}
           />
           <Button fullWidth variant="contained" sx={{ mt: 2 }} onClick={handleRegister} disabled={isLoading || !registerName || !registerPassword}>
@@ -541,6 +559,12 @@ const Login: React.FC<Props> = observer(({ store }) => {
             margin="normal"
             value={createRoomPassword}
             onChange={(event) => setCreateRoomPassword(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                handleCreateRoom();
+              }
+            }}
           />
         </DialogContent>
         <DialogActions>
@@ -573,6 +597,12 @@ const Login: React.FC<Props> = observer(({ store }) => {
             onChange={(event) => {
               setJoinRoomPassword(event.target.value);
               if (joinRoomError) setJoinRoomError(null);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                handleJoinRoom();
+              }
             }}
           />
         </DialogContent>
@@ -634,6 +664,12 @@ const Login: React.FC<Props> = observer(({ store }) => {
             onChange={(event) => {
               setInviteRoomPassword(event.target.value);
               if (inviteCopySuccess) setInviteCopySuccess(false);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                handleCopyInvite();
+              }
             }}
           />
           {inviteRoomPassword.trim() && (
@@ -724,6 +760,12 @@ const Login: React.FC<Props> = observer(({ store }) => {
             onChange={(event) => {
               setSuboInput(event.target.value);
               if (suboError) setSuboError(null);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                handleSuboSubmit();
+              }
             }}
             error={Boolean(suboError)}
             helperText={suboError || 'Формат: NNNN-N'}

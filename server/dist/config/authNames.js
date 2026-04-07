@@ -11,8 +11,7 @@ exports.FIXED_AUTH_NAMES = [
     'Чиненкова Вера Николаевна',
     'Острогожская Анастасия Игоревна',
     'Прохоров Андрей Евгеньевич',
-    'Обозный Сергей Павлович',
-    'Савичева Екатерина Владимировна'
+    'Обозный Сергей Павлович'
 ];
 const normalizeAuthName = (name) => name.trim().replace(/\s+/g, ' ');
 exports.normalizeAuthName = normalizeAuthName;
