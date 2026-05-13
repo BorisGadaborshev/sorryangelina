@@ -1,4 +1,5 @@
 export type Mood = 'great' | 'good' | 'neutral' | 'bad' | 'awful';
+export type Phase = 'creation' | 'voting' | 'discussion' | 'rating';
 
 export interface User {
   id: string;
@@ -25,7 +26,7 @@ export interface RoomDocument {
   id: string;
   password: string;
   owner: string;
-  phase: 'creation' | 'voting' | 'discussion';
+  phase: Phase;
   createdAt?: string;
   users: User[];
   cards: Card[];
@@ -35,7 +36,7 @@ export interface RoomDocument {
 export interface Room {
   id: string;
   owner: string;
-  phase: 'creation' | 'voting' | 'discussion';
+  phase: Phase;
   createdAt?: string;
   users: User[];
   cards: Card[];
@@ -43,7 +44,7 @@ export interface Room {
 
 export interface RoomState {
   cards: Card[];
-  phase: 'creation' | 'voting' | 'discussion';
+  phase: Phase;
   users: User[];
 }
 

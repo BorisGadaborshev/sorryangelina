@@ -1,6 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { RetroStore } from '../store/RetroStore';
-import { Room, RoomState, User, Card, PhaseTimerState, ChatMessage, Mood, WhiteboardStroke } from '../types';
+import { Room, RoomState, User, Card, FacilitatorAnnouncement, Phase, PhaseTimerState, ChatMessage, Mood, RetroRatingState, SprintVipState, WhiteboardStroke } from '../types';
 
 export class SocketService {
   private socket: Socket;
@@ -180,7 +180,7 @@ export class SocketService {
       this.store.setVoteError(cardId, message);
     });
 
-    this.socket.on('phase-changed', ({ phase, cards }: { phase: 'creation' | 'voting' | 'discussion'; cards: Card[] }) => {
+    this.socket.on('phase-changed', ({ phase, cards }: { phase: Phase; cards: Card[] }) => {
       console.log('Phase changed:', { phase, cards });
       this.store.setPhase(phase);
       this.store.setCards(cards);
@@ -208,6 +208,18 @@ export class SocketService {
 
     this.socket.on('whiteboard-cleared', () => {
       this.store.clearWhiteboard();
+    });
+
+    this.socket.on('retro-rating-state', (rating: RetroRatingState) => {
+      this.store.setRetroRating(rating);
+    });
+
+    this.socket.on('facilitator-selected', (announcement: FacilitatorAnnouncement) => {
+      this.store.setFacilitatorAnnouncement(announcement);
+    });
+
+    this.socket.on('sprint-vip-state', (state: SprintVipState) => {
+      this.store.setSprintVip(state);
     });
 
     this.socket.on('user-kicked', () => {
@@ -446,7 +458,7 @@ export class SocketService {
     this.socket.emit('vote-card', { cardId, voteType });
   }
 
-  async changePhase(phase: 'creation' | 'voting' | 'discussion'): Promise<void> {
+  async changePhase(phase: Phase): Promise<void> {
     console.log('Changing phase to:', phase);
     this.socket.emit('change-phase', { phase });
   }
@@ -468,8 +480,8 @@ export class SocketService {
     this.socket.emit('send-chat-message', { text });
   }
 
-  setUserMood(mood: Mood): void {
-    this.socket.emit('set-user-mood', { mood });
+  setUserMood(mood: Mood, sprintVipUserName?: string): void {
+    this.socket.emit('set-user-mood', { mood, sprintVipUserName });
   }
 
   sendWhiteboardStroke(stroke: WhiteboardStroke): void {
@@ -478,6 +490,14 @@ export class SocketService {
 
   clearWhiteboard(): void {
     this.socket.emit('clear-whiteboard');
+  }
+
+  submitRetroRating(value: 1 | 2 | 3 | 4 | 5): void {
+    this.socket.emit('submit-retro-rating', { value });
+  }
+
+  showRetroRatingResults(): void {
+    this.socket.emit('show-retro-rating-results');
   }
 
   async restoreSession(roomId: string, userId: string, username: string, token?: string): Promise<void> {

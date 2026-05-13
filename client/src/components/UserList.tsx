@@ -8,7 +8,7 @@ import PersonRemoveIcon from '@mui/icons-material/PersonRemove';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import { RetroStore } from '../store/RetroStore';
-import { Mood } from '../types';
+import { Mood, Phase } from '../types';
 
 interface User {
   id: string;
@@ -22,7 +22,7 @@ interface UserListProps {
   users: User[];
   onlineUsers: string[]; // массив ID пользователей онлайн
   currentUserId: string;
-  currentPhase: 'creation' | 'voting' | 'discussion';
+  currentPhase: Phase;
   onReadyStateChange: (isReady: boolean) => void;
   store: RetroStore;
 }
@@ -84,6 +84,8 @@ const UserList: React.FC<UserListProps> = ({
         return 'проголосовал(а)';
       case 'discussion':
         return 'готов(а) к обсуждению';
+      case 'rating':
+        return 'оценил(а) ретро';
       default:
         return 'готов(а)';
     }
@@ -124,29 +126,48 @@ const UserList: React.FC<UserListProps> = ({
       <List>
         {users.map((user) => {
           const moodMeta = getMoodMeta(user.mood);
+          const isSprintVip = store.sprintVip.vipUserName === user.name;
           return (
           <ListItem
             key={user.id}
             sx={{
               borderRadius: 1,
               mb: 0.5,
+              overflow: 'visible',
               bgcolor: user.id === currentUserId && user.isReady ? 'success.light' : 'transparent',
               '&:hover': {
                 bgcolor: user.id === currentUserId && user.isReady ? 'success.light' : 'action.hover',
               },
             }}
           >
-            <Avatar
-              sx={{
-                mr: 2,
-                bgcolor: moodMeta?.color ?? (onlineUsers.includes(user.id) ? 'success.main' : 'grey.400'),
-              }}
-            >
-              {moodMeta?.emoji ?? (user.role === 'admin' ? <AdminPanelSettingsIcon /> : <PersonIcon />)}
-            </Avatar>
+            <Box sx={{ position: 'relative', mr: 2 }}>
+              {isSprintVip && (
+                <Typography
+                  component="span"
+                  sx={{
+                    position: 'absolute',
+                    top: -18,
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    fontSize: 20,
+                    lineHeight: 1,
+                    zIndex: 1
+                  }}
+                >
+                  👑
+                </Typography>
+              )}
+              <Avatar
+                sx={{
+                  bgcolor: moodMeta?.color ?? (onlineUsers.includes(user.id) ? 'success.main' : 'grey.400'),
+                }}
+              >
+                {moodMeta?.emoji ?? (user.role === 'admin' ? <AdminPanelSettingsIcon /> : <PersonIcon />)}
+              </Avatar>
+            </Box>
             <ListItemText
               primary={user.name}
-              secondary={user.role === 'admin' ? 'Администратор' : 'Участник'}
+              secondary={isSprintVip ? 'VIP спринта' : (user.role === 'admin' ? 'Администратор' : 'Участник')}
               sx={{
                 '& .MuiListItemText-primary': {
                   fontWeight: onlineUsers.includes(user.id) ? 'bold' : 'normal',
@@ -157,17 +178,21 @@ const UserList: React.FC<UserListProps> = ({
               }}
             />
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              {user.id === currentUserId && (
-                <Tooltip title={user.isReady ? `Вы ${getPhaseActionText(currentPhase)}` : `Вы еще не готовы`}>
-                  <Box sx={{ 
-                    display: 'flex', 
-                    alignItems: 'center',
-                    color: user.isReady ? 'success.main' : 'text.disabled'
-                  }}>
-                    {user.isReady ? <CheckCircleIcon /> : <RadioButtonUncheckedIcon />}
-                  </Box>
-                </Tooltip>
-              )}
+              <Tooltip
+                title={
+                  user.id === currentUserId
+                    ? (user.isReady ? `Вы ${getPhaseActionText(currentPhase)}` : 'Вы еще не готовы')
+                    : (user.isReady ? `${user.name} ${getPhaseActionText(currentPhase)}` : `${user.name} еще не готов(а)`)
+                }
+              >
+                <Box sx={{ 
+                  display: 'flex', 
+                  alignItems: 'center',
+                  color: user.isReady ? 'success.main' : 'text.disabled'
+                }}>
+                  {user.isReady ? <CheckCircleIcon /> : <RadioButtonUncheckedIcon />}
+                </Box>
+              </Tooltip>
               {isAdmin && user.id !== currentUserId && (
                 <Tooltip title="Исключить пользователя">
                   <IconButton

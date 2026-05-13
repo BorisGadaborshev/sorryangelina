@@ -107,6 +107,9 @@ app.delete('/api/rooms/:roomId', (req, res) => __awaiter(void 0, void 0, void 0,
         clearRoomTimer(roomId, false);
         roomChats.delete(roomId);
         roomWhiteboards.delete(roomId);
+        roomRetroRatings.delete(roomId);
+        roomFacilitators.delete(roomId);
+        roomSprintVipVotes.delete(roomId);
         res.json({ message: 'Room deleted successfully' });
     }
     catch (error) {
@@ -240,6 +243,9 @@ let connectionCount = 0;
 const roomTimers = new Map();
 const roomChats = new Map();
 const roomWhiteboards = new Map();
+const roomRetroRatings = new Map();
+const roomFacilitators = new Map();
+const roomSprintVipVotes = new Map();
 const getRemainingSeconds = (endAt) => {
     return Math.max(0, Math.ceil((endAt - Date.now()) / 1000));
 };
@@ -317,6 +323,90 @@ const normalizeWhiteboardStroke = (value) => {
         points
     };
 };
+const getRetroRatingState = (roomId) => {
+    const existing = roomRetroRatings.get(roomId);
+    if (existing)
+        return existing;
+    const created = { votes: new Map(), resultsVisible: false };
+    roomRetroRatings.set(roomId, created);
+    return created;
+};
+const buildRetroRatingPayload = (room, userId) => {
+    const ratingState = getRetroRatingState(room.id);
+    const values = Array.from(ratingState.votes.values());
+    const distribution = {
+        1: values.filter((value) => value === 1).length,
+        2: values.filter((value) => value === 2).length,
+        3: values.filter((value) => value === 3).length,
+        4: values.filter((value) => value === 4).length,
+        5: values.filter((value) => value === 5).length
+    };
+    const average = values.length > 0
+        ? values.reduce((sum, value) => sum + value, 0) / values.length
+        : undefined;
+    return {
+        hasVoted: userId ? ratingState.votes.has(userId) : false,
+        votesCount: ratingState.votes.size,
+        totalCount: room.users.length,
+        resultsVisible: ratingState.resultsVisible,
+        average: ratingState.resultsVisible ? average : undefined,
+        distribution: ratingState.resultsVisible ? distribution : undefined
+    };
+};
+const emitRetroRatingStateToRoom = (roomId) => __awaiter(void 0, void 0, void 0, function* () {
+    const room = yield RoomService_1.RoomService.getRoom(roomId);
+    if (!room)
+        return;
+    const sockets = yield io.in(roomId).fetchSockets();
+    sockets.forEach((connectedSocket) => {
+        const userId = typeof connectedSocket.data.userId === 'string' ? connectedSocket.data.userId : connectedSocket.id;
+        connectedSocket.emit('retro-rating-state', buildRetroRatingPayload(room, userId));
+    });
+});
+const emitRetroRatingStateToSocket = (socket, room) => {
+    const userId = typeof socket.data.userId === 'string' ? socket.data.userId : socket.id;
+    socket.emit('retro-rating-state', buildRetroRatingPayload(room, userId));
+};
+const selectRandomFacilitator = (room) => {
+    if (room.users.length === 0)
+        return null;
+    const selectedUser = room.users[Math.floor(Math.random() * room.users.length)];
+    return {
+        userId: selectedUser.id,
+        userName: selectedUser.name,
+        selectedAt: Date.now()
+    };
+};
+const buildSprintVipState = (room) => {
+    const votes = roomSprintVipVotes.get(room.id);
+    if (!votes)
+        return { voteCount: 0 };
+    const activeNames = new Set(room.users.map((user) => user.name));
+    const counts = new Map();
+    votes.forEach((votedUserName) => {
+        if (!activeNames.has(votedUserName))
+            return;
+        counts.set(votedUserName, (counts.get(votedUserName) || 0) + 1);
+    });
+    let vipUserName;
+    let voteCount = 0;
+    counts.forEach((count, userName) => {
+        if (count > voteCount) {
+            vipUserName = userName;
+            voteCount = count;
+        }
+    });
+    return { vipUserName, voteCount };
+};
+const emitSprintVipStateToRoom = (roomId) => __awaiter(void 0, void 0, void 0, function* () {
+    const room = yield RoomService_1.RoomService.getRoom(roomId);
+    if (!room)
+        return;
+    io.to(roomId).emit('sprint-vip-state', buildSprintVipState(room));
+});
+const emitSprintVipStateToSocket = (socket, room) => {
+    socket.emit('sprint-vip-state', buildSprintVipState(room));
+};
 io.on('connection', (socket) => {
     connectionCount++;
     console.log(`Client connected (${connectionCount} total):`, socket.id);
@@ -346,6 +436,7 @@ io.on('connection', (socket) => {
             }
             socket.join(roomId);
             currentUser = user;
+            socket.data.userId = user.id;
             console.log('Session restored successfully:', { roomId, userId });
             socket.emit('room-joined', {
                 room,
@@ -358,6 +449,8 @@ io.on('connection', (socket) => {
             emitTimerToSocket(socket, roomId);
             socket.emit('chat-history', { messages: roomChats.get(roomId) || [] });
             socket.emit('whiteboard-history', { strokes: roomWhiteboards.get(roomId) || [] });
+            emitRetroRatingStateToSocket(socket, room);
+            emitSprintVipStateToSocket(socket, room);
         }
         catch (error) {
             console.error('Error restoring session:', error);
@@ -385,6 +478,7 @@ io.on('connection', (socket) => {
             }
             const room = yield RoomService_1.RoomService.createRoom(roomId, password, socket.id, effectiveUsername);
             socket.join(roomId);
+            socket.data.userId = socket.id;
             currentUser = {
                 id: socket.id,
                 name: effectiveUsername,
@@ -404,6 +498,8 @@ io.on('connection', (socket) => {
             emitTimerToSocket(socket, roomId);
             socket.emit('chat-history', { messages: roomChats.get(roomId) || [] });
             socket.emit('whiteboard-history', { strokes: roomWhiteboards.get(roomId) || [] });
+            emitRetroRatingStateToSocket(socket, room);
+            emitSprintVipStateToSocket(socket, room);
         }
         catch (error) {
             console.error('Error creating room:', error);
@@ -449,6 +545,7 @@ io.on('connection', (socket) => {
             }
             socket.join(roomId);
             currentUser = user;
+            socket.data.userId = user.id;
             console.log('User joined room successfully:', { roomId, username: effectiveUsername, isRejoin: !!existingUser });
             socket.emit('room-joined', {
                 room,
@@ -462,6 +559,8 @@ io.on('connection', (socket) => {
             emitTimerToSocket(socket, roomId);
             socket.emit('chat-history', { messages: roomChats.get(roomId) || [] });
             socket.emit('whiteboard-history', { strokes: roomWhiteboards.get(roomId) || [] });
+            emitRetroRatingStateToSocket(socket, room);
+            emitSprintVipStateToSocket(socket, room);
             if (!existingUser) {
                 socket.to(roomId).emit('user-joined', user);
             }
@@ -472,6 +571,8 @@ io.on('connection', (socket) => {
                     users: room.users
                 });
             }
+            yield emitRetroRatingStateToRoom(roomId);
+            yield emitSprintVipStateToRoom(roomId);
         }
         catch (error) {
             console.error('Error joining room:', error);
@@ -675,7 +776,7 @@ io.on('connection', (socket) => {
             console.error('Error updating ready state:', error);
         }
     }));
-    socket.on('set-user-mood', ({ mood }) => __awaiter(void 0, void 0, void 0, function* () {
+    socket.on('set-user-mood', ({ mood, sprintVipUserName }) => __awaiter(void 0, void 0, void 0, function* () {
         if (!(currentUser === null || currentUser === void 0 ? void 0 : currentUser.roomId))
             return;
         const safeMood = normalizeMood(mood);
@@ -687,12 +788,20 @@ io.on('connection', (socket) => {
             const room = yield RoomService_1.RoomService.updateUserMood(currentUser.roomId, currentUser.id, safeMood);
             if (!room)
                 return;
+            const safeSprintVipUserName = typeof sprintVipUserName === 'string' ? sprintVipUserName.trim() : '';
+            const isExistingParticipant = room.users.some((user) => user.name === safeSprintVipUserName);
+            if (safeSprintVipUserName && isExistingParticipant && safeSprintVipUserName !== currentUser.name) {
+                const votes = roomSprintVipVotes.get(currentUser.roomId) || new Map();
+                votes.set(currentUser.name, safeSprintVipUserName);
+                roomSprintVipVotes.set(currentUser.roomId, votes);
+            }
             currentUser = Object.assign(Object.assign({}, currentUser), { mood: safeMood });
             io.to(currentUser.roomId).emit('state-updated', {
                 cards: room.cards,
                 phase: room.phase,
                 users: room.users
             });
+            yield emitSprintVipStateToRoom(currentUser.roomId);
         }
         catch (error) {
             console.error('Error updating user mood:', error);
@@ -702,12 +811,18 @@ io.on('connection', (socket) => {
     socket.on('change-phase', ({ phase }) => __awaiter(void 0, void 0, void 0, function* () {
         if (!(currentUser === null || currentUser === void 0 ? void 0 : currentUser.roomId))
             return;
+        const allowedPhases = ['creation', 'voting', 'discussion', 'rating'];
+        if (!allowedPhases.includes(phase)) {
+            socket.emit('error', 'Invalid phase');
+            return;
+        }
         console.log('Phase change requested:', {
             userId: currentUser.id,
             userName: currentUser.name,
             phase
         });
         try {
+            const previousRoom = yield RoomService_1.RoomService.getRoom(currentUser.roomId);
             // Сначала меняем фазу
             const updatedRoom = yield RoomService_1.RoomService.updatePhase(currentUser.roomId, phase, currentUser.id);
             if (!updatedRoom) {
@@ -734,6 +849,12 @@ io.on('connection', (socket) => {
             const roomWithResetStates = yield RoomService_1.RoomService.resetUsersReadyState(currentUser.roomId);
             if (roomWithResetStates) {
                 clearRoomTimer(currentUser.roomId, true);
+                if (roomWithResetStates.phase === 'creation') {
+                    roomFacilitators.delete(currentUser.roomId);
+                }
+                if (roomWithResetStates.phase === 'rating') {
+                    roomRetroRatings.set(currentUser.roomId, { votes: new Map(), resultsVisible: false });
+                }
                 // Отправляем оба события для обновления UI
                 io.to(currentUser.roomId).emit('phase-changed', {
                     phase: roomWithResetStates.phase,
@@ -744,11 +865,62 @@ io.on('connection', (socket) => {
                     phase: roomWithResetStates.phase,
                     users: roomWithResetStates.users
                 });
+                if ((previousRoom === null || previousRoom === void 0 ? void 0 : previousRoom.phase) === 'creation' && roomWithResetStates.phase !== 'creation') {
+                    const facilitator = selectRandomFacilitator(roomWithResetStates);
+                    if (facilitator) {
+                        roomFacilitators.set(currentUser.roomId, facilitator);
+                        io.to(currentUser.roomId).emit('facilitator-selected', facilitator);
+                    }
+                }
+                yield emitRetroRatingStateToRoom(currentUser.roomId);
             }
         }
         catch (error) {
             console.error('Error changing phase:', error);
             socket.emit('error', 'Failed to change phase');
+        }
+    }));
+    socket.on('submit-retro-rating', ({ value }) => __awaiter(void 0, void 0, void 0, function* () {
+        if (!(currentUser === null || currentUser === void 0 ? void 0 : currentUser.roomId))
+            return;
+        if (![1, 2, 3, 4, 5].includes(value)) {
+            socket.emit('error', 'Invalid retro rating');
+            return;
+        }
+        try {
+            const room = yield RoomService_1.RoomService.getRoom(currentUser.roomId);
+            if (!room || room.phase !== 'rating')
+                return;
+            const ratingState = getRetroRatingState(currentUser.roomId);
+            if (!ratingState.votes.has(currentUser.id)) {
+                ratingState.votes.set(currentUser.id, value);
+            }
+            yield emitRetroRatingStateToRoom(currentUser.roomId);
+        }
+        catch (error) {
+            console.error('Error submitting retro rating:', error);
+            socket.emit('error', 'Failed to submit retro rating');
+        }
+    }));
+    socket.on('show-retro-rating-results', () => __awaiter(void 0, void 0, void 0, function* () {
+        if (!(currentUser === null || currentUser === void 0 ? void 0 : currentUser.roomId))
+            return;
+        try {
+            const room = yield RoomService_1.RoomService.getRoom(currentUser.roomId);
+            if (!room || room.phase !== 'rating')
+                return;
+            const isAdmin = room.users.some((user) => user.name === (currentUser === null || currentUser === void 0 ? void 0 : currentUser.name) && user.role === 'admin');
+            const ratingState = getRetroRatingState(currentUser.roomId);
+            if (!isAdmin || ratingState.votes.size < room.users.length) {
+                socket.emit('error', 'Results are available after all participants vote');
+                return;
+            }
+            ratingState.resultsVisible = true;
+            yield emitRetroRatingStateToRoom(currentUser.roomId);
+        }
+        catch (error) {
+            console.error('Error showing retro rating results:', error);
+            socket.emit('error', 'Failed to show retro rating results');
         }
     }));
     socket.on('set-phase-timer', ({ durationSeconds }) => __awaiter(void 0, void 0, void 0, function* () {
@@ -875,6 +1047,9 @@ io.on('connection', (socket) => {
             clearRoomTimer(roomId, false);
             roomChats.delete(roomId);
             roomWhiteboards.delete(roomId);
+            roomRetroRatings.delete(roomId);
+            roomFacilitators.delete(roomId);
+            roomSprintVipVotes.delete(roomId);
             io.to(roomId).emit('room-deleted');
             io.in(roomId).socketsLeave(roomId);
             currentUser = null;
@@ -897,9 +1072,20 @@ io.on('connection', (socket) => {
             const updatedRoom = yield RoomService_1.RoomService.removeUser(currentUser.roomId, currentUser.id);
             if (!updatedRoom)
                 return;
+            getRetroRatingState(currentUser.roomId).votes.delete(currentUser.id);
+            const vipVotes = roomSprintVipVotes.get(currentUser.roomId);
+            if (vipVotes) {
+                vipVotes.delete(currentUser.name);
+                vipVotes.forEach((votedUserName, voterName) => {
+                    if (votedUserName === (currentUser === null || currentUser === void 0 ? void 0 : currentUser.name)) {
+                        vipVotes.delete(voterName);
+                    }
+                });
+            }
             if (updatedRoom.users.length === 0) {
                 // If the room is empty, we might want to keep it for some time before deletion
                 // For now, we'll keep the room in the database
+                roomSprintVipVotes.delete(currentUser.roomId);
                 console.log('Room is empty:', currentUser.roomId);
             }
             else {
@@ -909,6 +1095,8 @@ io.on('connection', (socket) => {
                     phase: updatedRoom.phase,
                     users: updatedRoom.users
                 });
+                yield emitRetroRatingStateToRoom(currentUser.roomId);
+                yield emitSprintVipStateToRoom(currentUser.roomId);
             }
         }
         catch (error) {

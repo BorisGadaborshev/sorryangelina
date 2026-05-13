@@ -16,6 +16,7 @@ interface Props {
   columnIndex: number;
   store: RetroStore;
   enableDragDrop?: boolean;
+  onAddCardStart?: () => void;
 }
 
 const EMOJI_GROUPS = {
@@ -36,7 +37,7 @@ const EMOJI_GROUPS = {
   ]
 };
 
-const RetroColumn: React.FC<Props> = observer(({ title, type, columnIndex, store, enableDragDrop = false }) => {
+const RetroColumn: React.FC<Props> = observer(({ title, type, columnIndex, store, enableDragDrop = false, onAddCardStart }) => {
   const [newCardText, setNewCardText] = useState('');
   const [newCardImageUrl, setNewCardImageUrl] = useState('');
   const [selectedEmoji, setSelectedEmoji] = useState('');
@@ -152,8 +153,11 @@ const RetroColumn: React.FC<Props> = observer(({ title, type, columnIndex, store
             <Tooltip title="Добавить карточку">
               <IconButton
                 color="primary"
-                onClick={(event) => setAddCardAnchorEl(event.currentTarget)}
-                sx={{ border: '1px solid', borderColor: 'divider' }}
+                onClick={(event) => {
+                  onAddCardStart?.();
+                  setAddCardAnchorEl(event.currentTarget);
+                }}
+                sx={{ position: 'relative', zIndex: 4, border: '1px solid', borderColor: 'divider' }}
               >
                 <AddIcon />
               </IconButton>

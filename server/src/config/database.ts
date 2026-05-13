@@ -26,7 +26,7 @@ export const connectDB = async (): Promise<void> => {
       id text primary key,
       password text not null,
       owner text not null,
-      phase text not null check (phase in ('creation','voting','discussion')),
+      phase text not null check (phase in ('creation','voting','discussion','rating')),
       created_at timestamptz default now(),
       updated_at timestamptz default now()
     );
@@ -64,6 +64,8 @@ export const connectDB = async (): Promise<void> => {
 
     alter table cards add column if not exists image_url text;
     alter table room_users add column if not exists mood text;
+    alter table rooms drop constraint if exists rooms_phase_check;
+    alter table rooms add constraint rooms_phase_check check (phase in ('creation','voting','discussion','rating'));
   `);
 
   console.log('Connected to PostgreSQL and ensured schema');

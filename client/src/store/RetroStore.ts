@@ -1,5 +1,5 @@
 import { makeAutoObservable, runInAction } from 'mobx';
-import { AuthProfile, Card, ChatMessage, PhaseTimerState, Room, RoomState, User, WhiteboardStroke } from '../types';
+import { AuthProfile, Card, ChatMessage, FacilitatorAnnouncement, Phase, PhaseTimerState, RetroRatingState, Room, RoomState, SprintVipState, User, WhiteboardStroke } from '../types';
 import { Socket } from 'socket.io-client';
 import { SocketService } from '../services/socket';
 
@@ -10,13 +10,21 @@ export class RetroStore {
   authProfile: AuthProfile | null = null;
   room: Room | null = null;
   cards: Card[] = [];
-  phase: 'creation' | 'voting' | 'discussion' = 'creation';
+  phase: Phase = 'creation';
   users: User[] = [];
   error: string | null = null;
   voteError: { cardId: string; message: string } | null = null;
   phaseTimer: PhaseTimerState = { durationSeconds: 0, remainingSeconds: 0, running: false };
   chatMessages: ChatMessage[] = [];
   whiteboardStrokes: WhiteboardStroke[] = [];
+  facilitatorAnnouncement: FacilitatorAnnouncement | null = null;
+  sprintVip: SprintVipState = { voteCount: 0 };
+  retroRating: RetroRatingState = {
+    hasVoted: false,
+    votesCount: 0,
+    totalCount: 0,
+    resultsVisible: false
+  };
 
   constructor() {
     makeAutoObservable(this, {}, { autoBind: true });
@@ -154,6 +162,24 @@ export class RetroStore {
     });
   }
 
+  setRetroRating(rating: RetroRatingState) {
+    runInAction(() => {
+      this.retroRating = rating;
+    });
+  }
+
+  setFacilitatorAnnouncement(announcement: FacilitatorAnnouncement | null) {
+    runInAction(() => {
+      this.facilitatorAnnouncement = announcement;
+    });
+  }
+
+  setSprintVip(state: SprintVipState) {
+    runInAction(() => {
+      this.sprintVip = state;
+    });
+  }
+
   setAuthProfile(profile: AuthProfile | null) {
     runInAction(() => {
       this.authProfile = profile;
@@ -218,15 +244,21 @@ export class RetroStore {
         this.phaseTimer = { durationSeconds: 0, remainingSeconds: 0, running: false };
         this.chatMessages = [];
         this.whiteboardStrokes = [];
+        this.facilitatorAnnouncement = null;
+        this.sprintVip = { voteCount: 0 };
+        this.retroRating = { hasVoted: false, votesCount: 0, totalCount: 0, resultsVisible: false };
         console.log('Cleared room and session');
       }
     });
   }
 
-  setPhase(phase: 'creation' | 'voting' | 'discussion') {
+  setPhase(phase: Phase) {
     console.log('Setting phase:', phase);
     runInAction(() => {
       this.phase = phase;
+      if (phase === 'creation') {
+        this.facilitatorAnnouncement = null;
+      }
     });
   }
 
@@ -254,6 +286,9 @@ export class RetroStore {
     runInAction(() => {
       this.cards = state.cards;
       this.phase = state.phase;
+      if (state.phase === 'creation') {
+        this.facilitatorAnnouncement = null;
+      }
       this.users = this.normalizeUsers(state.users);
       if (this.currentUser) {
         const syncedUser = this.users.find((user) => user.name === this.currentUser?.name);

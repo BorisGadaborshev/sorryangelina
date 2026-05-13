@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { observer } from 'mobx-react-lite';
-import { Box, AppBar, Toolbar, Typography, Button, ButtonGroup, CircularProgress, IconButton, Tooltip, Tabs, Tab, useMediaQuery, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, FormControl, Select, MenuItem, Menu } from '@mui/material';
+import { Box, AppBar, Toolbar, Typography, Button, ButtonGroup, CircularProgress, IconButton, Tooltip, Tabs, Tab, useMediaQuery, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, FormControl, Select, MenuItem, Menu, Slider, Divider, RadioGroup, FormControlLabel, Radio } from '@mui/material';
 import { DragDropContext, DropResult } from '@hello-pangea/dnd';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
@@ -10,6 +10,10 @@ import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import DarkModeIcon from '@mui/icons-material/DarkMode';
 import LightModeIcon from '@mui/icons-material/LightMode';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import MusicNoteIcon from '@mui/icons-material/MusicNote';
+import PauseIcon from '@mui/icons-material/Pause';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
 import BrushIcon from '@mui/icons-material/Brush';
 import CleaningServicesIcon from '@mui/icons-material/CleaningServices';
@@ -20,7 +24,8 @@ import { RetroStore } from '../store/RetroStore';
 import DiscussionView from './DiscussionView';
 import ChatTerminal from './ChatTerminal';
 import CollaborativeWhiteboard from './CollaborativeWhiteboard';
-import { Mood } from '../types';
+import RetroRatingView from './RetroRatingView';
+import { Mood, Phase } from '../types';
 
 interface Props {
   store: RetroStore;
@@ -36,6 +41,7 @@ const MOOD_OPTIONS: Array<{ value: Mood; emoji: string; label: string; color: st
   { value: 'awful', emoji: '😠', label: 'Злой', color: '#ff5b62', labelColor: '#ffffff' }
 ];
 const WHITEBOARD_COLORS = ['#111111', '#006dff', '#00a878', '#ff6b00', '#e11d48', '#7c3aed'];
+const TIMER_MUSIC_SRC = '/audio/timer-music.mp3';
 
 const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) => {
   const [isReady, setIsReady] = useState(false);
@@ -53,6 +59,17 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   const [timerAnchorEl, setTimerAnchorEl] = useState<null | HTMLElement>(null);
   const [isMoodDialogOpen, setIsMoodDialogOpen] = useState(false);
   const [selectedMood, setSelectedMood] = useState<Mood | null>(null);
+  const [selectedSprintVipUserName, setSelectedSprintVipUserName] = useState('');
+  const timerAudioRef = useRef<HTMLAudioElement | null>(null);
+  const previousTimerRef = useRef({ running: false, remainingSeconds: 0 });
+  const [timerMusicVolume, setTimerMusicVolume] = useState(() => {
+    const saved = localStorage.getItem('timerMusicVolume');
+    const parsed = saved ? Number(saved) : 0.35;
+    return Number.isFinite(parsed) ? parsed : 0.35;
+  });
+  const [isTimerMusicPaused, setIsTimerMusicPaused] = useState(false);
+  const [isTimerAudioBlocked, setIsTimerAudioBlocked] = useState(false);
+  const [isTimerAudioUnavailable, setIsTimerAudioUnavailable] = useState(false);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -75,14 +92,16 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
       return;
     }
     setSelectedMood(null);
+    setSelectedSprintVipUserName('');
     setIsMoodDialogOpen(true);
   }, [currentRoomId, currentUserName, currentUserMood]);
 
-  const getPhaseTranslation = (phase: 'creation' | 'voting' | 'discussion'): string => {
+  const getPhaseTranslation = (phase: Phase): string => {
     const translations = {
       creation: 'Создание',
       voting: 'Голосование',
-      discussion: 'Обсуждение'
+      discussion: 'Обсуждение',
+      rating: 'Оценка ретро'
     };
     return translations[phase];
   };
@@ -90,6 +109,28 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   const handleReadyStateChange = (isReady: boolean) => {
     store.socketService?.updateReadyState(isReady);
   };
+
+  const playTimerEndSignal = useCallback(() => {
+    const AudioContextConstructor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextConstructor) return;
+
+    const audioContext = new AudioContextConstructor();
+    const oscillator = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(880, audioContext.currentTime);
+    oscillator.frequency.setValueAtTime(660, audioContext.currentTime + 0.2);
+    gain.gain.setValueAtTime(0.0001, audioContext.currentTime);
+    gain.gain.exponentialRampToValueAtTime(Math.max(timerMusicVolume, 0.2), audioContext.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.65);
+
+    oscillator.connect(gain);
+    gain.connect(audioContext.destination);
+    oscillator.start();
+    oscillator.stop(audioContext.currentTime + 0.7);
+    oscillator.onended = () => audioContext.close();
+  }, [timerMusicVolume]);
 
   const formatDuration = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
@@ -99,6 +140,41 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
 
   const isTimerMenuOpen = Boolean(timerAnchorEl);
   const canDrawOnBoard = !isMobile && (store.phase === 'creation' || store.phase === 'voting');
+
+  useEffect(() => {
+    const audio = timerAudioRef.current;
+    if (!audio) return;
+    audio.volume = timerMusicVolume;
+    localStorage.setItem('timerMusicVolume', String(timerMusicVolume));
+  }, [timerMusicVolume]);
+
+  useEffect(() => {
+    const audio = timerAudioRef.current;
+    if (!audio) return;
+
+    if (store.phaseTimer.running && !isTimerMusicPaused && !isTimerAudioUnavailable) {
+      audio.play()
+        .then(() => setIsTimerAudioBlocked(false))
+        .catch(() => setIsTimerAudioBlocked(true));
+      return;
+    }
+
+    audio.pause();
+    if (!store.phaseTimer.running) {
+      audio.currentTime = 0;
+    }
+  }, [store.phaseTimer.running, isTimerMusicPaused, isTimerAudioUnavailable]);
+
+  useEffect(() => {
+    const previous = previousTimerRef.current;
+    if (previous.running && previous.remainingSeconds <= 1 && !store.phaseTimer.running && store.phaseTimer.remainingSeconds === 0) {
+      playTimerEndSignal();
+    }
+    previousTimerRef.current = {
+      running: store.phaseTimer.running,
+      remainingSeconds: store.phaseTimer.remainingSeconds
+    };
+  }, [store.phaseTimer.running, store.phaseTimer.remainingSeconds, playTimerEndSignal]);
 
   useEffect(() => {
     if (!canDrawOnBoard && isDrawEnabled) {
@@ -120,7 +196,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
 
   const handleSaveMood = () => {
     if (!selectedMood) return;
-    store.socketService?.setUserMood(selectedMood);
+    store.socketService?.setUserMood(selectedMood, selectedSprintVipUserName || undefined);
     setIsMoodDialogOpen(false);
   };
 
@@ -146,6 +222,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
           columnIndex={0}
           store={store}
           enableDragDrop={store.phase === 'creation'}
+          onAddCardStart={() => setIsDrawEnabled(false)}
         />
         <RetroColumn
           title="Было не очень"
@@ -153,6 +230,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
           columnIndex={1}
           store={store}
           enableDragDrop={store.phase === 'creation'}
+          onAddCardStart={() => setIsDrawEnabled(false)}
         />
         <RetroColumn
           title="А давайте!:"
@@ -160,6 +238,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
           columnIndex={2}
           store={store}
           enableDragDrop={store.phase === 'creation'}
+          onAddCardStart={() => setIsDrawEnabled(false)}
         />
       </Box>
     );
@@ -175,6 +254,8 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
     switch (store.phase) {
       case 'discussion':
         return <DiscussionView store={store} />;
+      case 'rating':
+        return <RetroRatingView store={store} />;
       case 'creation':
       case 'voting':
       default:
@@ -198,13 +279,11 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
               <Typography variant="caption" sx={{ mr: 0.5, color: store.phaseTimer.running ? 'warning.main' : 'text.secondary', whiteSpace: 'nowrap' }}>
                 {formatDuration(store.phaseTimer.remainingSeconds)}
               </Typography>
-              {store.currentUser?.role === 'admin' && (
-                <Tooltip title="Настройки таймера">
-                  <IconButton size="small" onClick={(event) => setTimerAnchorEl(event.currentTarget)}>
-                    <AccessTimeIcon fontSize="small" />
-                  </IconButton>
-                </Tooltip>
-              )}
+              <Tooltip title="Таймер и музыка">
+                <IconButton size="small" onClick={(event) => setTimerAnchorEl(event.currentTarget)}>
+                  <AccessTimeIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
             </Box>
           )}
           <Typography variant="subtitle1" sx={{ mr: isMobile ? 0 : 2, whiteSpace: 'nowrap' }}>
@@ -221,7 +300,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                 <Typography variant="caption" sx={{ color: store.phaseTimer.running ? 'warning.light' : 'text.secondary', whiteSpace: 'nowrap' }}>
                   Таймер: {formatDuration(store.phaseTimer.remainingSeconds)}
                 </Typography>
-                <Tooltip title="Настройки таймера">
+                <Tooltip title="Таймер и музыка">
                   <IconButton size="small" onClick={(event) => setTimerAnchorEl(event.currentTarget)}>
                     <AccessTimeIcon fontSize="small" />
                   </IconButton>
@@ -265,13 +344,18 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                   >
                     Обсуждение
                   </Button>
+                  <Button
+                    onClick={() => store.socketService?.changePhase('rating')}
+                    disabled={store.phase === 'rating' || !canChange}
+                    sx={{ color: 'white' }}
+                  >
+                    Оценка
+                  </Button>
                 </ButtonGroup>
                 {!isCompactDesktop ? timerControls : null}
               </Box>
             ) : !isCompactDesktop ? (
-              <Typography variant="caption" sx={{ mr: 2, color: store.phaseTimer.running ? 'warning.light' : 'text.secondary', whiteSpace: 'nowrap' }}>
-                Таймер: {formatDuration(store.phaseTimer.remainingSeconds)}
-              </Typography>
+              timerControls
             ) : null;
             
           })()}
@@ -327,6 +411,15 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
           {isMobile ? (
             <Box sx={{ width: '100%' }}>
               <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 0.5, gap: 0.5 }}>
+                <Tooltip title="Таймер и музыка">
+                  <IconButton
+                    color="inherit"
+                    onClick={(event) => setTimerAnchorEl(event.currentTarget)}
+                    size="small"
+                  >
+                    <AccessTimeIcon />
+                  </IconButton>
+                </Tooltip>
                 <Tooltip title={isChatVisible ? 'Скрыть чат' : 'Показать чат'}>
                   <IconButton
                     color="inherit"
@@ -386,53 +479,105 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
             anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
             transformOrigin={{ vertical: 'top', horizontal: 'right' }}
           >
-            <Box sx={{ p: 1.5, minWidth: 220 }}>
+            <Box sx={{ p: 1.5, minWidth: 260 }}>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
                 Осталось: {formatDuration(store.phaseTimer.remainingSeconds)}
               </Typography>
-              <FormControl size="small" fullWidth sx={{ mb: 1 }}>
-                <Select
-                  value={selectedTimerSeconds}
-                  onChange={(event) => setSelectedTimerSeconds(Number(event.target.value))}
-                  sx={{ height: 32 }}
-                >
-                  <MenuItem value={60}>1 минута</MenuItem>
-                  <MenuItem value={180}>3 минуты</MenuItem>
-                  <MenuItem value={300}>5 минут</MenuItem>
-                  <MenuItem value={600}>10 минут</MenuItem>
-                  <MenuItem value={900}>15 минут</MenuItem>
-                </Select>
-              </FormControl>
-              <Box sx={{ display: 'flex', gap: 1 }}>
+
+              <Box sx={{ mb: 1.5 }}>
+                <Typography variant="subtitle2" sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 1 }}>
+                  <MusicNoteIcon fontSize="small" />
+                  Музыка таймера
+                </Typography>
                 <Button
                   size="small"
                   variant="outlined"
                   fullWidth
-                  onClick={() => {
-                    store.socketService?.setPhaseTimer(selectedTimerSeconds);
-                    setTimerAnchorEl(null);
-                  }}
-                  disabled={store.currentUser?.role !== 'admin'}
+                  startIcon={isTimerMusicPaused ? <PlayArrowIcon /> : <PauseIcon />}
+                  disabled={isTimerAudioUnavailable}
+                  onClick={() => setIsTimerMusicPaused((prev) => !prev)}
                 >
-                  {store.phaseTimer.running ? 'Перезапуск' : 'Старт'}
+                  {isTimerMusicPaused ? 'Включить музыку' : 'Пауза музыки'}
                 </Button>
-                <Button
-                  size="small"
-                  color="error"
-                  fullWidth
-                  onClick={() => {
-                    store.socketService?.resetPhaseTimer();
-                    setTimerAnchorEl(null);
-                  }}
-                  disabled={store.currentUser?.role !== 'admin' || !store.phaseTimer.running}
-                >
-                  Сброс
-                </Button>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}>
+                  <VolumeUpIcon fontSize="small" color="action" />
+                  <Slider
+                    size="small"
+                    value={Math.round(timerMusicVolume * 100)}
+                    min={0}
+                    max={100}
+                    onChange={(_, value) => setTimerMusicVolume((Array.isArray(value) ? value[0] : value) / 100)}
+                    aria-label="Громкость музыки таймера"
+                    disabled={isTimerAudioUnavailable}
+                  />
+                </Box>
+                {isTimerAudioBlocked && store.phaseTimer.running && !isTimerMusicPaused && (
+                  <Typography variant="caption" color="warning.main" sx={{ display: 'block' }}>
+                    Браузер заблокировал автозапуск. Нажмите “Включить музыку”.
+                  </Typography>
+                )}
+                {isTimerAudioUnavailable && (
+                  <Typography variant="caption" color="error" sx={{ display: 'block' }}>
+                    Трек не найден. Добавьте файл в client/public/audio/timer-music.mp3.
+                  </Typography>
+                )}
               </Box>
+
+              {store.currentUser?.role === 'admin' && (
+                <>
+                  <Divider sx={{ my: 1.5 }} />
+                  <FormControl size="small" fullWidth sx={{ mb: 1 }}>
+                    <Select
+                      value={selectedTimerSeconds}
+                      onChange={(event) => setSelectedTimerSeconds(Number(event.target.value))}
+                      sx={{ height: 32 }}
+                    >
+                      <MenuItem value={60}>1 минута</MenuItem>
+                      <MenuItem value={180}>3 минуты</MenuItem>
+                      <MenuItem value={300}>5 минут</MenuItem>
+                      <MenuItem value={600}>10 минут</MenuItem>
+                      <MenuItem value={900}>15 минут</MenuItem>
+                    </Select>
+                  </FormControl>
+                  <Box sx={{ display: 'flex', gap: 1 }}>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      fullWidth
+                      onClick={() => {
+                        store.socketService?.setPhaseTimer(selectedTimerSeconds);
+                        setTimerAnchorEl(null);
+                      }}
+                    >
+                      {store.phaseTimer.running ? 'Перезапуск' : 'Старт'}
+                    </Button>
+                    <Button
+                      size="small"
+                      color="error"
+                      fullWidth
+                      onClick={() => {
+                        store.socketService?.resetPhaseTimer();
+                        setTimerAnchorEl(null);
+                      }}
+                      disabled={!store.phaseTimer.running}
+                    >
+                      Сброс
+                    </Button>
+                  </Box>
+                </>
+              )}
             </Box>
           </Menu>
         </Toolbar>
       </AppBar>
+      <audio
+        ref={timerAudioRef}
+        src={TIMER_MUSIC_SRC}
+        loop
+        preload="auto"
+        onCanPlay={() => setIsTimerAudioUnavailable(false)}
+        onError={() => setIsTimerAudioUnavailable(true)}
+      />
 
       {/* Контент */}
       <Box sx={{ 
@@ -634,6 +779,25 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
       </Dialog>
 
       <Dialog
+        open={Boolean(store.facilitatorAnnouncement)}
+        onClose={() => store.setFacilitatorAnnouncement(null)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Ведущий выбран</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Карточки читает {store.facilitatorAnnouncement?.userName}
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button variant="contained" onClick={() => store.setFacilitatorAnnouncement(null)}>
+            Понятно
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
         open={isMoodDialogOpen}
         onClose={(_, reason) => {
           if (reason === 'backdropClick' || reason === 'escapeKeyDown') return;
@@ -701,6 +865,25 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
               ))}
             </Box>
           </Box>
+          <Divider sx={{ my: 2 }} />
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>
+            Кого отметим как VIP спринта?
+          </Typography>
+          <RadioGroup
+            value={selectedSprintVipUserName}
+            onChange={(event) => setSelectedSprintVipUserName(event.target.value)}
+          >
+            {store.users
+              .filter((user) => user.name !== store.currentUser?.name)
+              .map((user) => (
+                <FormControlLabel
+                  key={user.id}
+                  value={user.name}
+                  control={<Radio size="small" />}
+                  label={user.name}
+                />
+              ))}
+          </RadioGroup>
         </DialogContent>
         <DialogActions>
           <Button variant="contained" onClick={handleSaveMood} disabled={!selectedMood}>

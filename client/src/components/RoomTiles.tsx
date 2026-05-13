@@ -4,7 +4,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import ShareIcon from '@mui/icons-material/Share';
 import { Box, Card, CardActionArea, CardContent, Chip, Grid, IconButton, MenuItem, TextField, Typography, Button } from '@mui/material';
 import { alpha, useTheme } from '@mui/material/styles';
-import { AvailableRoom } from '../types';
+import { AvailableRoom, Phase } from '../types';
 
 interface Props {
   rooms: AvailableRoom[];
@@ -18,7 +18,8 @@ interface Props {
 const phaseLabel: Record<string, string> = {
   creation: 'Создание',
   voting: 'Голосование',
-  discussion: 'Обсуждение'
+  discussion: 'Обсуждение',
+  rating: 'Оценка ретро'
 };
 
 const tileSx = {
@@ -41,7 +42,7 @@ const formatDate = (value?: string): string => {
 const RoomTiles: React.FC<Props> = ({ rooms, currentUserName, onRoomClick, onCreateClick, onDeleteClick, onInviteClick }) => {
   const theme = useTheme();
   const [search, setSearch] = useState('');
-  const [phaseFilter, setPhaseFilter] = useState<'all' | 'creation' | 'voting' | 'discussion'>('all');
+  const [phaseFilter, setPhaseFilter] = useState<'all' | Phase>('all');
   const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>('newest');
 
   const isDark = theme.palette.mode === 'dark';
@@ -93,13 +94,14 @@ const RoomTiles: React.FC<Props> = ({ rooms, currentUserName, onRoomClick, onCre
           select
           label="Фаза"
           value={phaseFilter}
-          onChange={(event) => setPhaseFilter(event.target.value as 'all' | 'creation' | 'voting' | 'discussion')}
+          onChange={(event) => setPhaseFilter(event.target.value as 'all' | Phase)}
           sx={filterInputSx}
         >
           <MenuItem value="all">Все</MenuItem>
           <MenuItem value="creation">Создание</MenuItem>
           <MenuItem value="voting">Голосование</MenuItem>
           <MenuItem value="discussion">Обсуждение</MenuItem>
+          <MenuItem value="rating">Оценка ретро</MenuItem>
         </TextField>
         <TextField
           size="small"

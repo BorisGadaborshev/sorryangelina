@@ -1,5 +1,5 @@
 import { RoomModel } from '../models/Room';
-import { Room, RoomDocument, User, Card } from '../types';
+import { Room, RoomDocument, User, Card, Phase } from '../types';
 import bcrypt from 'bcryptjs';
 
 const PRIORITY_ADMIN_NAME = 'Коваль Ангелина Константиновна';
@@ -177,7 +177,7 @@ export class RoomService {
 
   static async updatePhase(
     roomId: string,
-    phase: 'creation' | 'voting' | 'discussion',
+    phase: Phase,
     userId: string,
     userName?: string
   ): Promise<Room | null> {

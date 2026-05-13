@@ -7,10 +7,12 @@ export interface User {
   mood?: Mood;
 }
 
+export type Phase = 'creation' | 'voting' | 'discussion' | 'rating';
+
 export interface Room {
   id: string;
   owner: string;
-  phase: 'creation' | 'voting' | 'discussion';
+  phase: Phase;
   users: User[];
   cards: Card[];
 }
@@ -28,15 +30,35 @@ export interface Card {
 
 export interface RoomState {
   cards: Card[];
-  phase: 'creation' | 'voting' | 'discussion';
+  phase: Phase;
   users: User[];
 } 
 
 export interface PhaseTimerState {
-  phase?: 'creation' | 'voting' | 'discussion';
+  phase?: Phase;
   durationSeconds: number;
   remainingSeconds: number;
   running: boolean;
+}
+
+export interface RetroRatingState {
+  hasVoted: boolean;
+  votesCount: number;
+  totalCount: number;
+  resultsVisible: boolean;
+  average?: number;
+  distribution?: Record<1 | 2 | 3 | 4 | 5, number>;
+}
+
+export interface FacilitatorAnnouncement {
+  userId: string;
+  userName: string;
+  selectedAt: number;
+}
+
+export interface SprintVipState {
+  vipUserName?: string;
+  voteCount: number;
 }
 
 export interface ChatMessage {
@@ -75,7 +97,7 @@ export interface AuthProfile {
 export interface AvailableRoom {
   id: string;
   usersCount: number;
-  phase: string;
+  phase: Phase;
   owner: string;
   createdAt?: string;
 }
