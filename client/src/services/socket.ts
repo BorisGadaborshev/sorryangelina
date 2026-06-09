@@ -471,8 +471,21 @@ export class SocketService {
     this.socket.emit('send-chat-message', { text });
   }
 
-  setUserMood(mood: Mood, sprintVipUserName?: string): void {
-    this.socket.emit('set-user-mood', { mood, sprintVipUserName });
+  setUserMood(mood: Mood): void {
+    this.socket.emit('set-user-mood', { mood });
+  }
+
+  voteSprintVip(userName: string): void {
+    const myName = this.store.currentUser?.name;
+    if (!myName || userName === myName) return;
+
+    const currentVote = this.store.sprintVip.myVote;
+    const nextVote = currentVote === userName ? undefined : userName;
+    this.store.setSprintVip({
+      ...this.store.sprintVip,
+      myVote: nextVote
+    });
+    this.socket.emit('vote-sprint-vip', { userName });
   }
 
   sendWhiteboardStroke(stroke: WhiteboardStroke): void {

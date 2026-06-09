@@ -124,6 +124,20 @@ export class TeamService {
     return this.convertToTeam(updatedTeam);
   }
 
+  static async getTeamRosterNames(teamId: string): Promise<string[]> {
+    await this.ensureBuiltinTeam();
+    if (teamId === BUILTIN_TEAM_ID) {
+      return [...FIXED_AUTH_NAMES];
+    }
+
+    const team = await TeamModel.findOne({ id: teamId });
+    if (!team) {
+      return [];
+    }
+
+    return team.members.map((member) => member.name);
+  }
+
   static async getUserRole(teamId: string, username: string): Promise<TeamMember['role'] | null> {
     await this.ensureBuiltinTeam();
     const team = await TeamModel.findOne({ id: teamId });

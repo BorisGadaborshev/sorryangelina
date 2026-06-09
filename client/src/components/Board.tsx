@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { observer } from 'mobx-react-lite';
-import { Box, AppBar, Toolbar, Typography, Button, ButtonGroup, CircularProgress, IconButton, Tooltip, Tabs, Tab, useMediaQuery, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, FormControl, Select, MenuItem, Menu, Slider, Divider, RadioGroup, FormControlLabel, Radio } from '@mui/material';
+import { Box, AppBar, Toolbar, Typography, Button, ButtonGroup, CircularProgress, IconButton, Tooltip, Tabs, Tab, useMediaQuery, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, FormControl, Select, MenuItem, Menu, Slider, Divider } from '@mui/material';
 import { DragDropContext, DropResult } from '@hello-pangea/dnd';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
@@ -59,7 +59,6 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   const [timerAnchorEl, setTimerAnchorEl] = useState<null | HTMLElement>(null);
   const [isMoodDialogOpen, setIsMoodDialogOpen] = useState(false);
   const [selectedMood, setSelectedMood] = useState<Mood | null>(null);
-  const [selectedSprintVipUserName, setSelectedSprintVipUserName] = useState('');
   const timerAudioRef = useRef<HTMLAudioElement | null>(null);
   const previousTimerRef = useRef({ running: false, remainingSeconds: 0 });
   const [timerMusicVolume, setTimerMusicVolume] = useState(() => {
@@ -92,7 +91,6 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
       return;
     }
     setSelectedMood(null);
-    setSelectedSprintVipUserName('');
     setIsMoodDialogOpen(true);
   }, [currentRoomId, currentUserName, currentUserMood]);
 
@@ -196,7 +194,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
 
   const handleSaveMood = () => {
     if (!selectedMood) return;
-    store.socketService?.setUserMood(selectedMood, selectedSprintVipUserName || undefined);
+    store.socketService?.setUserMood(selectedMood);
     setIsMoodDialogOpen(false);
   };
 
@@ -865,25 +863,6 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
               ))}
             </Box>
           </Box>
-          <Divider sx={{ my: 2 }} />
-          <Typography variant="subtitle2" sx={{ mb: 1 }}>
-            Кого отметим как VIP спринта?
-          </Typography>
-          <RadioGroup
-            value={selectedSprintVipUserName}
-            onChange={(event) => setSelectedSprintVipUserName(event.target.value)}
-          >
-            {store.users
-              .filter((user) => user.name !== store.currentUser?.name)
-              .map((user) => (
-                <FormControlLabel
-                  key={user.id}
-                  value={user.name}
-                  control={<Radio size="small" />}
-                  label={user.name}
-                />
-              ))}
-          </RadioGroup>
         </DialogContent>
         <DialogActions>
           <Button variant="contained" onClick={handleSaveMood} disabled={!selectedMood}>

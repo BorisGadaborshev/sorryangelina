@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { observer } from 'mobx-react-lite';
 import { Box, List, ListItem, ListItemText, Typography, Avatar, Button, Tooltip, IconButton } from '@mui/material';
 import PersonIcon from '@mui/icons-material/Person';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
@@ -8,7 +9,7 @@ import PersonRemoveIcon from '@mui/icons-material/PersonRemove';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import { RetroStore } from '../store/RetroStore';
-import { Mood, Phase } from '../types';
+import { BUILTIN_TEAM_ID, Mood, Phase } from '../types';
 
 interface User {
   id: string;
@@ -27,7 +28,7 @@ interface UserListProps {
   store: RetroStore;
 }
 
-const UserList: React.FC<UserListProps> = ({ 
+const UserList: React.FC<UserListProps> = observer(({ 
   users, 
   onlineUsers, 
   currentUserId,
@@ -35,31 +36,49 @@ const UserList: React.FC<UserListProps> = ({
   onReadyStateChange,
   store
 }) => {
-  const [fixedUsers, setFixedUsers] = useState<string[]>([]);
+  const [rosterUsers, setRosterUsers] = useState<string[]>([]);
   const [isOfflineExpanded, setIsOfflineExpanded] = useState(false);
+  const teamId = store.room?.teamId || store.selectedTeam?.id;
+  const isBuiltinTeam = teamId === BUILTIN_TEAM_ID;
   const currentUser = users.find(u => u.id === currentUserId);
   const isAdmin = currentUser?.role === 'admin';
+  const myVipVote = store.sprintVip.myVote;
+  const vipVoteHighlight = {
+    bg: 'rgba(255, 249, 196, 0.55)',
+    border: 'rgba(255, 224, 130, 0.75)',
+    text: '#8D6E00',
+  };
+
+  const handleVoteSprintVip = (userName: string) => {
+    if (!currentUser || userName === currentUser.name) return;
+    store.socketService?.voteSprintVip(userName);
+  };
 
   useEffect(() => {
-    const fetchFixedUsers = async () => {
+    if (!teamId) {
+      setRosterUsers([]);
+      return;
+    }
+
+    const fetchRosterUsers = async () => {
       try {
         const apiBase = process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3001';
-        const response = await fetch(`${apiBase}/api/auth/fixed-users`);
+        const response = await fetch(`${apiBase}/api/teams/${encodeURIComponent(teamId)}/members`);
         if (!response.ok) return;
-        const data = (await response.json()) as { users: string[] };
-        setFixedUsers(data.users || []);
+        const data = (await response.json()) as { members: string[] };
+        setRosterUsers(data.members || []);
       } catch (error) {
         // Silent fail: participant list should still work.
       }
     };
 
-    fetchFixedUsers();
-  }, []);
+    fetchRosterUsers();
+  }, [teamId]);
 
-  const offlineFixedUsers = useMemo(() => {
+  const offlineRosterUsers = useMemo(() => {
     const onlineNames = new Set(users.map((user) => user.name));
-    return fixedUsers.filter((name) => !onlineNames.has(name));
-  }, [fixedUsers, users]);
+    return rosterUsers.filter((name) => !onlineNames.has(name));
+  }, [rosterUsers, users]);
 
   const handleKickUser = (userId: string) => {
     if (isAdmin && userId !== currentUserId) {
@@ -123,20 +142,46 @@ const UserList: React.FC<UserListProps> = ({
           </>
         )}
       </Box>
+      <Box sx={{ px: 1, pb: 1 }}>
+        <Typography variant="subtitle2" gutterBottom>
+          VIP спринта
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+          Нажмите на ФИО участника, чтобы проголосовать
+          {store.sprintVip.voteCount > 0 ? ` (${store.sprintVip.voteCount} гол.)` : ''}
+        </Typography>
+        {myVipVote && (
+          <Typography variant="caption" color="primary" sx={{ display: 'block', mb: 0.5 }}>
+            Ваш голос: {myVipVote}
+          </Typography>
+        )}
+      </Box>
       <List>
         {users.map((user) => {
           const moodMeta = getMoodMeta(user.mood);
           const isSprintVip = store.sprintVip.vipUserName === user.name;
+          const isMyVipVote = myVipVote === user.name;
+          const canVoteForUser = Boolean(currentUser && user.name !== currentUser.name);
           return (
           <ListItem
             key={user.id}
+            onClick={() => handleVoteSprintVip(user.name)}
             sx={{
               borderRadius: 1,
               mb: 0.5,
               overflow: 'visible',
-              bgcolor: user.id === currentUserId && user.isReady ? 'success.light' : 'transparent',
+              cursor: canVoteForUser ? 'pointer' : 'default',
+              border: isMyVipVote ? '2px solid' : '2px solid transparent',
+              borderColor: isMyVipVote ? vipVoteHighlight.border : 'transparent',
+              bgcolor: user.id === currentUserId && user.isReady
+                ? 'success.light'
+                : isMyVipVote
+                  ? vipVoteHighlight.bg
+                  : 'transparent',
               '&:hover': {
-                bgcolor: user.id === currentUserId && user.isReady ? 'success.light' : 'action.hover',
+                bgcolor: canVoteForUser
+                  ? (isMyVipVote ? vipVoteHighlight.bg : 'action.hover')
+                  : (user.id === currentUserId && user.isReady ? 'success.light' : 'transparent'),
               },
             }}
           >
@@ -165,18 +210,38 @@ const UserList: React.FC<UserListProps> = ({
                 {moodMeta?.emoji ?? (user.role === 'admin' ? <AdminPanelSettingsIcon /> : <PersonIcon />)}
               </Avatar>
             </Box>
-            <ListItemText
-              primary={user.name}
-              secondary={isSprintVip ? 'VIP спринта' : (user.role === 'admin' ? 'Администратор' : 'Участник')}
-              sx={{
-                '& .MuiListItemText-primary': {
-                  fontWeight: onlineUsers.includes(user.id) ? 'bold' : 'normal',
-                },
-                '& .MuiListItemText-secondary': {
-                  color: user.role === 'admin' ? 'primary.main' : 'text.secondary',
-                },
-              }}
-            />
+            <Tooltip
+              title={
+                !canVoteForUser
+                  ? 'Нельзя голосовать за себя'
+                  : isMyVipVote
+                    ? 'Нажмите еще раз, чтобы снять голос'
+                    : 'Проголосовать за VIP спринта'
+              }
+            >
+              <ListItemText
+                primary={user.name}
+                secondary={
+                  isSprintVip
+                    ? 'VIP спринта'
+                    : isMyVipVote
+                      ? 'Ваш выбор'
+                      : (user.role === 'admin' ? 'Администратор' : 'Участник')
+                }
+                sx={{
+                  '& .MuiListItemText-primary': {
+                    fontWeight: onlineUsers.includes(user.id) ? 'bold' : 'normal',
+                  },
+                  '& .MuiListItemText-secondary': {
+                    color: isSprintVip
+                      ? 'warning.main'
+                      : isMyVipVote
+                        ? vipVoteHighlight.text
+                        : (user.role === 'admin' ? 'primary.main' : 'text.secondary'),
+                  },
+                }}
+              />
+            </Tooltip>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
               <Tooltip
                 title={
@@ -198,7 +263,10 @@ const UserList: React.FC<UserListProps> = ({
                   <IconButton
                     size="small"
                     color="error"
-                    onClick={() => handleKickUser(user.id)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      handleKickUser(user.id);
+                    }}
                   >
                     <PersonRemoveIcon />
                   </IconButton>
@@ -208,11 +276,11 @@ const UserList: React.FC<UserListProps> = ({
           </ListItem>
         )})}
       </List>
-      {offlineFixedUsers.length > 0 && (
+      {offlineRosterUsers.length > 0 && (
         <Box sx={{ px: 1, pb: 1 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
             <Typography variant="subtitle2" color="text.secondary">
-              Оффлайн (фиксированные) ({offlineFixedUsers.length})
+              {isBuiltinTeam ? 'Оффлайн (фиксированные)' : 'Оффлайн (команда)'} ({offlineRosterUsers.length})
             </Typography>
             <IconButton size="small" onClick={() => setIsOfflineExpanded((prev) => !prev)}>
               {isOfflineExpanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
@@ -220,7 +288,7 @@ const UserList: React.FC<UserListProps> = ({
           </Box>
           {isOfflineExpanded && (
             <List dense>
-              {offlineFixedUsers.map((name) => (
+              {offlineRosterUsers.map((name) => (
                 <ListItem key={name} sx={{ borderRadius: 1, opacity: 0.7 }}>
                   <Avatar
                     sx={{
@@ -247,6 +315,6 @@ const UserList: React.FC<UserListProps> = ({
       )}
     </Box>
   );
-};
+});
 
 export default UserList; 

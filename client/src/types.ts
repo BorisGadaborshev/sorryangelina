@@ -64,6 +64,7 @@ export interface FacilitatorAnnouncement {
 export interface SprintVipState {
   vipUserName?: string;
   voteCount: number;
+  myVote?: string;
 }
 
 export interface ChatMessage {

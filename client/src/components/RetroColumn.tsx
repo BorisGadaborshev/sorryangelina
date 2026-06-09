@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { observer } from 'mobx-react-lite';
 import { Paper, Typography, Box, TextField, Button, IconButton, Popover, Tooltip, useMediaQuery } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
@@ -8,7 +8,11 @@ import RetroCard from './RetroCard';
 import { Card } from '../types';
 import EmojiEmotionsIcon from '@mui/icons-material/EmojiEmotions';
 import ImageIcon from '@mui/icons-material/Image';
+import MicIcon from '@mui/icons-material/Mic';
 import AddIcon from '@mui/icons-material/Add';
+
+const getSpeechRecognition = (): SpeechRecognitionConstructor | null =>
+  window.SpeechRecognition || window.webkitSpeechRecognition || null;
 
 interface Props {
   title: string;
@@ -46,8 +50,23 @@ const RetroColumn: React.FC<Props> = observer(({ title, type, columnIndex, store
   const [anchorEl, setAnchorEl] = useState<HTMLButtonElement | null>(null);
   const [imageAnchorEl, setImageAnchorEl] = useState<HTMLButtonElement | null>(null);
   const [cursorPosition, setCursorPosition] = useState<number>(0);
+  const [isListening, setIsListening] = useState(false);
+  const [interimTranscript, setInterimTranscript] = useState('');
+  const [speechError, setSpeechError] = useState<string | null>(null);
   const textFieldRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const speechRecognitionRef = useRef<SpeechRecognition | null>(null);
+  const newCardTextRef = useRef(newCardText);
+  const cursorPositionRef = useRef(cursorPosition);
+  const isSpeechSupported = Boolean(getSpeechRecognition());
+
+  useEffect(() => {
+    newCardTextRef.current = newCardText;
+  }, [newCardText]);
+
+  useEffect(() => {
+    cursorPositionRef.current = cursorPosition;
+  }, [cursorPosition]);
   const isMobile = useMediaQuery('(max-width:600px)');
   const theme = useTheme();
 
@@ -55,6 +74,118 @@ const RetroColumn: React.FC<Props> = observer(({ title, type, columnIndex, store
     const filteredCards = store.cards.filter(card => card.column === columnIndex);
     setLocalCards(filteredCards);
   }, [store.cards, columnIndex]);
+
+  const insertDictation = (transcript: string) => {
+    const cleaned = transcript.trim();
+    if (!cleaned) return;
+
+    const start = cursorPositionRef.current;
+    const currentText = newCardTextRef.current;
+    const before = currentText.slice(0, start);
+    const after = currentText.slice(start);
+    const needsSpaceBefore = before.length > 0 && !/\s$/.test(before);
+    const needsSpaceAfter = after.length > 0 && !/^\s/.test(after);
+    const piece = `${needsSpaceBefore ? ' ' : ''}${cleaned}${needsSpaceAfter ? ' ' : ''}`;
+    const nextText = before + piece + after;
+    const nextCursor = start + piece.length;
+
+    newCardTextRef.current = nextText;
+    cursorPositionRef.current = nextCursor;
+    setNewCardText(nextText);
+    setCursorPosition(nextCursor);
+    setTimeout(() => {
+      if (textFieldRef.current) {
+        textFieldRef.current.focus();
+        textFieldRef.current.setSelectionRange(nextCursor, nextCursor);
+      }
+    }, 0);
+  };
+
+  const buildPreviewText = (base: string, cursor: number, interim: string) => {
+    const before = base.slice(0, cursor);
+    const after = base.slice(cursor);
+    const needsSpaceBefore = before.length > 0 && !/\s$/.test(before);
+    return `${before}${needsSpaceBefore ? ' ' : ''}${interim}${after}`;
+  };
+
+  const displayedCardText = useMemo(() => {
+    if (!isListening || !interimTranscript) return newCardText;
+    return buildPreviewText(newCardText, cursorPosition, interimTranscript);
+  }, [cursorPosition, interimTranscript, isListening, newCardText]);
+
+  const stopListening = () => {
+    speechRecognitionRef.current?.stop();
+    speechRecognitionRef.current = null;
+    setIsListening(false);
+    setInterimTranscript('');
+  };
+
+  const handleToggleDictation = () => {
+    if (!isSpeechSupported) {
+      setSpeechError('Браузер не поддерживает надиктовку');
+      return;
+    }
+
+    if (isListening) {
+      stopListening();
+      return;
+    }
+
+    const SpeechRecognitionClass = getSpeechRecognition();
+    if (!SpeechRecognitionClass) return;
+
+    setSpeechError(null);
+    const recognition = new SpeechRecognitionClass();
+    recognition.lang = 'ru-RU';
+    recognition.continuous = true;
+    recognition.interimResults = true;
+
+    recognition.onresult = (event) => {
+      let interim = '';
+      let finalTranscript = '';
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const part = event.results[index][0].transcript;
+        if (event.results[index].isFinal) {
+          finalTranscript += part;
+        } else {
+          interim += part;
+        }
+      }
+
+      setInterimTranscript(interim);
+      if (finalTranscript) {
+        insertDictation(finalTranscript);
+        setInterimTranscript('');
+      }
+    };
+
+    recognition.onerror = () => {
+      setSpeechError('Не удалось распознать речь');
+      stopListening();
+    };
+
+    recognition.onend = () => {
+      speechRecognitionRef.current = null;
+      setIsListening(false);
+    };
+
+    speechRecognitionRef.current = recognition;
+    recognition.start();
+    setIsListening(true);
+    textFieldRef.current?.focus();
+  };
+
+  useEffect(() => {
+    if (!addCardAnchorEl) {
+      stopListening();
+      setSpeechError(null);
+      setInterimTranscript('');
+    }
+  }, [addCardAnchorEl]);
+
+  useEffect(() => () => {
+    speechRecognitionRef.current?.abort();
+  }, []);
 
   const handleAddCard = () => {
     if (newCardText.trim() && store.socket && store.phase === 'creation') {
@@ -85,6 +216,7 @@ const RetroColumn: React.FC<Props> = observer(({ title, type, columnIndex, store
 
   const handleCursorTracking = (event: React.SyntheticEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const position = event.currentTarget.selectionStart ?? 0;
+    cursorPositionRef.current = position;
     setCursorPosition(position);
   };
 
@@ -178,10 +310,31 @@ const RetroColumn: React.FC<Props> = observer(({ title, type, columnIndex, store
                   rows={isMobile ? 2 : 3}
                   variant="outlined"
                   placeholder="Добавить новую карточку..."
-                  value={newCardText}
-                  onChange={(e) => setNewCardText(e.target.value)}
+                  value={displayedCardText}
+                  onChange={(e) => {
+                    if (isListening) {
+                      setInterimTranscript('');
+                    }
+                    const value = e.target.value;
+                    newCardTextRef.current = value;
+                    setNewCardText(value);
+                  }}
                   inputRef={textFieldRef}
                   size="small"
+                  sx={isListening ? {
+                    '& .MuiOutlinedInput-root': {
+                      animation: 'dictationPulse 1.4s ease-in-out infinite',
+                      '@keyframes dictationPulse': {
+                        '0%': { boxShadow: '0 0 0 0 rgba(211, 47, 47, 0.35)' },
+                        '70%': { boxShadow: '0 0 0 8px rgba(211, 47, 47, 0)' },
+                        '100%': { boxShadow: '0 0 0 0 rgba(211, 47, 47, 0)' }
+                      },
+                      '& fieldset': {
+                        borderColor: 'error.main',
+                        borderWidth: 2
+                      }
+                    }
+                  } : undefined}
                   inputProps={{
                     onClick: handleCursorTracking,
                     onKeyUp: handleCursorTracking,
@@ -203,11 +356,71 @@ const RetroColumn: React.FC<Props> = observer(({ title, type, columnIndex, store
                         >
                           <ImageIcon fontSize="small" />
                         </IconButton>
+                        <Tooltip title={isListening ? 'Остановить надиктовку' : 'Надиктовать текст'}>
+                          <span>
+                            <IconButton
+                              onClick={handleToggleDictation}
+                              disabled={!isSpeechSupported}
+                              color={isListening ? 'error' : 'default'}
+                              sx={{
+                                p: 0.5,
+                                opacity: isListening ? 1 : 0.7,
+                                animation: isListening ? 'micPulse 1s ease-in-out infinite' : 'none',
+                                '@keyframes micPulse': {
+                                  '0%, 100%': { transform: 'scale(1)' },
+                                  '50%': { transform: 'scale(1.15)' }
+                                },
+                                '&:hover': { backgroundColor: 'transparent', opacity: 1 }
+                              }}
+                            >
+                              <MicIcon fontSize="small" />
+                            </IconButton>
+                          </span>
+                        </Tooltip>
                       </Box>
                     )
                   }}
                 />
               </Box>
+              {speechError && (
+                <Typography variant="caption" color="error" sx={{ display: 'block', mb: 1 }}>
+                  {speechError}
+                </Typography>
+              )}
+              {isListening && (
+                <Box
+                  sx={{
+                    mb: 1,
+                    px: 1,
+                    py: 0.75,
+                    borderRadius: 1,
+                    bgcolor: 'error.main',
+                    color: 'error.contrastText',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1
+                  }}
+                >
+                  <Box
+                    sx={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: '50%',
+                      bgcolor: 'error.contrastText',
+                      animation: 'recordDot 1s ease-in-out infinite',
+                      '@keyframes recordDot': {
+                        '0%, 100%': { opacity: 1 },
+                        '50%': { opacity: 0.25 }
+                      }
+                    }}
+                  />
+                  <Typography variant="caption" sx={{ flex: 1 }}>
+                    {interimTranscript
+                      ? `Слушаю: «${interimTranscript.trim()}»`
+                      : 'Говорите... текст появится в поле выше'}
+                  </Typography>
+                </Box>
+              )}
               <Button
                 fullWidth
                 variant="contained"

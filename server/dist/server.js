@@ -494,14 +494,27 @@ const buildSprintVipState = (room) => {
     });
     return { vipUserName, voteCount };
 };
+const buildPersonalSprintVipState = (room, userName) => {
+    const votes = roomSprintVipVotes.get(room.id);
+    const myVote = userName && votes ? votes.get(userName) : undefined;
+    return Object.assign(Object.assign({}, buildSprintVipState(room)), { myVote });
+};
 const emitSprintVipStateToRoom = (roomId) => __awaiter(void 0, void 0, void 0, function* () {
     const room = yield RoomService_1.RoomService.getRoom(roomId);
     if (!room)
         return;
-    io.to(roomId).emit('sprint-vip-state', buildSprintVipState(room));
+    const votes = roomSprintVipVotes.get(roomId);
+    const sockets = yield io.in(roomId).fetchSockets();
+    const base = buildSprintVipState(room);
+    for (const remoteSocket of sockets) {
+        const user = room.users.find((roomUser) => roomUser.id === remoteSocket.id);
+        const myVote = user && votes ? votes.get(user.name) : undefined;
+        remoteSocket.emit('sprint-vip-state', Object.assign(Object.assign({}, base), { myVote }));
+    }
 });
 const emitSprintVipStateToSocket = (socket, room) => {
-    socket.emit('sprint-vip-state', buildSprintVipState(room));
+    const user = room.users.find((roomUser) => roomUser.id === socket.id);
+    socket.emit('sprint-vip-state', buildPersonalSprintVipState(room, user === null || user === void 0 ? void 0 : user.name));
 };
 io.on('connection', (socket) => {
     connectionCount++;
@@ -897,7 +910,38 @@ io.on('connection', (socket) => {
             console.error('Error updating ready state:', error);
         }
     }));
-    socket.on('set-user-mood', ({ mood, sprintVipUserName }) => __awaiter(void 0, void 0, void 0, function* () {
+    socket.on('vote-sprint-vip', ({ userName }) => __awaiter(void 0, void 0, void 0, function* () {
+        if (!(currentUser === null || currentUser === void 0 ? void 0 : currentUser.roomId))
+            return;
+        try {
+            const room = yield RoomService_1.RoomService.getRoom(currentUser.roomId);
+            if (!room)
+                return;
+            const targetName = typeof userName === 'string' ? userName.trim() : '';
+            const votes = roomSprintVipVotes.get(currentUser.roomId) || new Map();
+            const currentVote = votes.get(currentUser.name);
+            if (!targetName || targetName === currentUser.name) {
+                return;
+            }
+            if (!room.users.some((user) => user.name === targetName)) {
+                socket.emit('error', 'Участник не найден');
+                return;
+            }
+            if (currentVote === targetName) {
+                votes.delete(currentUser.name);
+            }
+            else {
+                votes.set(currentUser.name, targetName);
+            }
+            roomSprintVipVotes.set(currentUser.roomId, votes);
+            yield emitSprintVipStateToRoom(currentUser.roomId);
+        }
+        catch (error) {
+            console.error('Error voting sprint VIP:', error);
+            socket.emit('error', 'Не удалось проголосовать за VIP спринта');
+        }
+    }));
+    socket.on('set-user-mood', ({ mood }) => __awaiter(void 0, void 0, void 0, function* () {
         if (!(currentUser === null || currentUser === void 0 ? void 0 : currentUser.roomId))
             return;
         const safeMood = normalizeMood(mood);
@@ -909,20 +953,12 @@ io.on('connection', (socket) => {
             const room = yield RoomService_1.RoomService.updateUserMood(currentUser.roomId, currentUser.id, safeMood);
             if (!room)
                 return;
-            const safeSprintVipUserName = typeof sprintVipUserName === 'string' ? sprintVipUserName.trim() : '';
-            const isExistingParticipant = room.users.some((user) => user.name === safeSprintVipUserName);
-            if (safeSprintVipUserName && isExistingParticipant && safeSprintVipUserName !== currentUser.name) {
-                const votes = roomSprintVipVotes.get(currentUser.roomId) || new Map();
-                votes.set(currentUser.name, safeSprintVipUserName);
-                roomSprintVipVotes.set(currentUser.roomId, votes);
-            }
             currentUser = Object.assign(Object.assign({}, currentUser), { mood: safeMood });
             io.to(currentUser.roomId).emit('state-updated', {
                 cards: room.cards,
                 phase: room.phase,
                 users: room.users
             });
-            yield emitSprintVipStateToRoom(currentUser.roomId);
         }
         catch (error) {
             console.error('Error updating user mood:', error);

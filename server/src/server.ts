@@ -157,6 +157,16 @@ app.post('/api/teams/:teamId/join', async (req, res) => {
   }
 });
 
+app.get('/api/teams/:teamId/members', async (req, res) => {
+  try {
+    const members = await TeamService.getTeamRosterNames(req.params.teamId);
+    res.json({ members });
+  } catch (error) {
+    console.error('Error getting team members:', error);
+    res.status(500).json({ error: 'Failed to get team members' });
+  }
+});
+
 app.get('/api/teams/:teamId/rooms', async (req, res) => {
   try {
     const team = await TeamService.getTeam(req.params.teamId);
@@ -385,6 +395,7 @@ interface FacilitatorAnnouncement {
 interface SprintVipState {
   vipUserName?: string;
   voteCount: number;
+  myVote?: string;
 }
 
 interface ChatMessage {
@@ -581,14 +592,60 @@ const buildSprintVipState = (room: Room): SprintVipState => {
   return { vipUserName, voteCount };
 };
 
+const buildPersonalSprintVipState = (room: Room, userName?: string): SprintVipState => {
+  const votes = roomSprintVipVotes.get(room.id);
+  const myVote = userName && votes ? votes.get(userName) : undefined;
+  return {
+    ...buildSprintVipState(room),
+    myVote
+  };
+};
+
+const resolveRoomUserForSocket = (
+  room: Room,
+  connectedSocket: { id: string; data: Record<string, unknown> }
+): User | undefined => {
+  const trackedUserName =
+    typeof connectedSocket.data.userName === 'string' ? connectedSocket.data.userName : undefined;
+  if (trackedUserName) {
+    const byName = room.users.find((roomUser) => roomUser.name === trackedUserName);
+    if (byName) return byName;
+  }
+
+  const trackedUserId =
+    typeof connectedSocket.data.userId === 'string' ? connectedSocket.data.userId : connectedSocket.id;
+  return room.users.find(
+    (roomUser) => roomUser.id === trackedUserId || roomUser.id === connectedSocket.id
+  );
+};
+
+const resolveVoterNameForSocket = (
+  room: Room,
+  connectedSocket: { id: string; data: Record<string, unknown> }
+): string | undefined => {
+  if (typeof connectedSocket.data.userName === 'string') {
+    return connectedSocket.data.userName;
+  }
+  return resolveRoomUserForSocket(room, connectedSocket)?.name;
+};
+
 const emitSprintVipStateToRoom = async (roomId: string): Promise<void> => {
   const room = await RoomService.getRoom(roomId);
   if (!room) return;
-  io.to(roomId).emit('sprint-vip-state', buildSprintVipState(room));
+  const votes = roomSprintVipVotes.get(roomId);
+  const sockets = await io.in(roomId).fetchSockets();
+  const base = buildSprintVipState(room);
+
+  for (const remoteSocket of sockets) {
+    const voterName = resolveVoterNameForSocket(room, remoteSocket);
+    const myVote = voterName && votes ? votes.get(voterName) : undefined;
+    remoteSocket.emit('sprint-vip-state', { ...base, myVote });
+  }
 };
 
 const emitSprintVipStateToSocket = (socket: Socket, room: Room): void => {
-  socket.emit('sprint-vip-state', buildSprintVipState(room));
+  const voterName = resolveVoterNameForSocket(room, socket);
+  socket.emit('sprint-vip-state', buildPersonalSprintVipState(room, voterName));
 };
 
 io.on('connection', (socket) => {
@@ -626,6 +683,7 @@ io.on('connection', (socket) => {
       socket.join(roomId);
       currentUser = user;
       socket.data.userId = user.id;
+      socket.data.userName = user.name;
       
       console.log('Session restored successfully:', { roomId, userId });
       socket.emit('room-joined', { 
@@ -685,6 +743,7 @@ io.on('connection', (socket) => {
       });
       socket.join(roomId);
       socket.data.userId = socket.id;
+      socket.data.userName = effectiveUsername;
       currentUser = room.users.find((user) => user.id === socket.id) || {
         id: socket.id,
         name: effectiveUsername,
@@ -772,6 +831,7 @@ io.on('connection', (socket) => {
       socket.join(roomId);
       currentUser = user;
       socket.data.userId = user.id;
+      socket.data.userName = effectiveUsername;
       
       console.log('User joined room successfully:', { roomId, username: effectiveUsername, isRejoin: !!existingUser });
       socket.emit('room-joined', { 
@@ -1004,7 +1064,41 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('set-user-mood', async ({ mood, sprintVipUserName }) => {
+  socket.on('vote-sprint-vip', async ({ userName }) => {
+    if (!currentUser?.roomId) return;
+
+    try {
+      const room = await RoomService.getRoom(currentUser.roomId);
+      if (!room) return;
+
+      const targetName = typeof userName === 'string' ? userName.trim() : '';
+      const votes = roomSprintVipVotes.get(currentUser.roomId) || new Map<string, string>();
+      const currentVote = votes.get(currentUser.name);
+
+      if (!targetName || targetName === currentUser.name) {
+        return;
+      }
+
+      if (!room.users.some((user) => user.name === targetName)) {
+        socket.emit('error', 'Участник не найден');
+        return;
+      }
+
+      if (currentVote === targetName) {
+        votes.delete(currentUser.name);
+      } else {
+        votes.set(currentUser.name, targetName);
+      }
+
+      roomSprintVipVotes.set(currentUser.roomId, votes);
+      await emitSprintVipStateToRoom(currentUser.roomId);
+    } catch (error) {
+      console.error('Error voting sprint VIP:', error);
+      socket.emit('error', 'Не удалось проголосовать за VIP спринта');
+    }
+  });
+
+  socket.on('set-user-mood', async ({ mood }) => {
     if (!currentUser?.roomId) return;
     const safeMood = normalizeMood(mood);
     if (!safeMood) {
@@ -1015,13 +1109,6 @@ io.on('connection', (socket) => {
     try {
       const room = await RoomService.updateUserMood(currentUser.roomId, currentUser.id, safeMood);
       if (!room) return;
-      const safeSprintVipUserName = typeof sprintVipUserName === 'string' ? sprintVipUserName.trim() : '';
-      const isExistingParticipant = room.users.some((user) => user.name === safeSprintVipUserName);
-      if (safeSprintVipUserName && isExistingParticipant && safeSprintVipUserName !== currentUser.name) {
-        const votes = roomSprintVipVotes.get(currentUser.roomId) || new Map<string, string>();
-        votes.set(currentUser.name, safeSprintVipUserName);
-        roomSprintVipVotes.set(currentUser.roomId, votes);
-      }
       currentUser = {
         ...currentUser,
         mood: safeMood
@@ -1031,7 +1118,6 @@ io.on('connection', (socket) => {
         phase: room.phase,
         users: room.users
       });
-      await emitSprintVipStateToRoom(currentUser.roomId);
     } catch (error) {
       console.error('Error updating user mood:', error);
       socket.emit('error', 'Failed to update user mood');
