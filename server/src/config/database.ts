@@ -22,9 +22,27 @@ export const connectDB = async (): Promise<void> => {
       updated_at timestamptz default now()
     );
 
+    create table if not exists teams (
+      id text primary key,
+      name text not null,
+      password_hash text not null,
+      owner text not null,
+      created_at timestamptz default now(),
+      updated_at timestamptz default now()
+    );
+
+    create table if not exists team_members (
+      team_id text not null references teams(id) on delete cascade,
+      name text not null,
+      role text not null check (role in ('admin','user')),
+      created_at timestamptz default now(),
+      primary key (team_id, name)
+    );
+
     create table if not exists rooms (
       id text primary key,
       password text not null,
+      team_id text references teams(id) on delete set null,
       owner text not null,
       phase text not null check (phase in ('creation','voting','discussion','rating')),
       created_at timestamptz default now(),
@@ -58,14 +76,17 @@ export const connectDB = async (): Promise<void> => {
       primary key (card_id, user_id)
     );
 
-    create index if not exists idx_cards_room on cards(room_id);
-    create index if not exists idx_users_room on room_users(room_id);
-    create unique index if not exists idx_accounts_name_ci on accounts ((lower(name)));
-
+    alter table rooms add column if not exists team_id text references teams(id) on delete set null;
     alter table cards add column if not exists image_url text;
     alter table room_users add column if not exists mood text;
     alter table rooms drop constraint if exists rooms_phase_check;
     alter table rooms add constraint rooms_phase_check check (phase in ('creation','voting','discussion','rating'));
+
+    create index if not exists idx_cards_room on cards(room_id);
+    create index if not exists idx_users_room on room_users(room_id);
+    create index if not exists idx_rooms_team on rooms(team_id);
+    create index if not exists idx_team_members_name on team_members(name);
+    create unique index if not exists idx_accounts_name_ci on accounts ((lower(name)));
   `);
 
   console.log('Connected to PostgreSQL and ensured schema');

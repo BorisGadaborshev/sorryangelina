@@ -15,22 +15,27 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.RoomService = void 0;
 const Room_1 = require("../models/Room");
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
-const PRIORITY_ADMIN_NAME = 'Коваль Ангелина Константиновна';
 class RoomService {
-    static createRoom(roomId, password, owner, username) {
+    static createRoom(roomId, password, owner, username, options = {}) {
         return __awaiter(this, void 0, void 0, function* () {
             const hashedPassword = yield bcryptjs_1.default.hash(password, 10);
             const user = {
                 id: owner,
                 name: username,
                 roomId,
-                role: 'admin',
+                role: options.userRole || 'user',
                 isReady: false
             };
-            console.log('Creating room with admin user:', user);
+            console.log('Creating room:', {
+                roomId,
+                teamId: options.teamId,
+                owner: username,
+                user
+            });
             const room = yield Room_1.RoomModel.create({
                 id: roomId,
                 password: hashedPassword,
+                teamId: options.teamId,
                 owner: username,
                 phase: 'creation',
                 users: [user],
@@ -65,13 +70,12 @@ class RoomService {
                 return null;
             const existingUser = room.users.find(user => user.name === username);
             if (existingUser) {
-                const adminName = this.getAdminName(room.owner, room.users.map((user) => user.name));
                 console.log('Found existing user check:', {
                     username,
-                    adminName,
+                    role: existingUser.role,
                     roomOwner: room.owner
                 });
-                return Object.assign(Object.assign({}, existingUser), { role: username === adminName ? 'admin' : 'user' });
+                return Object.assign(Object.assign({}, existingUser), { role: existingUser.role || 'user' });
             }
             return null;
         });
@@ -81,14 +85,11 @@ class RoomService {
             const room = yield Room_1.RoomModel.findOne({ id: roomId });
             if (!room)
                 return null;
-            const userNamesAfterJoin = Array.from(new Set([...room.users.map((existingUser) => existingUser.name), user.name]));
-            const adminName = this.getAdminName(room.owner, userNamesAfterJoin);
             const existingUser = yield this.findExistingUser(roomId, user.name);
             if (existingUser) {
-                const userWithRole = Object.assign(Object.assign({}, user), { role: user.name === adminName ? 'admin' : 'user' });
+                const userWithRole = Object.assign(Object.assign({}, user), { role: existingUser.role || 'user' });
                 console.log('Updating existing user:', {
-                    user: userWithRole,
-                    adminName
+                    user: userWithRole
                 });
                 const updatedRoom = yield Room_1.RoomModel.findOneAndUpdate({
                     id: roomId,
@@ -101,10 +102,9 @@ class RoomService {
                 }, { new: true });
                 return updatedRoom ? this.convertToRoom(updatedRoom) : null;
             }
-            const userWithRole = Object.assign(Object.assign({}, user), { role: user.name === adminName ? 'admin' : 'user' });
+            const userWithRole = Object.assign(Object.assign({}, user), { role: 'user' });
             console.log('Adding new user:', {
                 user: userWithRole,
-                adminName,
                 existingUsersCount: room.users.length
             });
             const updatedRoom = yield Room_1.RoomModel.findOneAndUpdate({ id: roomId }, {
@@ -166,12 +166,10 @@ class RoomService {
                 console.log('User not found for phase update:', { userId, userName, availableUsers: room.users });
                 return null;
             }
-            const adminName = this.getAdminName(room.owner, room.users.map((roomUser) => roomUser.name));
-            const hasAdminRole = user.name === adminName;
+            const hasAdminRole = user.role === 'admin';
             console.log('Checking phase update permissions:', {
                 userName: user.name,
                 userRole: user.role,
-                adminName,
                 hasAdminRole,
                 currentPhase: room.phase,
                 requestedPhase: phase
@@ -253,9 +251,9 @@ class RoomService {
             yield Room_1.RoomModel.deleteOne({ id: roomId });
         });
     }
-    static getAllRooms() {
+    static getAllRooms(teamId) {
         return __awaiter(this, void 0, void 0, function* () {
-            const rooms = yield Room_1.RoomModel.find();
+            const rooms = yield Room_1.RoomModel.find(teamId ? { teamId } : undefined);
             return rooms.map(room => this.convertToRoom(room));
         });
     }
@@ -273,11 +271,9 @@ class RoomService {
                 return { room: null, user: null };
             }
             console.log('Found existing user:', existingUser);
-            const adminName = this.getAdminName(room.owner, room.users.map((roomUser) => roomUser.name));
-            const role = existingUser.name === adminName ? 'admin' : 'user';
+            const role = existingUser.role || 'user';
             console.log('Role determination during restore:', {
                 username: existingUser.name,
-                adminName,
                 assignedRole: role,
                 currentRole: existingUser.role
             });
@@ -375,15 +371,17 @@ class RoomService {
         });
     }
     static convertToRoom(doc) {
-        const { id, owner, phase, createdAt, users, cards } = doc;
-        const adminName = this.getAdminName(owner, (users || []).map((user) => user.name));
+        const { id, teamId, owner, phase, createdAt, users, cards } = doc;
+        const hasAdmin = Boolean(users === null || users === void 0 ? void 0 : users.some((user) => user.role === 'admin'));
         console.log('Converting room document:', {
+            teamId,
             owner,
-            adminName,
+            hasAdmin,
             originalUsers: users === null || users === void 0 ? void 0 : users.map(u => ({ name: u.name, role: u.role }))
         });
         const convertedRoom = {
             id,
+            teamId,
             owner,
             phase,
             createdAt,
@@ -391,7 +389,7 @@ class RoomService {
                 id: user.id,
                 name: user.name,
                 roomId: id,
-                role: user.name === adminName ? 'admin' : 'user',
+                role: user.role === 'admin' || (!hasAdmin && user.name === owner) ? 'admin' : 'user',
                 isReady: user.isReady,
                 mood: user.mood
             })) : [],
@@ -401,9 +399,6 @@ class RoomService {
             convertedUsers: convertedRoom.users.map(u => ({ name: u.name, role: u.role }))
         });
         return convertedRoom;
-    }
-    static getAdminName(roomOwner, userNames) {
-        return userNames.includes(PRIORITY_ADMIN_NAME) ? PRIORITY_ADMIN_NAME : roomOwner;
     }
 }
 exports.RoomService = RoomService;

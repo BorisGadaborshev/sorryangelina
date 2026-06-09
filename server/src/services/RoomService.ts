@@ -1,25 +1,29 @@
 import { RoomModel } from '../models/Room';
-import { Room, RoomDocument, User, Card, Phase } from '../types';
+import { Room, RoomDocument, User, Card, Phase, CreateRoomOptions } from '../types';
 import bcrypt from 'bcryptjs';
 
-const PRIORITY_ADMIN_NAME = 'Коваль Ангелина Константиновна';
-
 export class RoomService {
-  static async createRoom(roomId: string, password: string, owner: string, username: string): Promise<Room> {
+  static async createRoom(roomId: string, password: string, owner: string, username: string, options: CreateRoomOptions = {}): Promise<Room> {
     const hashedPassword = await bcrypt.hash(password, 10);
-    const user: User = { 
-      id: owner, 
-      name: username, 
+    const user: User = {
+      id: owner,
+      name: username,
       roomId,
-      role: 'admin',
+      role: options.userRole || 'user',
       isReady: false
     };
     
-    console.log('Creating room with admin user:', user);
+    console.log('Creating room:', {
+      roomId,
+      teamId: options.teamId,
+      owner: username,
+      user
+    });
     
     const room = await RoomModel.create({
       id: roomId,
       password: hashedPassword,
+      teamId: options.teamId,
       owner: username,
       phase: 'creation',
       users: [user],
@@ -52,17 +56,15 @@ export class RoomService {
     
     const existingUser = room.users.find(user => user.name === username);
     if (existingUser) {
-      const adminName = this.getAdminName(room.owner, room.users.map((user) => user.name));
-      
       console.log('Found existing user check:', { 
         username,
-        adminName,
+        role: existingUser.role,
         roomOwner: room.owner
       });
 
       return {
         ...existingUser,
-        role: username === adminName ? 'admin' as const : 'user' as const
+        role: existingUser.role || 'user' as const
       };
     }
     return null;
@@ -72,20 +74,16 @@ export class RoomService {
     const room = await RoomModel.findOne({ id: roomId });
     if (!room) return null;
 
-    const userNamesAfterJoin = Array.from(new Set([...room.users.map((existingUser) => existingUser.name), user.name]));
-    const adminName = this.getAdminName(room.owner, userNamesAfterJoin);
-
     const existingUser = await this.findExistingUser(roomId, user.name);
     
     if (existingUser) {
       const userWithRole = { 
         ...user, 
-        role: user.name === adminName ? 'admin' as const : 'user' as const 
+        role: existingUser.role || 'user' as const
       };
       
       console.log('Updating existing user:', {
-        user: userWithRole,
-        adminName
+        user: userWithRole
       });
       
       const updatedRoom = await RoomModel.findOneAndUpdate(
@@ -106,12 +104,11 @@ export class RoomService {
 
     const userWithRole = { 
       ...user, 
-      role: user.name === adminName ? 'admin' as const : 'user' as const
+      role: 'user' as const
     };
     
     console.log('Adding new user:', {
       user: userWithRole,
-      adminName,
       existingUsersCount: room.users.length
     });
 
@@ -201,13 +198,11 @@ export class RoomService {
       return null;
     }
 
-    const adminName = this.getAdminName(room.owner, room.users.map((roomUser) => roomUser.name));
-    const hasAdminRole = user.name === adminName;
+    const hasAdminRole = user.role === 'admin';
     
     console.log('Checking phase update permissions:', {
       userName: user.name,
       userRole: user.role,
-      adminName,
       hasAdminRole,
       currentPhase: room.phase,
       requestedPhase: phase
@@ -315,8 +310,8 @@ export class RoomService {
     await RoomModel.deleteOne({ id: roomId });
   }
 
-  static async getAllRooms(): Promise<Room[]> {
-    const rooms = await RoomModel.find();
+  static async getAllRooms(teamId?: string): Promise<Room[]> {
+    const rooms = await RoomModel.find(teamId ? { teamId } : undefined);
     return rooms.map(room => this.convertToRoom(room));
   }
 
@@ -336,12 +331,10 @@ export class RoomService {
 
     console.log('Found existing user:', existingUser);
 
-    const adminName = this.getAdminName(room.owner, room.users.map((roomUser) => roomUser.name));
-    const role = existingUser.name === adminName ? 'admin' as const : 'user' as const;
+    const role = existingUser.role || 'user' as const;
 
     console.log('Role determination during restore:', {
       username: existingUser.name,
-      adminName,
       assignedRole: role,
       currentRole: existingUser.role
     });
@@ -469,16 +462,18 @@ export class RoomService {
   }
 
   private static convertToRoom(doc: RoomDocument): Room {
-    const { id, owner, phase, createdAt, users, cards } = doc;
-    const adminName = this.getAdminName(owner, (users || []).map((user) => user.name));
+    const { id, teamId, owner, phase, createdAt, users, cards } = doc;
+    const hasAdmin = Boolean(users?.some((user) => user.role === 'admin'));
     console.log('Converting room document:', {
+      teamId,
       owner,
-      adminName,
+      hasAdmin,
       originalUsers: users?.map(u => ({ name: u.name, role: u.role }))
     });
     
     const convertedRoom = {
       id,
+      teamId,
       owner,
       phase,
       createdAt,
@@ -486,7 +481,7 @@ export class RoomService {
         id: user.id,
         name: user.name,
         roomId: id,
-        role: user.name === adminName ? ('admin' as const) : ('user' as const),
+        role: user.role === 'admin' || (!hasAdmin && user.name === owner) ? ('admin' as const) : ('user' as const),
         isReady: user.isReady,
         mood: user.mood
       })) : [],
@@ -498,9 +493,5 @@ export class RoomService {
     });
 
     return convertedRoom;
-  }
-
-  private static getAdminName(roomOwner: string, userNames: string[]): string {
-    return userNames.includes(PRIORITY_ADMIN_NAME) ? PRIORITY_ADMIN_NAME : roomOwner;
   }
 } 

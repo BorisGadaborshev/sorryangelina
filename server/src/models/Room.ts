@@ -8,9 +8,9 @@ export const RoomModel = {
     try {
       await client.query('BEGIN');
       await client.query(
-        `insert into rooms (id, password, owner, phase) values ($1,$2,$3,$4)
+        `insert into rooms (id, password, team_id, owner, phase) values ($1,$2,$3,$4,$5)
          on conflict (id) do nothing`,
-        [doc.id, doc.password, doc.owner, doc.phase]
+        [doc.id, doc.password, doc.teamId ?? null, doc.owner, doc.phase]
       );
       for (const user of doc.users || []) {
         await client.query(
@@ -30,9 +30,9 @@ export const RoomModel = {
   },
 
   async findOne(where: { id: string }): Promise<RoomDocument | null> {
-    const { rows } = await pool.query('select id, password, owner, phase, created_at from rooms where id=$1', [where.id]);
+    const { rows } = await pool.query('select id, password, team_id, owner, phase, created_at from rooms where id=$1', [where.id]);
     if (rows.length === 0) return null;
-    const roomRow = rows[0] as { id: string; password: string; owner: string; phase: Room['phase']; created_at: string };
+    const roomRow = rows[0] as { id: string; password: string; team_id: string | null; owner: string; phase: Room['phase']; created_at: string };
     const usersRes = await pool.query('select id, name, role, is_ready, mood from room_users where room_id=$1', [where.id]);
     const cardsRes = await pool.query('select id, text, type, created_by, column_index, image_url from cards where room_id=$1', [where.id]);
     const cardRows = cardsRes.rows as Array<{ id: string; text: string; type: Card['type']; created_by: string; column_index: number; image_url: string | null }>;
@@ -58,6 +58,7 @@ export const RoomModel = {
     return {
       id: roomRow.id,
       password: roomRow.password,
+      teamId: roomRow.team_id ?? undefined,
       owner: roomRow.owner,
       phase: roomRow.phase,
       createdAt: roomRow.created_at,
@@ -202,8 +203,14 @@ export const RoomModel = {
     await pool.query('truncate table card_votes, cards, room_users, rooms restart identity cascade');
   },
 
-  async find(): Promise<RoomDocument[]> {
-    const { rows } = await pool.query('select id from rooms');
+  async find(where?: { teamId?: string }): Promise<RoomDocument[]> {
+    const params: string[] = [];
+    let query = 'select id from rooms';
+    if (where?.teamId) {
+      params.push(where.teamId);
+      query += ' where team_id=$1';
+    }
+    const { rows } = await pool.query(query, params);
     const results: RoomDocument[] = [];
     for (const r of rows as Array<{ id: string }>) {
       const doc = await this.findOne({ id: r.id });

@@ -18,8 +18,10 @@ import {
   Typography
 } from '@mui/material';
 import { RetroStore } from '../store/RetroStore';
-import { AuthProfile, AvailableRoom } from '../types';
+import { AuthProfile, AvailableRoom, AvailableTeam, BUILTIN_TEAM_ID, Team } from '../types';
+import CreateTeamDialog from './CreateTeamDialog';
 import RoomTiles from './RoomTiles';
+import TeamLobby from './TeamLobby';
 
 interface Props {
   store: RetroStore;
@@ -36,7 +38,9 @@ const Login: React.FC<Props> = observer(({ store }) => {
   const [authTab, setAuthTab] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [isRoomsLoading, setIsRoomsLoading] = useState(false);
+  const [isTeamsLoading, setIsTeamsLoading] = useState(false);
   const [fixedUsers, setFixedUsers] = useState<string[]>([]);
+  const [availableTeams, setAvailableTeams] = useState<AvailableTeam[]>([]);
   const [availableRooms, setAvailableRooms] = useState<AvailableRoom[]>([]);
 
   const [fixedName, setFixedName] = useState('');
@@ -52,7 +56,12 @@ const Login: React.FC<Props> = observer(({ store }) => {
   const [createRoomPassword, setCreateRoomPassword] = useState('');
   const [joinRoomPassword, setJoinRoomPassword] = useState('');
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [isCreateTeamDialogOpen, setIsCreateTeamDialogOpen] = useState(false);
   const [isJoinDialogOpen, setIsJoinDialogOpen] = useState(false);
+  const [isJoinTeamDialogOpen, setIsJoinTeamDialogOpen] = useState(false);
+  const [selectedTeamForJoin, setSelectedTeamForJoin] = useState<AvailableTeam | null>(null);
+  const [joinTeamPassword, setJoinTeamPassword] = useState('');
+  const [joinTeamError, setJoinTeamError] = useState<string | null>(null);
   const [joinRoomError, setJoinRoomError] = useState<string | null>(null);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [deleteRoomId, setDeleteRoomId] = useState('');
@@ -66,6 +75,9 @@ const Login: React.FC<Props> = observer(({ store }) => {
   const [isSuboDialogOpen, setIsSuboDialogOpen] = useState(false);
   const [suboInput, setSuboInput] = useState('');
   const [suboError, setSuboError] = useState<string | null>(null);
+  const [isAutoJoiningBuiltinTeam, setIsAutoJoiningBuiltinTeam] = useState(false);
+  const selectedTeam = store.selectedTeam;
+  const isFixedAuth = store.authProfile?.type === 'fixed';
 
   const fetchFixedUsers = useCallback(async () => {
     try {
@@ -82,9 +94,14 @@ const Login: React.FC<Props> = observer(({ store }) => {
   }, [store]);
 
   const fetchAvailableRooms = useCallback(async () => {
+    if (!selectedTeam) {
+      setAvailableRooms([]);
+      return;
+    }
+
     setIsRoomsLoading(true);
     try {
-      const response = await fetch(`${getApiBase()}/api/rooms`);
+      const response = await fetch(`${getApiBase()}/api/teams/${encodeURIComponent(selectedTeam.id)}/rooms`);
       if (!response.ok) {
         throw new Error('Failed to fetch rooms');
       }
@@ -95,6 +112,22 @@ const Login: React.FC<Props> = observer(({ store }) => {
     } finally {
       setIsRoomsLoading(false);
     }
+  }, [selectedTeam, store]);
+
+  const fetchAvailableTeams = useCallback(async () => {
+    setIsTeamsLoading(true);
+    try {
+      const response = await fetch(`${getApiBase()}/api/teams`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch teams');
+      }
+      const teams = (await response.json()) as AvailableTeam[];
+      setAvailableTeams(teams);
+    } catch (error) {
+      store.setError('Не удалось загрузить список команд');
+    } finally {
+      setIsTeamsLoading(false);
+    }
   }, [store]);
 
   useEffect(() => {
@@ -102,10 +135,48 @@ const Login: React.FC<Props> = observer(({ store }) => {
   }, [fetchFixedUsers]);
 
   useEffect(() => {
-    if (store.authProfile) {
+    if (store.authProfile && !isFixedAuth) {
+      fetchAvailableTeams();
+    }
+  }, [fetchAvailableTeams, store.authProfile, isFixedAuth]);
+
+  useEffect(() => {
+    if (store.authProfile && selectedTeam) {
       fetchAvailableRooms();
     }
-  }, [fetchAvailableRooms, store.authProfile]);
+  }, [fetchAvailableRooms, store.authProfile, selectedTeam]);
+
+  const autoJoinBuiltinTeam = useCallback(async () => {
+    if (!store.authProfile || store.authProfile.type !== 'fixed' || store.selectedTeam) return;
+
+    setIsAutoJoiningBuiltinTeam(true);
+    store.setError(null);
+    try {
+      const response = await fetch(`${getApiBase()}/api/teams/${encodeURIComponent(BUILTIN_TEAM_ID)}/join`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${store.authProfile.token}`
+        },
+        body: JSON.stringify({})
+      });
+      const data = (await response.json()) as Team | { error?: string };
+      if (!response.ok || 'error' in data) {
+        throw new Error('error' in data && data.error ? data.error : 'Не удалось войти в команду');
+      }
+      store.setSelectedTeam(data as Team);
+    } catch (error) {
+      store.setError(error instanceof Error ? error.message : 'Не удалось войти в команду');
+    } finally {
+      setIsAutoJoiningBuiltinTeam(false);
+    }
+  }, [store]);
+
+  useEffect(() => {
+    if (isFixedAuth && !selectedTeam) {
+      void autoJoinBuiltinTeam();
+    }
+  }, [autoJoinBuiltinTeam, isFixedAuth, selectedTeam]);
 
   const handleAuthSuccess = (profile: AuthProfile) => {
     store.setAuthProfile(profile);
@@ -229,13 +300,86 @@ const Login: React.FC<Props> = observer(({ store }) => {
     setIsInviteDialogOpen(true);
   };
 
-  const handleCreateRoom = async () => {
-    if (!store.authProfile || !createRoomId.trim() || !createRoomPassword.trim()) return;
+  const handleOpenJoinTeamDialog = (team: AvailableTeam) => {
+    setSelectedTeamForJoin(team);
+    setJoinTeamPassword('');
+    setJoinTeamError(null);
+    setIsJoinTeamDialogOpen(true);
+  };
+
+  const handleJoinTeam = async () => {
+    if (!store.authProfile || !selectedTeamForJoin || !joinTeamPassword.trim()) return;
+
+    setIsLoading(true);
+    setJoinTeamError(null);
+    store.setError(null);
+    try {
+      const response = await fetch(`${getApiBase()}/api/teams/${encodeURIComponent(selectedTeamForJoin.id)}/join`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${store.authProfile.token}`
+        },
+        body: JSON.stringify({ password: joinTeamPassword.trim() })
+      });
+      const data = (await response.json()) as Team | { error?: string };
+      if (!response.ok || 'error' in data) {
+        throw new Error('error' in data && data.error ? data.error : 'Не удалось войти в команду');
+      }
+      store.setSelectedTeam(data as Team);
+      setIsJoinTeamDialogOpen(false);
+      setSelectedTeamForJoin(null);
+      await fetchAvailableTeams();
+    } catch (error) {
+      setJoinTeamError(error instanceof Error ? error.message : 'Не удалось войти в команду');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleCreateTeam = async (payload: { name: string; password: string; members: string[]; scrumMasterName?: string }) => {
+    if (!store.authProfile) return;
 
     setIsLoading(true);
     store.setError(null);
     try {
-      await store.socketService?.createRoom(createRoomId.trim(), createRoomPassword.trim(), store.authProfile.name, store.authProfile.token);
+      const response = await fetch(`${getApiBase()}/api/teams`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${store.authProfile.token}`
+        },
+        body: JSON.stringify(payload)
+      });
+      const data = (await response.json()) as Team | { error?: string };
+      if (!response.ok || 'error' in data) {
+        throw new Error('error' in data && data.error ? data.error : 'Не удалось создать команду');
+      }
+      store.setSelectedTeam(data as Team);
+      setIsCreateTeamDialogOpen(false);
+      await fetchAvailableTeams();
+    } catch (error) {
+      store.setError(error instanceof Error ? error.message : 'Не удалось создать команду');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleCreateRoom = async () => {
+    if (!store.authProfile || !store.selectedTeam || !createRoomId.trim() || !createRoomPassword.trim()) return;
+
+    setIsLoading(true);
+    store.setError(null);
+    try {
+      await store.socketService?.createRoom(
+        createRoomId.trim(),
+        createRoomPassword.trim(),
+        store.authProfile.name,
+        store.authProfile.token,
+        {
+          teamId: store.selectedTeam.id
+        }
+      );
       setIsCreateDialogOpen(false);
     } catch (error) {
       store.setError(error instanceof Error ? error.message : 'Не удалось создать комнату');
@@ -505,7 +649,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
     >
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 1, mb: 2 }}>
         <Box>
-          <Typography variant="h5">Выбор комнаты</Typography>
+          <Typography variant="h5">Комнаты команды {store.selectedTeam?.name}</Typography>
           <Typography variant="body2" color="text.secondary">
             Вы вошли как: <b>{store.authProfile?.name}</b>
           </Typography>
@@ -514,6 +658,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
           <Button variant="outlined" onClick={fetchAvailableRooms} disabled={isRoomsLoading}>
             Обновить
           </Button>
+          {!isFixedAuth && <Button onClick={() => store.setSelectedTeam(null)}>К командам</Button>}
           <Button onClick={() => store.clearAuthProfile()}>Сменить аккаунт</Button>
         </Box>
       </Box>
@@ -544,6 +689,9 @@ const Login: React.FC<Props> = observer(({ store }) => {
       <Dialog open={isCreateDialogOpen} onClose={() => setIsCreateDialogOpen(false)} fullWidth maxWidth="xs">
         <DialogTitle>Создать комнату</DialogTitle>
         <DialogContent>
+          <DialogContentText sx={{ mb: 1 }}>
+            Комната будет создана внутри команды <b>{store.selectedTeam?.name}</b>.
+          </DialogContentText>
           <TextField
             autoFocus
             fullWidth
@@ -712,6 +860,109 @@ const Login: React.FC<Props> = observer(({ store }) => {
       </Dialog>
     </Box>
   );
+
+  if (store.authProfile && !store.selectedTeam) {
+    if (isFixedAuth) {
+      return (
+        <Box
+          sx={{
+            minHeight: '100vh',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 2,
+            bgcolor: 'background.default'
+          }}
+        >
+          <CircularProgress />
+          <Typography variant="body2" color="text.secondary">
+            {isAutoJoiningBuiltinTeam ? 'Вход в команду «Карты и Партнеры»...' : 'Загрузка...'}
+          </Typography>
+          {store.error && (
+            <Typography color="error" sx={{ px: 2, textAlign: 'center' }}>
+              {store.error}
+            </Typography>
+          )}
+        </Box>
+      );
+    }
+
+    return (
+      <>
+        {store.error && (
+          <Typography color="error" sx={{ position: 'fixed', top: 16, left: 16, right: 16, zIndex: 1200 }}>
+            {store.error}
+          </Typography>
+        )}
+        <TeamLobby
+          teams={availableTeams}
+          currentUserName={store.authProfile.name}
+          isLoading={isTeamsLoading}
+          onRefresh={fetchAvailableTeams}
+          onTeamClick={handleOpenJoinTeamDialog}
+          onCreateClick={() => setIsCreateTeamDialogOpen(true)}
+          onLogout={() => store.clearAuthProfile()}
+        />
+        <CreateTeamDialog
+          open={isCreateTeamDialogOpen}
+          currentUserName={store.authProfile.name}
+          isLoading={isLoading}
+          onClose={() => setIsCreateTeamDialogOpen(false)}
+          onCreate={handleCreateTeam}
+        />
+        <Dialog
+          open={isJoinTeamDialogOpen}
+          onClose={() => {
+            setIsJoinTeamDialogOpen(false);
+            setJoinTeamError(null);
+          }}
+          fullWidth
+          maxWidth="xs"
+        >
+          <DialogTitle>Войти в команду {selectedTeamForJoin?.name}</DialogTitle>
+          <DialogContent>
+            {joinTeamError && (
+              <Alert severity="error" sx={{ mb: 1 }}>
+                {joinTeamError}
+              </Alert>
+            )}
+            <TextField
+              autoFocus
+              fullWidth
+              type="password"
+              label="Пароль команды"
+              margin="normal"
+              value={joinTeamPassword}
+              onChange={(event) => {
+                setJoinTeamPassword(event.target.value);
+                if (joinTeamError) setJoinTeamError(null);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  handleJoinTeam();
+                }
+              }}
+            />
+          </DialogContent>
+          <DialogActions>
+            <Button
+              onClick={() => {
+                setIsJoinTeamDialogOpen(false);
+                setJoinTeamError(null);
+              }}
+            >
+              Отмена
+            </Button>
+            <Button variant="contained" onClick={handleJoinTeam} disabled={isLoading || !joinTeamPassword.trim()}>
+              {isLoading ? <CircularProgress size={18} color="inherit" /> : 'Войти'}
+            </Button>
+          </DialogActions>
+        </Dialog>
+      </>
+    );
+  }
 
   if (store.authProfile) {
     return renderRoomsBlock();

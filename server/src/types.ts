@@ -25,6 +25,7 @@ export interface Card {
 export interface RoomDocument {
   id: string;
   password: string;
+  teamId?: string;
   owner: string;
   phase: Phase;
   createdAt?: string;
@@ -35,6 +36,7 @@ export interface RoomDocument {
 // Интерфейс для комнаты, отправляемой клиенту
 export interface Room {
   id: string;
+  teamId?: string;
   owner: string;
   phase: Phase;
   createdAt?: string;
@@ -48,4 +50,45 @@ export interface RoomState {
   users: User[];
 }
 
+export interface CreateRoomOptions {
+  teamId?: string;
+  userRole?: TeamRole;
+}
+
 export type AuthProfileType = 'fixed' | 'registered' | 'guest';
+
+export type TeamRole = 'admin' | 'user';
+
+export interface TeamMember {
+  teamId: string;
+  name: string;
+  role: TeamRole;
+}
+
+export interface Team {
+  id: string;
+  name: string;
+  owner: string;
+  createdAt?: string;
+  members: TeamMember[];
+}
+
+export interface TeamDocument extends Team {
+  passwordHash: string;
+}
+
+export interface AvailableTeam {
+  id: string;
+  name: string;
+  owner: string;
+  membersCount: number;
+  createdAt?: string;
+}
+
+export interface CreateTeamInput {
+  name: string;
+  password: string;
+  owner: string;
+  members: string[];
+  scrumMasterName?: string;
+}

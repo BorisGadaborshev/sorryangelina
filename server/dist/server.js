@@ -17,6 +17,7 @@ const http_1 = require("http");
 const socket_io_1 = require("socket.io");
 const cors_1 = __importDefault(require("cors"));
 const RoomService_1 = require("./services/RoomService");
+const TeamService_1 = require("./services/TeamService");
 const AccountService_1 = require("./services/AccountService");
 const jwt_1 = require("./config/jwt");
 const dotenv_1 = __importDefault(require("dotenv"));
@@ -68,9 +69,11 @@ app.post('/api/clear-database', (req, res) => __awaiter(void 0, void 0, void 0, 
 // Get available rooms
 app.get('/api/rooms', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const rooms = yield RoomService_1.RoomService.getAllRooms();
+        yield TeamService_1.TeamService.ensureBuiltinTeam();
+        const rooms = yield RoomService_1.RoomService.getAllRooms(TeamService_1.BUILTIN_TEAM_ID);
         res.json(rooms.map(room => ({
             id: room.id,
+            teamId: room.teamId,
             usersCount: room.users.length,
             phase: room.phase,
             owner: room.owner,
@@ -80,6 +83,91 @@ app.get('/api/rooms', (req, res) => __awaiter(void 0, void 0, void 0, function* 
     catch (error) {
         console.error('Error getting rooms:', error);
         res.status(500).json({ error: 'Failed to get rooms' });
+    }
+}));
+app.get('/api/teams', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const teams = yield TeamService_1.TeamService.getAllTeams();
+        res.json(teams);
+    }
+    catch (error) {
+        console.error('Error getting teams:', error);
+        res.status(500).json({ error: 'Failed to get teams' });
+    }
+}));
+app.post('/api/teams', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const authHeader = req.headers.authorization;
+    const token = (authHeader === null || authHeader === void 0 ? void 0 : authHeader.startsWith('Bearer ')) ? authHeader.slice(7) : undefined;
+    const auth = (0, jwt_1.verifyAuthToken)(token);
+    if (!auth) {
+        res.status(401).json({ error: 'Unauthorized: token is invalid or expired' });
+        return;
+    }
+    const { name, password, members, scrumMasterName } = req.body;
+    if (!(name === null || name === void 0 ? void 0 : name.trim()) || !(password === null || password === void 0 ? void 0 : password.trim())) {
+        res.status(400).json({ error: 'Team name and password are required' });
+        return;
+    }
+    try {
+        const team = yield TeamService_1.TeamService.createTeam({
+            name,
+            password,
+            owner: auth.name,
+            members: normalizeNameList(members),
+            scrumMasterName
+        });
+        res.status(201).json(team);
+    }
+    catch (error) {
+        console.error('Error creating team:', error);
+        res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to create team' });
+    }
+}));
+app.post('/api/teams/:teamId/join', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const authHeader = req.headers.authorization;
+    const token = (authHeader === null || authHeader === void 0 ? void 0 : authHeader.startsWith('Bearer ')) ? authHeader.slice(7) : undefined;
+    const auth = (0, jwt_1.verifyAuthToken)(token);
+    if (!auth) {
+        res.status(401).json({ error: 'Unauthorized: token is invalid or expired' });
+        return;
+    }
+    const { password } = req.body;
+    const isFixedBuiltinJoin = req.params.teamId === TeamService_1.BUILTIN_TEAM_ID && auth.type === 'fixed';
+    if (!isFixedBuiltinJoin && !(password === null || password === void 0 ? void 0 : password.trim())) {
+        res.status(400).json({ error: 'Team password is required' });
+        return;
+    }
+    try {
+        const team = isFixedBuiltinJoin
+            ? yield TeamService_1.TeamService.joinBuiltinTeamForFixedUser(auth.name)
+            : yield TeamService_1.TeamService.joinTeam(req.params.teamId, password, auth.name);
+        res.json(team);
+    }
+    catch (error) {
+        console.error('Error joining team:', error);
+        res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to join team' });
+    }
+}));
+app.get('/api/teams/:teamId/rooms', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const team = yield TeamService_1.TeamService.getTeam(req.params.teamId);
+        if (!team) {
+            res.status(404).json({ error: 'Team not found' });
+            return;
+        }
+        const rooms = yield RoomService_1.RoomService.getAllRooms(req.params.teamId);
+        res.json(rooms.map(room => ({
+            id: room.id,
+            teamId: room.teamId,
+            usersCount: room.users.length,
+            phase: room.phase,
+            owner: room.owner,
+            createdAt: room.createdAt
+        })));
+    }
+    catch (error) {
+        console.error('Error getting team rooms:', error);
+        res.status(500).json({ error: 'Failed to get team rooms' });
     }
 }));
 app.delete('/api/rooms/:roomId', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
@@ -237,6 +325,14 @@ const normalizeMood = (value) => {
         return undefined;
     const allowed = ['great', 'good', 'neutral', 'bad', 'awful'];
     return allowed.includes(value) ? value : undefined;
+};
+const normalizeNameList = (value) => {
+    if (!Array.isArray(value))
+        return [];
+    return value
+        .filter((name) => typeof name === 'string')
+        .map((name) => name.trim())
+        .filter(Boolean);
 };
 // Connection monitoring
 let connectionCount = 0;
@@ -457,7 +553,7 @@ io.on('connection', (socket) => {
             socket.emit('session-expired');
         }
     }));
-    socket.on('create-room', ({ roomId, password, username, token }) => __awaiter(void 0, void 0, void 0, function* () {
+    socket.on('create-room', ({ roomId, password, username, token, teamId }) => __awaiter(void 0, void 0, void 0, function* () {
         const auth = (0, jwt_1.verifyAuthToken)(token);
         if (!auth) {
             socket.emit('error', 'Unauthorized: token is invalid or expired');
@@ -468,22 +564,35 @@ io.on('connection', (socket) => {
             return;
         }
         const effectiveUsername = auth.name;
-        console.log('Attempting to create room:', { roomId, username: effectiveUsername });
+        const normalizedTeamId = typeof teamId === 'string' && teamId.trim() ? teamId.trim() : TeamService_1.BUILTIN_TEAM_ID;
+        console.log('Attempting to create room:', {
+            roomId,
+            username: effectiveUsername,
+            teamId: normalizedTeamId
+        });
         try {
+            const teamRole = yield TeamService_1.TeamService.getUserRole(normalizedTeamId, effectiveUsername);
+            if (!teamRole) {
+                socket.emit('error', 'Join the team before creating a room');
+                return;
+            }
             const existingRoom = yield RoomService_1.RoomService.getRoom(roomId);
             if (existingRoom) {
                 console.log('Room already exists:', roomId);
                 socket.emit('error', 'Room already exists');
                 return;
             }
-            const room = yield RoomService_1.RoomService.createRoom(roomId, password, socket.id, effectiveUsername);
+            const room = yield RoomService_1.RoomService.createRoom(roomId, password, socket.id, effectiveUsername, {
+                teamId: normalizedTeamId,
+                userRole: teamRole
+            });
             socket.join(roomId);
             socket.data.userId = socket.id;
-            currentUser = {
+            currentUser = room.users.find((user) => user.id === socket.id) || {
                 id: socket.id,
                 name: effectiveUsername,
                 roomId,
-                role: 'admin'
+                role: 'user'
             };
             console.log('Room created successfully:', roomId);
             socket.emit('room-joined', {
@@ -525,13 +634,25 @@ io.on('connection', (socket) => {
                 socket.emit('error', 'Invalid password');
                 return;
             }
+            const existingRoom = yield RoomService_1.RoomService.getRoom(roomId);
+            if (!existingRoom) {
+                socket.emit('error', 'Room not found');
+                return;
+            }
+            const teamRole = existingRoom.teamId
+                ? yield TeamService_1.TeamService.getUserRole(existingRoom.teamId, effectiveUsername)
+                : null;
+            if (existingRoom.teamId && !teamRole) {
+                socket.emit('error', 'Join the team before joining a room');
+                return;
+            }
             // Check for existing user first
             const existingUser = yield RoomService_1.RoomService.findExistingUser(roomId, effectiveUsername);
             const user = {
                 id: socket.id,
                 name: effectiveUsername,
                 roomId,
-                role: 'user'
+                role: teamRole || 'user'
             };
             // If user exists, we'll reuse their original ID for card ownership
             if (existingUser) {

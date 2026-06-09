@@ -1,6 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { RetroStore } from '../store/RetroStore';
-import { Room, RoomState, User, Card, FacilitatorAnnouncement, Phase, PhaseTimerState, ChatMessage, Mood, RetroRatingState, SprintVipState, WhiteboardStroke } from '../types';
+import { Room, RoomState, User, Card, FacilitatorAnnouncement, Phase, PhaseTimerState, ChatMessage, Mood, RetroRatingState, SprintVipState, WhiteboardStroke, CreateRoomOptions } from '../types';
 
 export class SocketService {
   private socket: Socket;
@@ -297,7 +297,7 @@ export class SocketService {
     });
   }
 
-  async createRoom(roomId: string, password: string, username: string, token: string): Promise<void> {
+  async createRoom(roomId: string, password: string, username: string, token: string, options?: CreateRoomOptions): Promise<void> {
     console.log('Attempting to create room:', roomId);
     try {
       await this.ensureConnection();
@@ -341,28 +341,19 @@ export class SocketService {
               id: currentUser.id,
               name: currentUser.name,
               roomId: room.id,
-              role: currentUser.role || 'admin', // Гарантируем, что создатель комнаты получит роль админа
+              role: currentUser.role || 'user',
               mood: currentUser.mood
             });
           }
-          
-          // Обновляем роли пользователей в комнате если нужно
-          const updatedRoom = {
-            ...room,
-            users: room.users.map(u => ({
-              ...u,
-              role: u.id === userId ? 'admin' : (u.role || 'user')
-            }))
-          };
-          
-          this.store.setRoom(updatedRoom);
+
+          this.store.setRoom(room);
           this.store.updateState(state);
           resolve();
         };
 
         this.socket.once('error', handleError);
         this.socket.once('room-joined', handleSuccess);
-        this.socket.emit('create-room', { roomId, password, username, token });
+        this.socket.emit('create-room', { roomId, password, username, token, ...options });
       });
     } catch (error) {
       console.error('Failed to connect to server:', error);

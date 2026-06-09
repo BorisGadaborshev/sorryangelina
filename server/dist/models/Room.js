@@ -14,16 +14,16 @@ exports.RoomModel = void 0;
 const database_1 = require("../config/database");
 exports.RoomModel = {
     create(doc) {
-        var _a, _b;
+        var _a, _b, _c;
         return __awaiter(this, void 0, void 0, function* () {
             const client = yield database_1.pool.connect();
             try {
                 yield client.query('BEGIN');
-                yield client.query(`insert into rooms (id, password, owner, phase) values ($1,$2,$3,$4)
-         on conflict (id) do nothing`, [doc.id, doc.password, doc.owner, doc.phase]);
+                yield client.query(`insert into rooms (id, password, team_id, owner, phase) values ($1,$2,$3,$4,$5)
+         on conflict (id) do nothing`, [doc.id, doc.password, (_a = doc.teamId) !== null && _a !== void 0 ? _a : null, doc.owner, doc.phase]);
                 for (const user of doc.users || []) {
                     yield client.query(`insert into room_users (id, name, room_id, role, is_ready, mood) values ($1,$2,$3,$4,$5,$6)
-           on conflict (room_id, id) do update set name = excluded.name, role = excluded.role, is_ready = excluded.is_ready, mood = excluded.mood`, [user.id, user.name, doc.id, user.role, (_a = user.isReady) !== null && _a !== void 0 ? _a : false, (_b = user.mood) !== null && _b !== void 0 ? _b : null]);
+           on conflict (room_id, id) do update set name = excluded.name, role = excluded.role, is_ready = excluded.is_ready, mood = excluded.mood`, [user.id, user.name, doc.id, user.role, (_b = user.isReady) !== null && _b !== void 0 ? _b : false, (_c = user.mood) !== null && _c !== void 0 ? _c : null]);
                 }
                 yield client.query('COMMIT');
                 return doc;
@@ -38,8 +38,9 @@ exports.RoomModel = {
         });
     },
     findOne(where) {
+        var _a;
         return __awaiter(this, void 0, void 0, function* () {
-            const { rows } = yield database_1.pool.query('select id, password, owner, phase, created_at from rooms where id=$1', [where.id]);
+            const { rows } = yield database_1.pool.query('select id, password, team_id, owner, phase, created_at from rooms where id=$1', [where.id]);
             if (rows.length === 0)
                 return null;
             const roomRow = rows[0];
@@ -71,6 +72,7 @@ exports.RoomModel = {
             return {
                 id: roomRow.id,
                 password: roomRow.password,
+                teamId: (_a = roomRow.team_id) !== null && _a !== void 0 ? _a : undefined,
                 owner: roomRow.owner,
                 phase: roomRow.phase,
                 createdAt: roomRow.created_at,
@@ -209,9 +211,15 @@ exports.RoomModel = {
             yield database_1.pool.query('truncate table card_votes, cards, room_users, rooms restart identity cascade');
         });
     },
-    find() {
+    find(where) {
         return __awaiter(this, void 0, void 0, function* () {
-            const { rows } = yield database_1.pool.query('select id from rooms');
+            const params = [];
+            let query = 'select id from rooms';
+            if (where === null || where === void 0 ? void 0 : where.teamId) {
+                params.push(where.teamId);
+                query += ' where team_id=$1';
+            }
+            const { rows } = yield database_1.pool.query(query, params);
             const results = [];
             for (const r of rows) {
                 const doc = yield this.findOne({ id: r.id });

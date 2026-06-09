@@ -5,6 +5,7 @@ import cors from 'cors';
 import { Room, User, Card, RoomState, Mood, Phase } from './types';
 import bcrypt from 'bcryptjs';
 import { RoomService } from './services/RoomService';
+import { BUILTIN_TEAM_ID, TeamService } from './services/TeamService';
 import { AccountService } from './services/AccountService';
 import { signAuthToken, verifyAuthToken } from './config/jwt';
 import dotenv from 'dotenv';
@@ -64,9 +65,11 @@ app.post('/api/clear-database', async (req, res) => {
 // Get available rooms
 app.get('/api/rooms', async (req, res) => {
   try {
-    const rooms = await RoomService.getAllRooms();
+    await TeamService.ensureBuiltinTeam();
+    const rooms = await RoomService.getAllRooms(BUILTIN_TEAM_ID);
     res.json(rooms.map(room => ({
       id: room.id,
+      teamId: room.teamId,
       usersCount: room.users.length,
       phase: room.phase,
       owner: room.owner,
@@ -75,6 +78,105 @@ app.get('/api/rooms', async (req, res) => {
   } catch (error) {
     console.error('Error getting rooms:', error);
     res.status(500).json({ error: 'Failed to get rooms' });
+  }
+});
+
+app.get('/api/teams', async (req, res) => {
+  try {
+    const teams = await TeamService.getAllTeams();
+    res.json(teams);
+  } catch (error) {
+    console.error('Error getting teams:', error);
+    res.status(500).json({ error: 'Failed to get teams' });
+  }
+});
+
+app.post('/api/teams', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
+  const auth = verifyAuthToken(token);
+
+  if (!auth) {
+    res.status(401).json({ error: 'Unauthorized: token is invalid or expired' });
+    return;
+  }
+
+  const { name, password, members, scrumMasterName } = req.body as {
+    name?: string;
+    password?: string;
+    members?: string[];
+    scrumMasterName?: string;
+  };
+
+  if (!name?.trim() || !password?.trim()) {
+    res.status(400).json({ error: 'Team name and password are required' });
+    return;
+  }
+
+  try {
+    const team = await TeamService.createTeam({
+      name,
+      password,
+      owner: auth.name,
+      members: normalizeNameList(members),
+      scrumMasterName
+    });
+    res.status(201).json(team);
+  } catch (error) {
+    console.error('Error creating team:', error);
+    res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to create team' });
+  }
+});
+
+app.post('/api/teams/:teamId/join', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
+  const auth = verifyAuthToken(token);
+
+  if (!auth) {
+    res.status(401).json({ error: 'Unauthorized: token is invalid or expired' });
+    return;
+  }
+
+  const { password } = req.body as { password?: string };
+  const isFixedBuiltinJoin = req.params.teamId === BUILTIN_TEAM_ID && auth.type === 'fixed';
+
+  if (!isFixedBuiltinJoin && !password?.trim()) {
+    res.status(400).json({ error: 'Team password is required' });
+    return;
+  }
+
+  try {
+    const team = isFixedBuiltinJoin
+      ? await TeamService.joinBuiltinTeamForFixedUser(auth.name)
+      : await TeamService.joinTeam(req.params.teamId, password!, auth.name);
+    res.json(team);
+  } catch (error) {
+    console.error('Error joining team:', error);
+    res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to join team' });
+  }
+});
+
+app.get('/api/teams/:teamId/rooms', async (req, res) => {
+  try {
+    const team = await TeamService.getTeam(req.params.teamId);
+    if (!team) {
+      res.status(404).json({ error: 'Team not found' });
+      return;
+    }
+
+    const rooms = await RoomService.getAllRooms(req.params.teamId);
+    res.json(rooms.map(room => ({
+      id: room.id,
+      teamId: room.teamId,
+      usersCount: room.users.length,
+      phase: room.phase,
+      owner: room.owner,
+      createdAt: room.createdAt
+    })));
+  } catch (error) {
+    console.error('Error getting team rooms:', error);
+    res.status(500).json({ error: 'Failed to get team rooms' });
   }
 });
 
@@ -250,6 +352,14 @@ const normalizeMood = (value: unknown): Mood | undefined => {
   if (typeof value !== 'string') return undefined;
   const allowed: Mood[] = ['great', 'good', 'neutral', 'bad', 'awful'];
   return allowed.includes(value as Mood) ? (value as Mood) : undefined;
+};
+
+const normalizeNameList = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((name): name is string => typeof name === 'string')
+    .map((name) => name.trim())
+    .filter(Boolean);
 };
 
 // Connection monitoring
@@ -537,7 +647,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('create-room', async ({ roomId, password, username, token }) => {
+  socket.on('create-room', async ({ roomId, password, username, token, teamId }) => {
     const auth = verifyAuthToken(token);
     if (!auth) {
       socket.emit('error', 'Unauthorized: token is invalid or expired');
@@ -548,9 +658,20 @@ io.on('connection', (socket) => {
       return;
     }
     const effectiveUsername = auth.name;
-    console.log('Attempting to create room:', { roomId, username: effectiveUsername });
+    const normalizedTeamId = typeof teamId === 'string' && teamId.trim() ? teamId.trim() : BUILTIN_TEAM_ID;
+    console.log('Attempting to create room:', {
+      roomId,
+      username: effectiveUsername,
+      teamId: normalizedTeamId
+    });
     
     try {
+      const teamRole = await TeamService.getUserRole(normalizedTeamId, effectiveUsername);
+      if (!teamRole) {
+        socket.emit('error', 'Join the team before creating a room');
+        return;
+      }
+
       const existingRoom = await RoomService.getRoom(roomId);
       if (existingRoom) {
         console.log('Room already exists:', roomId);
@@ -558,14 +679,17 @@ io.on('connection', (socket) => {
         return;
       }
 
-      const room = await RoomService.createRoom(roomId, password, socket.id, effectiveUsername);
+      const room = await RoomService.createRoom(roomId, password, socket.id, effectiveUsername, {
+        teamId: normalizedTeamId,
+        userRole: teamRole
+      });
       socket.join(roomId);
       socket.data.userId = socket.id;
-      currentUser = { 
-        id: socket.id, 
-        name: effectiveUsername, 
+      currentUser = room.users.find((user) => user.id === socket.id) || {
+        id: socket.id,
+        name: effectiveUsername,
         roomId,
-        role: 'admin'
+        role: 'user'
       };
       
       console.log('Room created successfully:', roomId);
@@ -610,13 +734,26 @@ io.on('connection', (socket) => {
         return;
       }
 
+      const existingRoom = await RoomService.getRoom(roomId);
+      if (!existingRoom) {
+        socket.emit('error', 'Room not found');
+        return;
+      }
+      const teamRole = existingRoom.teamId
+        ? await TeamService.getUserRole(existingRoom.teamId, effectiveUsername)
+        : null;
+      if (existingRoom.teamId && !teamRole) {
+        socket.emit('error', 'Join the team before joining a room');
+        return;
+      }
+
       // Check for existing user first
       const existingUser = await RoomService.findExistingUser(roomId, effectiveUsername);
       const user: User = {
         id: socket.id,
         name: effectiveUsername,
         roomId,
-        role: 'user'
+        role: teamRole || 'user'
       };
 
       // If user exists, we'll reuse their original ID for card ownership

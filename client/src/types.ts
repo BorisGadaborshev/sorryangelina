@@ -11,6 +11,7 @@ export type Phase = 'creation' | 'voting' | 'discussion' | 'rating';
 
 export interface Room {
   id: string;
+  teamId?: string;
   owner: string;
   phase: Phase;
   users: User[];
@@ -33,6 +34,10 @@ export interface RoomState {
   phase: Phase;
   users: User[];
 } 
+
+export interface CreateRoomOptions {
+  teamId?: string;
+}
 
 export interface PhaseTimerState {
   phase?: Phase;
@@ -87,6 +92,8 @@ export type Mood = 'great' | 'good' | 'neutral' | 'bad' | 'awful';
 
 export type AuthProfileType = 'fixed' | 'registered' | 'guest';
 
+export const BUILTIN_TEAM_ID = 'cards-partners';
+
 export interface AuthProfile {
   name: string;
   type: AuthProfileType;
@@ -96,8 +103,33 @@ export interface AuthProfile {
 
 export interface AvailableRoom {
   id: string;
+  teamId?: string;
   usersCount: number;
   phase: Phase;
   owner: string;
+  createdAt?: string;
+}
+
+export type TeamRole = 'admin' | 'user';
+
+export interface TeamMember {
+  teamId: string;
+  name: string;
+  role: TeamRole;
+}
+
+export interface Team {
+  id: string;
+  name: string;
+  owner: string;
+  createdAt?: string;
+  members: TeamMember[];
+}
+
+export interface AvailableTeam {
+  id: string;
+  name: string;
+  owner: string;
+  membersCount: number;
   createdAt?: string;
 }

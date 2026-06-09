@@ -1,5 +1,5 @@
 import { makeAutoObservable, runInAction } from 'mobx';
-import { AuthProfile, Card, ChatMessage, FacilitatorAnnouncement, Phase, PhaseTimerState, RetroRatingState, Room, RoomState, SprintVipState, User, WhiteboardStroke } from '../types';
+import { AuthProfile, Card, ChatMessage, FacilitatorAnnouncement, Phase, PhaseTimerState, RetroRatingState, Room, RoomState, SprintVipState, Team, User, WhiteboardStroke } from '../types';
 import { Socket } from 'socket.io-client';
 import { SocketService } from '../services/socket';
 
@@ -8,6 +8,7 @@ export class RetroStore {
   socketService: SocketService | null = null;
   currentUser: User | null = null;
   authProfile: AuthProfile | null = null;
+  selectedTeam: Team | null = null;
   room: Room | null = null;
   cards: Card[] = [];
   phase: Phase = 'creation';
@@ -193,8 +194,15 @@ export class RetroStore {
 
   clearAuthProfile() {
     this.setAuthProfile(null);
+    this.setSelectedTeam(null);
     this.setRoom(null);
     this.setError(null);
+  }
+
+  setSelectedTeam(team: Team | null) {
+    runInAction(() => {
+      this.selectedTeam = team;
+    });
   }
 
   setCurrentUser(user: User | null) {
