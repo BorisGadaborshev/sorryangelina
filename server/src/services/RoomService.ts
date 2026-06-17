@@ -1,5 +1,5 @@
 import { RoomModel } from '../models/Room';
-import { Room, RoomDocument, User, Card, Phase, CreateRoomOptions } from '../types';
+import { Room, RoomDocument, User, Card, Phase, CreateRoomOptions, COLUMN_COUNT } from '../types';
 import bcrypt from 'bcryptjs';
 
 export class RoomService {
@@ -41,6 +41,15 @@ export class RoomService {
 
   static async getRoom(roomId: string): Promise<Room | null> {
     const room = await RoomModel.findOne({ id: roomId });
+    return room ? this.convertToRoom(room) : null;
+  }
+
+  static async updateColumnTitles(roomId: string, titles: string[]): Promise<Room | null> {
+    if (titles.length !== COLUMN_COUNT || titles.some((title) => !title.trim())) {
+      return null;
+    }
+    const normalized = titles.map((title) => title.trim());
+    const room = await RoomModel.updateColumnTitles(roomId, normalized);
     return room ? this.convertToRoom(room) : null;
   }
 
@@ -464,7 +473,7 @@ export class RoomService {
   }
 
   private static convertToRoom(doc: RoomDocument): Room {
-    const { id, teamId, owner, phase, createdAt, users, cards } = doc;
+    const { id, teamId, owner, phase, columnTitles, createdAt, users, cards } = doc;
     const hasAdmin = Boolean(users?.some((user) => user.role === 'admin'));
     console.log('Converting room document:', {
       teamId,
@@ -478,6 +487,7 @@ export class RoomService {
       teamId,
       owner,
       phase,
+      columnTitles: doc.columnTitles,
       createdAt,
       users: users ? users.map(user => ({
         id: user.id,

@@ -14,6 +14,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.RoomService = void 0;
 const Room_1 = require("../models/Room");
+const types_1 = require("../types");
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 class RoomService {
     static createRoom(roomId, password, owner, username, options = {}) {
@@ -52,6 +53,16 @@ class RoomService {
     static getRoom(roomId) {
         return __awaiter(this, void 0, void 0, function* () {
             const room = yield Room_1.RoomModel.findOne({ id: roomId });
+            return room ? this.convertToRoom(room) : null;
+        });
+    }
+    static updateColumnTitles(roomId, titles) {
+        return __awaiter(this, void 0, void 0, function* () {
+            if (titles.length !== types_1.COLUMN_COUNT || titles.some((title) => !title.trim())) {
+                return null;
+            }
+            const normalized = titles.map((title) => title.trim());
+            const room = yield Room_1.RoomModel.updateColumnTitles(roomId, normalized);
             return room ? this.convertToRoom(room) : null;
         });
     }
@@ -373,7 +384,7 @@ class RoomService {
         });
     }
     static convertToRoom(doc) {
-        const { id, teamId, owner, phase, createdAt, users, cards } = doc;
+        const { id, teamId, owner, phase, columnTitles, createdAt, users, cards } = doc;
         const hasAdmin = Boolean(users === null || users === void 0 ? void 0 : users.some((user) => user.role === 'admin'));
         console.log('Converting room document:', {
             teamId,
@@ -386,6 +397,7 @@ class RoomService {
             teamId,
             owner,
             phase,
+            columnTitles: doc.columnTitles,
             createdAt,
             users: users ? users.map(user => ({
                 id: user.id,

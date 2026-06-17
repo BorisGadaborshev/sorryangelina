@@ -215,7 +215,6 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
     const columns = (
       <Box sx={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 2, width: '100%' }}>
         <RetroColumn
-          title="Было хорошо"
           type="liked"
           columnIndex={0}
           store={store}
@@ -223,7 +222,6 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
           onAddCardStart={() => setIsDrawEnabled(false)}
         />
         <RetroColumn
-          title="Было не очень"
           type="disliked"
           columnIndex={1}
           store={store}
@@ -231,7 +229,6 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
           onAddCardStart={() => setIsDrawEnabled(false)}
         />
         <RetroColumn
-          title="А давайте!:"
           type="suggestion"
           columnIndex={2}
           store={store}

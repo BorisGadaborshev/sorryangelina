@@ -12,6 +12,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.RoomModel = void 0;
 // Postgres access helpers
 const database_1 = require("../config/database");
+const types_1 = require("../types");
 exports.RoomModel = {
     create(doc) {
         var _a, _b, _c;
@@ -40,7 +41,7 @@ exports.RoomModel = {
     findOne(where) {
         var _a;
         return __awaiter(this, void 0, void 0, function* () {
-            const { rows } = yield database_1.pool.query('select id, password, team_id, owner, phase, created_at from rooms where id=$1', [where.id]);
+            const { rows } = yield database_1.pool.query('select id, password, team_id, owner, phase, created_at, column_titles from rooms where id=$1', [where.id]);
             if (rows.length === 0)
                 return null;
             const roomRow = rows[0];
@@ -75,10 +76,22 @@ exports.RoomModel = {
                 teamId: (_a = roomRow.team_id) !== null && _a !== void 0 ? _a : undefined,
                 owner: roomRow.owner,
                 phase: roomRow.phase,
+                columnTitles: Array.isArray(roomRow.column_titles) && roomRow.column_titles.length === types_1.COLUMN_COUNT
+                    ? roomRow.column_titles
+                    : undefined,
                 createdAt: roomRow.created_at,
                 users,
                 cards
             };
+        });
+    },
+    updateColumnTitles(roomId, titles) {
+        return __awaiter(this, void 0, void 0, function* () {
+            yield database_1.pool.query('update rooms set column_titles=$1::jsonb, updated_at=now() where id=$2', [
+                JSON.stringify(titles),
+                roomId
+            ]);
+            return this.findOne({ id: roomId });
         });
     },
     findOneAndUpdate(filter, update, options) {

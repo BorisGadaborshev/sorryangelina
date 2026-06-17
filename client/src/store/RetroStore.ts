@@ -1,5 +1,5 @@
 import { makeAutoObservable, runInAction } from 'mobx';
-import { AuthProfile, Card, ChatMessage, DiscussionNavigationState, FacilitatorAnnouncement, Phase, PhaseTimerState, RetroRatingState, Room, RoomState, SprintVipState, Team, User, WhiteboardStroke } from '../types';
+import { AuthProfile, Card, ChatMessage, DEFAULT_COLUMN_TITLES, DiscussionNavigationState, FacilitatorAnnouncement, Phase, PhaseTimerState, RetroRatingState, Room, RoomState, SprintVipState, Team, User, WhiteboardStroke } from '../types';
 import { Socket } from 'socket.io-client';
 import { SocketService } from '../services/socket';
 
@@ -20,6 +20,7 @@ export class RetroStore {
   whiteboardStrokes: WhiteboardStroke[] = [];
   facilitatorAnnouncement: FacilitatorAnnouncement | null = null;
   discussionNavigation: DiscussionNavigationState | null = null;
+  columnTitles: string[] = [...DEFAULT_COLUMN_TITLES];
   sprintVip: SprintVipState = { voteCount: 0 };
   retroRating: RetroRatingState = {
     hasVoted: false,
@@ -227,6 +228,11 @@ export class RetroStore {
     runInAction(() => {
       this.room = room;
       if (room) {
+        if (room.columnTitles?.length === DEFAULT_COLUMN_TITLES.length) {
+          this.columnTitles = [...room.columnTitles];
+        } else {
+          this.columnTitles = [...DEFAULT_COLUMN_TITLES];
+        }
         const savedUsername = localStorage.getItem('username');
         console.log('Current users in room:', room.users.map(u => ({ name: u.name, role: u.role })));
         
@@ -261,6 +267,7 @@ export class RetroStore {
         this.whiteboardStrokes = [];
         this.facilitatorAnnouncement = null;
         this.discussionNavigation = null;
+        this.columnTitles = [...DEFAULT_COLUMN_TITLES];
         this.sprintVip = { voteCount: 0 };
         this.retroRating = { hasVoted: false, votesCount: 0, totalCount: 0, resultsVisible: false };
         console.log('Cleared room and session');
@@ -449,6 +456,28 @@ export class RetroStore {
       return true;
     }
     return this.facilitatorAnnouncement?.userName === this.currentUser.name;
+  }
+
+  canEditColumnTitles(): boolean {
+    return this.canControlDiscussionNavigation();
+  }
+
+  getColumnTitle(index: number): string {
+    return this.columnTitles[index] ?? DEFAULT_COLUMN_TITLES[index];
+  }
+
+  setColumnTitles(titles: string[]) {
+    runInAction(() => {
+      this.columnTitles = titles;
+      if (this.room) {
+        this.room = { ...this.room, columnTitles: titles };
+      }
+    });
+  }
+
+  requestColumnTitlesUpdate(titles: string[]) {
+    this.setColumnTitles(titles);
+    this.socketService?.setColumnTitles(titles);
   }
 
   getUserReadyCount(): number {

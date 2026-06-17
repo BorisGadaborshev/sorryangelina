@@ -1135,6 +1135,40 @@ io.on('connection', (socket) => {
             socket.emit('error', 'Failed to change phase');
         }
     }));
+    socket.on('set-column-titles', ({ titles }) => __awaiter(void 0, void 0, void 0, function* () {
+        let actor = currentUser;
+        if (!(actor === null || actor === void 0 ? void 0 : actor.roomId)) {
+            const roomId = [...socket.rooms].find((roomName) => roomName !== socket.id);
+            const userName = typeof socket.data.userName === 'string' ? socket.data.userName : undefined;
+            const userId = typeof socket.data.userId === 'string' ? socket.data.userId : socket.id;
+            if (roomId && userName) {
+                const room = yield RoomService_1.RoomService.getRoom(roomId);
+                const user = room === null || room === void 0 ? void 0 : room.users.find((roomUser) => roomUser.name === userName || roomUser.id === userId);
+                if (user) {
+                    actor = Object.assign(Object.assign({}, user), { roomId });
+                    currentUser = actor;
+                }
+            }
+        }
+        if (!(actor === null || actor === void 0 ? void 0 : actor.roomId))
+            return;
+        try {
+            const room = yield RoomService_1.RoomService.getRoom(actor.roomId);
+            if (!room)
+                return;
+            if (!canControlDiscussionNavigation(room, actor.name, actor.role))
+                return;
+            if (!Array.isArray(titles))
+                return;
+            const updatedRoom = yield RoomService_1.RoomService.updateColumnTitles(actor.roomId, titles);
+            if (!(updatedRoom === null || updatedRoom === void 0 ? void 0 : updatedRoom.columnTitles))
+                return;
+            io.to(actor.roomId).emit('column-titles-updated', { titles: updatedRoom.columnTitles });
+        }
+        catch (error) {
+            console.error('Error updating column titles:', error);
+        }
+    }));
     socket.on('set-discussion-navigation', ({ unviewedCardIds, viewedCardIds }) => __awaiter(void 0, void 0, void 0, function* () {
         let actor = currentUser;
         if (!(actor === null || actor === void 0 ? void 0 : actor.roomId)) {

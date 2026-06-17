@@ -10,12 +10,12 @@ import EmojiEmotionsIcon from '@mui/icons-material/EmojiEmotions';
 import ImageIcon from '@mui/icons-material/Image';
 import MicIcon from '@mui/icons-material/Mic';
 import AddIcon from '@mui/icons-material/Add';
+import EditIcon from '@mui/icons-material/Edit';
 
 const getSpeechRecognition = (): SpeechRecognitionConstructor | null =>
   window.SpeechRecognition || window.webkitSpeechRecognition || null;
 
 interface Props {
-  title: string;
   type: 'liked' | 'disliked' | 'suggestion';
   columnIndex: number;
   store: RetroStore;
@@ -41,7 +41,7 @@ const EMOJI_GROUPS = {
   ]
 };
 
-const RetroColumn: React.FC<Props> = observer(({ title, type, columnIndex, store, enableDragDrop = false, onAddCardStart }) => {
+const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enableDragDrop = false, onAddCardStart }) => {
   const [newCardText, setNewCardText] = useState('');
   const [newCardImageUrl, setNewCardImageUrl] = useState('');
   const [selectedEmoji, setSelectedEmoji] = useState('');
@@ -53,6 +53,9 @@ const RetroColumn: React.FC<Props> = observer(({ title, type, columnIndex, store
   const [isListening, setIsListening] = useState(false);
   const [interimTranscript, setInterimTranscript] = useState('');
   const [speechError, setSpeechError] = useState<string | null>(null);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [draftTitle, setDraftTitle] = useState('');
+  const [isHeaderHovered, setIsHeaderHovered] = useState(false);
   const textFieldRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const speechRecognitionRef = useRef<SpeechRecognition | null>(null);
@@ -69,6 +72,28 @@ const RetroColumn: React.FC<Props> = observer(({ title, type, columnIndex, store
   }, [cursorPosition]);
   const isMobile = useMediaQuery('(max-width:600px)');
   const theme = useTheme();
+  const displayTitle = store.getColumnTitle(columnIndex);
+  const canEditTitle = store.canEditColumnTitles();
+
+  const startEditingTitle = () => {
+    if (!canEditTitle) return;
+    setDraftTitle(displayTitle);
+    setIsEditingTitle(true);
+  };
+
+  const commitTitle = () => {
+    const trimmed = draftTitle.trim();
+    setIsEditingTitle(false);
+    if (!trimmed || trimmed === displayTitle) return;
+    const next = [...store.columnTitles];
+    next[columnIndex] = trimmed;
+    store.requestColumnTitlesUpdate(next);
+  };
+
+  const cancelTitleEdit = () => {
+    setIsEditingTitle(false);
+    setDraftTitle(displayTitle);
+  };
 
   useEffect(() => {
     const filteredCards = store.cards.filter(card => card.column === columnIndex);
@@ -274,9 +299,63 @@ const RetroColumn: React.FC<Props> = observer(({ title, type, columnIndex, store
         gap: 0.75
       }}
     >
-      <Typography variant="h6" align="center" sx={{ mb: 0.5 }}>
-        {title}
-      </Typography>
+      <Box
+        onMouseEnter={() => setIsHeaderHovered(true)}
+        onMouseLeave={() => setIsHeaderHovered(false)}
+        onDoubleClick={startEditingTitle}
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 0.5,
+          mb: 0.5,
+          minHeight: 40,
+          px: 0.5
+        }}
+      >
+        {isEditingTitle ? (
+          <TextField
+            size="small"
+            value={draftTitle}
+            onChange={(event) => setDraftTitle(event.target.value)}
+            onBlur={commitTitle}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                commitTitle();
+              }
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                cancelTitleEdit();
+              }
+            }}
+            autoFocus
+            fullWidth
+            inputProps={{ maxLength: 80 }}
+            sx={{ maxWidth: 280 }}
+          />
+        ) : (
+          <>
+            <Typography variant="h6" align="center" sx={{ flex: 1 }}>
+              {displayTitle}
+            </Typography>
+            {canEditTitle && isHeaderHovered && (
+              <Tooltip title="Изменить название">
+                <IconButton
+                  size="small"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    startEditingTitle();
+                  }}
+                  sx={{ opacity: 0.85 }}
+                >
+                  <EditIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            )}
+          </>
+        )}
+      </Box>
       <Box sx={{ height: 4, borderRadius: 999, backgroundColor: columnAccent, mb: 0.5 }} />
 
       {store.phase === 'creation' && (

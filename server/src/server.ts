@@ -1292,6 +1292,39 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('set-column-titles', async ({ titles }) => {
+    let actor = currentUser;
+    if (!actor?.roomId) {
+      const roomId = [...socket.rooms].find((roomName) => roomName !== socket.id);
+      const userName = typeof socket.data.userName === 'string' ? socket.data.userName : undefined;
+      const userId = typeof socket.data.userId === 'string' ? socket.data.userId : socket.id;
+      if (roomId && userName) {
+        const room = await RoomService.getRoom(roomId);
+        const user = room?.users.find((roomUser) => roomUser.name === userName || roomUser.id === userId);
+        if (user) {
+          actor = { ...user, roomId };
+          currentUser = actor;
+        }
+      }
+    }
+
+    if (!actor?.roomId) return;
+
+    try {
+      const room = await RoomService.getRoom(actor.roomId);
+      if (!room) return;
+      if (!canControlDiscussionNavigation(room, actor.name, actor.role)) return;
+      if (!Array.isArray(titles)) return;
+
+      const updatedRoom = await RoomService.updateColumnTitles(actor.roomId, titles);
+      if (!updatedRoom?.columnTitles) return;
+
+      io.to(actor.roomId).emit('column-titles-updated', { titles: updatedRoom.columnTitles });
+    } catch (error) {
+      console.error('Error updating column titles:', error);
+    }
+  });
+
   socket.on('set-discussion-navigation', async ({ unviewedCardIds, viewedCardIds }) => {
     let actor = currentUser;
     if (!actor?.roomId) {

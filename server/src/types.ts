@@ -1,6 +1,9 @@
 export type Mood = 'great' | 'good' | 'neutral' | 'bad' | 'awful';
 export type Phase = 'creation' | 'voting' | 'discussion' | 'rating';
 
+export const DEFAULT_COLUMN_TITLES = ['Было хорошо', 'Было не очень', 'А давайте!:'] as const;
+export const COLUMN_COUNT = DEFAULT_COLUMN_TITLES.length;
+
 export interface User {
   id: string;
   name: string;
@@ -28,6 +31,7 @@ export interface RoomDocument {
   teamId?: string;
   owner: string;
   phase: Phase;
+  columnTitles?: string[];
   createdAt?: string;
   users: User[];
   cards: Card[];
@@ -39,6 +43,7 @@ export interface Room {
   teamId?: string;
   owner: string;
   phase: Phase;
+  columnTitles?: string[];
   createdAt?: string;
   users: User[];
   cards: Card[];

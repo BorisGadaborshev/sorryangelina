@@ -9,11 +9,15 @@ export interface User {
 
 export type Phase = 'creation' | 'voting' | 'discussion' | 'rating';
 
+export const DEFAULT_COLUMN_TITLES = ['Было хорошо', 'Было не очень', 'А давайте!:'] as const;
+export const COLUMN_COUNT = DEFAULT_COLUMN_TITLES.length;
+
 export interface Room {
   id: string;
   teamId?: string;
   owner: string;
   phase: Phase;
+  columnTitles?: string[];
   users: User[];
   cards: Card[];
 }

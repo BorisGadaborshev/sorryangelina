@@ -231,6 +231,10 @@ export class SocketService {
       this.store.setDiscussionNavigation(state);
     });
 
+    this.socket.on('column-titles-updated', ({ titles }: { titles: string[] }) => {
+      this.store.setColumnTitles(titles);
+    });
+
     this.socket.on('sprint-vip-state', (state: SprintVipState) => {
       this.store.setSprintVip(state);
     });
@@ -520,6 +524,10 @@ export class SocketService {
   setDiscussionNavigation(state: DiscussionNavigationState): void {
     this.store.setDiscussionNavigation(state);
     this.socket.emit('set-discussion-navigation', state);
+  }
+
+  setColumnTitles(titles: string[]): void {
+    this.socket.emit('set-column-titles', { titles });
   }
 
   async restoreSession(roomId: string, userId: string, username: string, token?: string): Promise<void> {
