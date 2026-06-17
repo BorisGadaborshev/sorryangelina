@@ -76,6 +76,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
   const [suboInput, setSuboInput] = useState('');
   const [suboError, setSuboError] = useState<string | null>(null);
   const [isAutoJoiningBuiltinTeam, setIsAutoJoiningBuiltinTeam] = useState(false);
+  const [isChoosingTeam, setIsChoosingTeam] = useState(false);
   const selectedTeam = store.selectedTeam;
   const isFixedAuth = store.authProfile?.type === 'fixed';
 
@@ -135,10 +136,10 @@ const Login: React.FC<Props> = observer(({ store }) => {
   }, [fetchFixedUsers]);
 
   useEffect(() => {
-    if (store.authProfile && !isFixedAuth) {
+    if (store.authProfile && (!isFixedAuth || isChoosingTeam)) {
       fetchAvailableTeams();
     }
-  }, [fetchAvailableTeams, store.authProfile, isFixedAuth]);
+  }, [fetchAvailableTeams, store.authProfile, isFixedAuth, isChoosingTeam]);
 
   useEffect(() => {
     if (store.authProfile && selectedTeam) {
@@ -165,6 +166,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
         throw new Error('error' in data && data.error ? data.error : 'Не удалось войти в команду');
       }
       store.setSelectedTeam(data as Team);
+      setIsChoosingTeam(false);
     } catch (error) {
       store.setError(error instanceof Error ? error.message : 'Не удалось войти в команду');
     } finally {
@@ -173,17 +175,25 @@ const Login: React.FC<Props> = observer(({ store }) => {
   }, [store]);
 
   useEffect(() => {
-    if (isFixedAuth && !selectedTeam) {
+    if (isFixedAuth && !selectedTeam && !isChoosingTeam) {
       void autoJoinBuiltinTeam();
     }
-  }, [autoJoinBuiltinTeam, isFixedAuth, selectedTeam]);
+  }, [autoJoinBuiltinTeam, isFixedAuth, selectedTeam, isChoosingTeam]);
 
   const handleAuthSuccess = (profile: AuthProfile) => {
     store.setAuthProfile(profile);
     store.setError(null);
+    setIsChoosingTeam(false);
     setAccountPassword('');
     setRegisterPassword('');
     setFixedPassword('');
+  };
+
+  const handleChangeTeam = () => {
+    store.setSelectedTeam(null);
+    store.setError(null);
+    setIsChoosingTeam(true);
+    void fetchAvailableTeams();
   };
 
   const handleFixedLogin = async () => {
@@ -327,6 +337,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
         throw new Error('error' in data && data.error ? data.error : 'Не удалось войти в команду');
       }
       store.setSelectedTeam(data as Team);
+      setIsChoosingTeam(false);
       setIsJoinTeamDialogOpen(false);
       setSelectedTeamForJoin(null);
       await fetchAvailableTeams();
@@ -356,6 +367,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
         throw new Error('error' in data && data.error ? data.error : 'Не удалось создать команду');
       }
       store.setSelectedTeam(data as Team);
+      setIsChoosingTeam(false);
       setIsCreateTeamDialogOpen(false);
       await fetchAvailableTeams();
     } catch (error) {
@@ -696,8 +708,10 @@ const Login: React.FC<Props> = observer(({ store }) => {
           <Button variant="outlined" onClick={fetchAvailableRooms} disabled={isRoomsLoading}>
             Обновить
           </Button>
-          {!isFixedAuth && <Button onClick={() => store.setSelectedTeam(null)}>К командам</Button>}
-          <Button onClick={() => store.clearAuthProfile()}>Сменить аккаунт</Button>
+          <Button variant="outlined" onClick={handleChangeTeam}>
+            Сменить команду
+          </Button>
+          <Button onClick={() => { setIsChoosingTeam(false); store.clearAuthProfile(); }}>Сменить аккаунт</Button>
         </Box>
       </Box>
 
@@ -909,7 +923,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
   );
 
   if (store.authProfile && !store.selectedTeam) {
-    if (isFixedAuth) {
+    if (isFixedAuth && !isChoosingTeam) {
       return (
         <Box
           sx={{
