@@ -1,6 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { RetroStore } from '../store/RetroStore';
-import { Room, RoomState, User, Card, FacilitatorAnnouncement, Phase, PhaseTimerState, ChatMessage, Mood, RetroRatingState, SprintVipState, WhiteboardStroke, CreateRoomOptions } from '../types';
+import { Room, RoomState, User, Card, FacilitatorAnnouncement, DiscussionNavigationState, Phase, PhaseTimerState, ChatMessage, Mood, RetroRatingState, SprintVipState, WhiteboardStroke, CreateRoomOptions } from '../types';
 
 export class SocketService {
   private socket: Socket;
@@ -36,6 +36,17 @@ export class SocketService {
     this.socket.on('connect', () => {
       console.log('Socket connected successfully:', this.socket.id);
       this.store.setError(null);
+
+      const roomId = localStorage.getItem('roomId');
+      const userId = localStorage.getItem('userId');
+      const username = localStorage.getItem('username');
+      const token = this.store.authProfile?.token;
+
+      if (roomId && userId && username && token && !this.store.room) {
+        this.restoreSession(roomId, userId, username, token).catch((error) => {
+          console.error('Failed to restore session after reconnect:', error);
+        });
+      }
     });
 
     this.socket.on('connect_error', (error) => {
@@ -87,15 +98,13 @@ export class SocketService {
       });
       
       const savedUsername = localStorage.getItem('username');
-      const savedUserId = localStorage.getItem('userId');
       
-      if (savedUsername && savedUserId) {
-        // Восстановление сессии: используем сохраненный ID
+      if (savedUsername) {
         const userToUpdate = room.users.find(u => u.name === savedUsername);
         if (userToUpdate) {
           console.log('Found user to restore - FULL USER:', userToUpdate);
-          userToUpdate.id = savedUserId;
-          // Устанавливаем текущего пользователя сразу
+          localStorage.setItem('userId', userToUpdate.id);
+          localStorage.setItem('username', userToUpdate.name);
           this.store.setCurrentUser({
             id: userToUpdate.id,
             name: userToUpdate.name,
@@ -216,6 +225,10 @@ export class SocketService {
 
     this.socket.on('facilitator-selected', (announcement: FacilitatorAnnouncement) => {
       this.store.setFacilitatorAnnouncement(announcement);
+    });
+
+    this.socket.on('discussion-navigation', (state: DiscussionNavigationState) => {
+      this.store.setDiscussionNavigation(state);
     });
 
     this.socket.on('sprint-vip-state', (state: SprintVipState) => {
@@ -504,6 +517,11 @@ export class SocketService {
     this.socket.emit('show-retro-rating-results');
   }
 
+  setDiscussionNavigation(state: DiscussionNavigationState): void {
+    this.store.setDiscussionNavigation(state);
+    this.socket.emit('set-discussion-navigation', state);
+  }
+
   async restoreSession(roomId: string, userId: string, username: string, token?: string): Promise<void> {
     console.log('Attempting to restore session:', { roomId, userId, username });
     try {
@@ -540,13 +558,20 @@ export class SocketService {
           this.socket.off('room-joined', handleSuccess);
           this.socket.off('session-expired', handleExpired);
           this.socket.off('error', handleError);
-          
-          // Убеждаемся, что у пользователя правильный ID
-          const userToUpdate = room.users.find(u => u.name === username);
-          if (userToUpdate) {
-            userToUpdate.id = userId;
+
+          const restoredUser = room.users.find(u => u.name === username);
+          if (restoredUser) {
+            localStorage.setItem('userId', restoredUser.id);
+            localStorage.setItem('username', restoredUser.name);
+            this.store.setCurrentUser({
+              id: restoredUser.id,
+              name: restoredUser.name,
+              roomId: room.id,
+              role: restoredUser.role,
+              mood: restoredUser.mood
+            });
           }
-          
+
           this.store.setRoom(room);
           this.store.updateState(state);
           resolve();

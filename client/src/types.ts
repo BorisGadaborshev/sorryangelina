@@ -61,6 +61,11 @@ export interface FacilitatorAnnouncement {
   selectedAt: number;
 }
 
+export interface DiscussionNavigationState {
+  unviewedCardIds: string[];
+  viewedCardIds: string[];
+}
+
 export interface SprintVipState {
   vipUserName?: string;
   voteCount: number;

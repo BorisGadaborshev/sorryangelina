@@ -17,6 +17,10 @@ dotenv.config();
 // Connect to Postgres
 connectDB().catch((err) => {
   console.error('PostgreSQL connection error:', err);
+  if (process.env.NODE_ENV === 'production') {
+    console.error('Server will keep running, but database-backed features may fail until PostgreSQL is available.');
+    return;
+  }
   process.exit(1);
 });
 
@@ -27,8 +31,13 @@ const roomStates = new Map<string, RoomState>();
 
 // Настраиваем CORS для Express с учетом Vercel
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? ['https://sorryangelina.vercel.app', 'https://sorryangelina-git-main-borisgadaborshevs-projects.vercel.app']
+  origin: process.env.NODE_ENV === 'production'
+    ? [
+        'https://sorryangelina.ru',
+        'https://www.sorryangelina.ru',
+        'https://sorryangelina.vercel.app',
+        'https://sorryangelina-git-main-borisgadaborshevs-projects.vercel.app'
+      ]
     : "http://localhost:3000",
   methods: ['GET', 'POST', 'DELETE'],
   credentials: true
@@ -221,6 +230,7 @@ app.delete('/api/rooms/:roomId', async (req, res) => {
     roomWhiteboards.delete(roomId);
     roomRetroRatings.delete(roomId);
     roomFacilitators.delete(roomId);
+    roomDiscussionNavigation.delete(roomId);
     roomSprintVipVotes.delete(roomId);
 
     res.json({ message: 'Room deleted successfully' });
@@ -343,6 +353,62 @@ const getSortedCards = (cards: Card[]): Card[] => {
   return [...cards].sort((a, b) => ((b.likes?.length || 0) - (b.dislikes?.length || 0)) - ((a.likes?.length || 0) - (a.dislikes?.length || 0)));
 };
 
+const buildDiscussionNavigation = (cards: Card[]): DiscussionNavigationState => ({
+  unviewedCardIds: getSortedCards(cards).map((card) => card.id),
+  viewedCardIds: []
+});
+
+const ensureDiscussionNavigation = (roomId: string, room: Room): DiscussionNavigationState | null => {
+  if (room.phase !== 'discussion') return null;
+  const existing = roomDiscussionNavigation.get(roomId);
+  if (existing) return existing;
+
+  const initial = buildDiscussionNavigation(room.cards);
+  roomDiscussionNavigation.set(roomId, initial);
+  return initial;
+};
+
+const emitDiscussionNavigationToSocket = (socket: Socket, roomId: string, room?: Room): void => {
+  const state = room ? ensureDiscussionNavigation(roomId, room) : roomDiscussionNavigation.get(roomId);
+  if (state) {
+    socket.emit('discussion-navigation', state);
+  }
+};
+
+const canControlDiscussionNavigation = (
+  room: Room,
+  userName: string,
+  userRole: User['role']
+): boolean => {
+  if (userRole === 'admin' || room.owner === userName) {
+    return true;
+  }
+  const facilitator = roomFacilitators.get(room.id);
+  return facilitator?.userName === userName;
+};
+
+const normalizeDiscussionNavigation = (
+  room: Room,
+  state: DiscussionNavigationState
+): DiscussionNavigationState | null => {
+  const availableIds = new Set(room.cards.map((card) => card.id));
+  const unviewedCardIds = state.unviewedCardIds.filter((id) => availableIds.has(id));
+  const viewedCardIds = state.viewedCardIds.filter((id) => availableIds.has(id));
+  const knownIds = new Set([...unviewedCardIds, ...viewedCardIds]);
+  const appended = room.cards
+    .map((card) => card.id)
+    .filter((id) => !knownIds.has(id));
+
+  if (unviewedCardIds.length + viewedCardIds.length + appended.length === 0) {
+    return null;
+  }
+
+  return {
+    unviewedCardIds: [...unviewedCardIds, ...appended],
+    viewedCardIds
+  };
+};
+
 const getCardTypeByColumn = (column: number): Card['type'] => {
   if (column === 1) return 'disliked';
   if (column === 2) return 'suggestion';
@@ -392,6 +458,11 @@ interface FacilitatorAnnouncement {
   selectedAt: number;
 }
 
+interface DiscussionNavigationState {
+  unviewedCardIds: string[];
+  viewedCardIds: string[];
+}
+
 interface SprintVipState {
   vipUserName?: string;
   voteCount: number;
@@ -425,6 +496,7 @@ const roomChats = new Map<string, ChatMessage[]>();
 const roomWhiteboards = new Map<string, WhiteboardStroke[]>();
 const roomRetroRatings = new Map<string, RetroRatingRoomState>();
 const roomFacilitators = new Map<string, FacilitatorAnnouncement>();
+const roomDiscussionNavigation = new Map<string, DiscussionNavigationState>();
 const roomSprintVipVotes = new Map<string, Map<string, string>>();
 
 const getRemainingSeconds = (endAt: number): number => {
@@ -699,6 +771,7 @@ io.on('connection', (socket) => {
       socket.emit('whiteboard-history', { strokes: roomWhiteboards.get(roomId) || [] });
       emitRetroRatingStateToSocket(socket, room);
       emitSprintVipStateToSocket(socket, room);
+      emitDiscussionNavigationToSocket(socket, roomId, room);
     } catch (error) {
       console.error('Error restoring session:', error);
       socket.emit('session-expired');
@@ -828,9 +901,13 @@ io.on('connection', (socket) => {
         return;
       }
 
+      const joinedUser = room.users.find((roomUser) => roomUser.name === effectiveUsername);
+
       socket.join(roomId);
-      currentUser = user;
-      socket.data.userId = user.id;
+      currentUser = joinedUser
+        ? { ...joinedUser, roomId }
+        : user;
+      socket.data.userId = currentUser.id;
       socket.data.userName = effectiveUsername;
       
       console.log('User joined room successfully:', { roomId, username: effectiveUsername, isRejoin: !!existingUser });
@@ -848,6 +925,7 @@ io.on('connection', (socket) => {
       socket.emit('whiteboard-history', { strokes: roomWhiteboards.get(roomId) || [] });
       emitRetroRatingStateToSocket(socket, room);
       emitSprintVipStateToSocket(socket, room);
+      emitDiscussionNavigationToSocket(socket, roomId, room);
       if (!existingUser) {
         socket.to(roomId).emit('user-joined', user);
       } else {
@@ -1125,74 +1203,132 @@ io.on('connection', (socket) => {
   });
 
   socket.on('change-phase', async ({ phase }) => {
-    if (!currentUser?.roomId) return;
     const allowedPhases: Phase[] = ['creation', 'voting', 'discussion', 'rating'];
     if (!allowedPhases.includes(phase)) {
       socket.emit('error', 'Invalid phase');
       return;
     }
 
+    let actor = currentUser;
+    if (!actor?.roomId) {
+      const roomId = [...socket.rooms].find((roomName) => roomName !== socket.id);
+      const userName = typeof socket.data.userName === 'string' ? socket.data.userName : undefined;
+      const userId = typeof socket.data.userId === 'string' ? socket.data.userId : socket.id;
+      if (roomId && userName) {
+        const room = await RoomService.getRoom(roomId);
+        const user = room?.users.find((roomUser) => roomUser.name === userName || roomUser.id === userId);
+        if (user) {
+          actor = { ...user, roomId };
+          currentUser = actor;
+        }
+      }
+    }
+
+    if (!actor?.roomId) {
+      socket.emit('error', 'Не удалось сменить этап: сессия не восстановлена');
+      return;
+    }
+
     console.log('Phase change requested:', {
-      userId: currentUser.id,
-      userName: currentUser.name,
+      userId: actor.id,
+      userName: actor.name,
       phase
     });
 
     try {
-      const previousRoom = await RoomService.getRoom(currentUser.roomId);
-      // Сначала меняем фазу
-      const updatedRoom = await RoomService.updatePhase(currentUser.roomId, phase, currentUser.id);
+      const previousRoom = await RoomService.getRoom(actor.roomId);
+      const updatedRoom = await RoomService.updatePhase(actor.roomId, phase, actor.id, actor.name);
       if (!updatedRoom) {
         socket.emit('error', 'Failed to change phase');
         return;
       }
 
-      // Если фаза обсуждения, сортируем карточки по голосам
       let sortedCards = updatedRoom.cards;
       if (phase === 'discussion') {
         console.log('Sorting cards for discussion phase');
         sortedCards = getSortedCards(updatedRoom.cards);
-        console.log('Sorted cards:', sortedCards.map(c => ({
-          id: c.id,
-          text: c.text,
-          likes: c.likes?.length || 0,
-          dislikes: c.dislikes?.length || 0,
-          score: (c.likes?.length || 0) - (c.dislikes?.length || 0)
-        })));
       }
 
-      // После смены фазы сбрасываем состояния готовности всех пользователей
-      const roomWithResetStates = await RoomService.resetUsersReadyState(currentUser.roomId);
-      if (roomWithResetStates) {
-        clearRoomTimer(currentUser.roomId, true);
-        if (roomWithResetStates.phase === 'creation') {
-          roomFacilitators.delete(currentUser.roomId);
-        }
-        if (roomWithResetStates.phase === 'rating') {
-          roomRetroRatings.set(currentUser.roomId, { votes: new Map(), resultsVisible: false });
-        }
-        // Отправляем оба события для обновления UI
-        io.to(currentUser.roomId).emit('phase-changed', { 
-          phase: roomWithResetStates.phase, 
-          cards: sortedCards 
-        });
-        io.to(currentUser.roomId).emit('state-updated', {
-          cards: sortedCards,
-          phase: roomWithResetStates.phase,
-          users: roomWithResetStates.users
-        });
-        if (previousRoom?.phase === 'creation' && roomWithResetStates.phase !== 'creation') {
-          const facilitator = selectRandomFacilitator(roomWithResetStates);
-          if (facilitator) {
-            roomFacilitators.set(currentUser.roomId, facilitator);
-            io.to(currentUser.roomId).emit('facilitator-selected', facilitator);
-          }
-        }
-        await emitRetroRatingStateToRoom(currentUser.roomId);
+      const roomWithResetStates = await RoomService.resetUsersReadyState(actor.roomId);
+      const roomState = roomWithResetStates || updatedRoom;
+
+      clearRoomTimer(actor.roomId, true);
+      if (roomState.phase === 'creation') {
+        roomFacilitators.delete(actor.roomId);
+        roomDiscussionNavigation.delete(actor.roomId);
       }
+      if (roomState.phase === 'rating') {
+        roomRetroRatings.set(actor.roomId, { votes: new Map(), resultsVisible: false });
+      }
+      if (roomState.phase === 'discussion') {
+        const navigationState = buildDiscussionNavigation(sortedCards);
+        roomDiscussionNavigation.set(actor.roomId, navigationState);
+        io.to(actor.roomId).emit('discussion-navigation', navigationState);
+      } else {
+        roomDiscussionNavigation.delete(actor.roomId);
+      }
+
+      io.to(actor.roomId).emit('phase-changed', {
+        phase: roomState.phase,
+        cards: sortedCards
+      });
+      io.to(actor.roomId).emit('state-updated', {
+        cards: sortedCards,
+        phase: roomState.phase,
+        users: roomState.users
+      });
+
+      if (previousRoom?.phase === 'creation' && roomState.phase !== 'creation') {
+        const facilitator = selectRandomFacilitator(roomState);
+        if (facilitator) {
+          roomFacilitators.set(actor.roomId, facilitator);
+          io.to(actor.roomId).emit('facilitator-selected', facilitator);
+        }
+      }
+      await emitRetroRatingStateToRoom(actor.roomId);
     } catch (error) {
       console.error('Error changing phase:', error);
       socket.emit('error', 'Failed to change phase');
+    }
+  });
+
+  socket.on('set-discussion-navigation', async ({ unviewedCardIds, viewedCardIds }) => {
+    let actor = currentUser;
+    if (!actor?.roomId) {
+      const roomId = [...socket.rooms].find((roomName) => roomName !== socket.id);
+      const userName = typeof socket.data.userName === 'string' ? socket.data.userName : undefined;
+      const userId = typeof socket.data.userId === 'string' ? socket.data.userId : socket.id;
+      if (roomId && userName) {
+        const room = await RoomService.getRoom(roomId);
+        const user = room?.users.find((roomUser) => roomUser.name === userName || roomUser.id === userId);
+        if (user) {
+          actor = { ...user, roomId };
+          currentUser = actor;
+        }
+      }
+    }
+
+    if (!actor?.roomId) return;
+
+    try {
+      const room = await RoomService.getRoom(actor.roomId);
+      if (!room || room.phase !== 'discussion') return;
+      if (!canControlDiscussionNavigation(room, actor.name, actor.role)) return;
+
+      const normalized = normalizeDiscussionNavigation(room, {
+        unviewedCardIds: Array.isArray(unviewedCardIds)
+          ? unviewedCardIds.filter((id): id is string => typeof id === 'string')
+          : [],
+        viewedCardIds: Array.isArray(viewedCardIds)
+          ? viewedCardIds.filter((id): id is string => typeof id === 'string')
+          : []
+      });
+      if (!normalized) return;
+
+      roomDiscussionNavigation.set(actor.roomId, normalized);
+      io.to(actor.roomId).emit('discussion-navigation', normalized);
+    } catch (error) {
+      console.error('Error updating discussion navigation:', error);
     }
   });
 
@@ -1381,6 +1517,7 @@ io.on('connection', (socket) => {
       roomWhiteboards.delete(roomId);
       roomRetroRatings.delete(roomId);
       roomFacilitators.delete(roomId);
+      roomDiscussionNavigation.delete(roomId);
       roomSprintVipVotes.delete(roomId);
 
       io.to(roomId).emit('room-deleted');

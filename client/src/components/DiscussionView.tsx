@@ -1,34 +1,38 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { observer } from 'mobx-react-lite';
 import { Box, Paper, Typography, IconButton, Tooltip } from '@mui/material';
 import { NavigateBefore, NavigateNext } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import { RetroStore } from '../store/RetroStore';
-import { Card as CardType } from '../types';
+import { Card as CardType, DiscussionNavigationState } from '../types';
 
 interface Props {
   store: RetroStore;
 }
 
 const DiscussionView: React.FC<Props> = observer(({ store }) => {
-  const [unviewedCardIds, setUnviewedCardIds] = useState<string[]>([]);
-  const [viewedCardIds, setViewedCardIds] = useState<string[]>([]);
   const carouselSize = 3;
   const sortedCards = store.sortedCards;
   const theme = useTheme();
+  const canControl = store.canControlDiscussionNavigation();
 
-  useEffect(() => {
+  const navigation = useMemo<DiscussionNavigationState>(() => {
     const availableIds = sortedCards.map((card) => card.id);
-    setUnviewedCardIds((prev) => {
-      if (prev.length === 0) {
-        return availableIds;
-      }
-      const filtered = prev.filter((id) => availableIds.includes(id));
-      const appended = availableIds.filter((id) => !filtered.includes(id));
-      return [...filtered, ...appended];
-    });
-    setViewedCardIds((prev) => prev.filter((id) => availableIds.includes(id)));
-  }, [sortedCards]);
+    const source = store.discussionNavigation ?? {
+      unviewedCardIds: availableIds,
+      viewedCardIds: []
+    };
+
+    const unviewedCardIds = source.unviewedCardIds.filter((id) => availableIds.includes(id));
+    const viewedCardIds = source.viewedCardIds.filter((id) => availableIds.includes(id));
+    const knownIds = new Set([...unviewedCardIds, ...viewedCardIds]);
+    const appended = availableIds.filter((id) => !knownIds.has(id));
+
+    return {
+      unviewedCardIds: [...unviewedCardIds, ...appended],
+      viewedCardIds
+    };
+  }, [sortedCards, store.discussionNavigation]);
 
   const cardsById = useMemo(
     () => new Map(sortedCards.map((card) => [card.id, card])),
@@ -36,34 +40,47 @@ const DiscussionView: React.FC<Props> = observer(({ store }) => {
   );
 
   const unviewedCards = useMemo(
-    () => unviewedCardIds.map((id) => cardsById.get(id)).filter(Boolean) as CardType[],
-    [unviewedCardIds, cardsById]
+    () => navigation.unviewedCardIds.map((id) => cardsById.get(id)).filter(Boolean) as CardType[],
+    [navigation.unviewedCardIds, cardsById]
   );
 
   const currentCard = unviewedCards[0];
   const remainingCards = unviewedCards.slice(1);
   const visibleCarouselCards = remainingCards.slice(0, carouselSize);
 
+  const publishNavigation = (next: DiscussionNavigationState) => {
+    if (!canControl) return;
+    store.socketService?.setDiscussionNavigation(next);
+  };
+
   const handleNextCard = () => {
-    if (!currentCard) return;
-    setViewedCardIds((prev) => [...prev, currentCard.id]);
-    setUnviewedCardIds((prev) => prev.slice(1));
+    if (!currentCard || !canControl) return;
+    publishNavigation({
+      viewedCardIds: [...navigation.viewedCardIds, currentCard.id],
+      unviewedCardIds: navigation.unviewedCardIds.slice(1)
+    });
   };
 
   const handlePreviousCard = () => {
-    setViewedCardIds((prevViewed) => {
-      if (prevViewed.length === 0) return prevViewed;
-      const previousCardId = prevViewed[prevViewed.length - 1];
-      setUnviewedCardIds((prevUnviewed) => [previousCardId, ...prevUnviewed]);
-      return prevViewed.slice(0, -1);
+    if (!canControl || navigation.viewedCardIds.length === 0) return;
+    const previousCardId = navigation.viewedCardIds[navigation.viewedCardIds.length - 1];
+    publishNavigation({
+      viewedCardIds: navigation.viewedCardIds.slice(0, -1),
+      unviewedCardIds: [previousCardId, ...navigation.unviewedCardIds]
     });
   };
 
   const handleCardSelect = (card: CardType) => {
-    setUnviewedCardIds((prev) => {
-      const index = prev.indexOf(card.id);
-      if (index <= 0) return prev;
-      return [card.id, ...prev.slice(0, index), ...prev.slice(index + 1)];
+    if (!canControl) return;
+    const index = navigation.unviewedCardIds.indexOf(card.id);
+    if (index <= 0) return;
+    publishNavigation({
+      ...navigation,
+      unviewedCardIds: [
+        card.id,
+        ...navigation.unviewedCardIds.slice(0, index),
+        ...navigation.unviewedCardIds.slice(index + 1)
+      ]
     });
   };
 
@@ -84,9 +101,9 @@ const DiscussionView: React.FC<Props> = observer(({ store }) => {
 
   if (!currentCard) {
     return (
-      <Box sx={{ 
-        display: 'flex', 
-        justifyContent: 'center', 
+      <Box sx={{
+        display: 'flex',
+        justifyContent: 'center',
         alignItems: 'center',
         height: '100%',
         width: '100%'
@@ -97,7 +114,7 @@ const DiscussionView: React.FC<Props> = observer(({ store }) => {
   }
 
   return (
-    <Box sx={{ 
+    <Box sx={{
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'center',
@@ -115,9 +132,9 @@ const DiscussionView: React.FC<Props> = observer(({ store }) => {
         gap: 4
       }}>
         <Box sx={{ width: '100%', maxWidth: '600px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Tooltip title="Вернуть предыдущую карточку">
+          <Tooltip title={canControl ? 'Вернуть предыдущую карточку' : 'Переключением управляет фасилитатор'}>
             <span>
-              <IconButton onClick={handlePreviousCard} disabled={viewedCardIds.length === 0}>
+              <IconButton onClick={handlePreviousCard} disabled={!canControl || navigation.viewedCardIds.length === 0}>
                 <NavigateBefore />
               </IconButton>
             </span>
@@ -125,14 +142,20 @@ const DiscussionView: React.FC<Props> = observer(({ store }) => {
           <Typography variant="h6">
             Осталось {unviewedCards.length} из {sortedCards.length}
           </Typography>
-          <Tooltip title="Следующая карточка (текущая будет убрана из списка)">
+          <Tooltip title={canControl ? 'Следующая карточка' : 'Переключением управляет фасилитатор'}>
             <span>
-              <IconButton onClick={handleNextCard} disabled={!currentCard}>
+              <IconButton onClick={handleNextCard} disabled={!canControl || !currentCard}>
                 <NavigateNext />
               </IconButton>
             </span>
           </Tooltip>
         </Box>
+
+        {!canControl && store.facilitatorAnnouncement && (
+          <Typography variant="body2" color="text.secondary">
+            Карточки переключает {store.facilitatorAnnouncement.userName}
+          </Typography>
+        )}
 
         <Paper
           elevation={3}
@@ -206,13 +229,14 @@ const DiscussionView: React.FC<Props> = observer(({ store }) => {
                 onClick={() => handleCardSelect(card)}
                 sx={{
                   p: 1.5,
-                  cursor: 'pointer',
+                  cursor: canControl ? 'pointer' : 'default',
                   minHeight: 120,
                   display: 'flex',
                   flexDirection: 'column',
                   justifyContent: 'space-between',
                   backgroundColor: getCardColor(card),
-                  color: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.92)' : 'inherit'
+                  color: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.92)' : 'inherit',
+                  opacity: canControl ? 1 : 0.92
                 }}
               >
                 <Typography variant="body2" sx={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -247,4 +271,4 @@ const DiscussionView: React.FC<Props> = observer(({ store }) => {
   );
 });
 
-export default DiscussionView; 
+export default DiscussionView;

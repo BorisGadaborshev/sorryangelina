@@ -27,6 +27,10 @@ dotenv_1.default.config();
 // Connect to Postgres
 (0, database_1.connectDB)().catch((err) => {
     console.error('PostgreSQL connection error:', err);
+    if (process.env.NODE_ENV === 'production') {
+        console.error('Server will keep running, but database-backed features may fail until PostgreSQL is available.');
+        return;
+    }
     process.exit(1);
 });
 const app = (0, express_1.default)();
@@ -36,7 +40,12 @@ const roomStates = new Map();
 // Настраиваем CORS для Express с учетом Vercel
 app.use((0, cors_1.default)({
     origin: process.env.NODE_ENV === 'production'
-        ? ['https://sorryangelina.vercel.app', 'https://sorryangelina-git-main-borisgadaborshevs-projects.vercel.app']
+        ? [
+            'https://sorryangelina.ru',
+            'https://www.sorryangelina.ru',
+            'https://sorryangelina.vercel.app',
+            'https://sorryangelina-git-main-borisgadaborshevs-projects.vercel.app'
+        ]
         : "http://localhost:3000",
     methods: ['GET', 'POST', 'DELETE'],
     credentials: true
@@ -148,6 +157,16 @@ app.post('/api/teams/:teamId/join', (req, res) => __awaiter(void 0, void 0, void
         res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to join team' });
     }
 }));
+app.get('/api/teams/:teamId/members', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const members = yield TeamService_1.TeamService.getTeamRosterNames(req.params.teamId);
+        res.json({ members });
+    }
+    catch (error) {
+        console.error('Error getting team members:', error);
+        res.status(500).json({ error: 'Failed to get team members' });
+    }
+}));
 app.get('/api/teams/:teamId/rooms', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const team = yield TeamService_1.TeamService.getTeam(req.params.teamId);
@@ -197,6 +216,7 @@ app.delete('/api/rooms/:roomId', (req, res) => __awaiter(void 0, void 0, void 0,
         roomWhiteboards.delete(roomId);
         roomRetroRatings.delete(roomId);
         roomFacilitators.delete(roomId);
+        roomDiscussionNavigation.delete(roomId);
         roomSprintVipVotes.delete(roomId);
         res.json({ message: 'Room deleted successfully' });
     }
@@ -301,6 +321,49 @@ io.engine.on("connection_error", (err) => {
 const getSortedCards = (cards) => {
     return [...cards].sort((a, b) => { var _a, _b, _c, _d; return ((((_a = b.likes) === null || _a === void 0 ? void 0 : _a.length) || 0) - (((_b = b.dislikes) === null || _b === void 0 ? void 0 : _b.length) || 0)) - ((((_c = a.likes) === null || _c === void 0 ? void 0 : _c.length) || 0) - (((_d = a.dislikes) === null || _d === void 0 ? void 0 : _d.length) || 0)); });
 };
+const buildDiscussionNavigation = (cards) => ({
+    unviewedCardIds: getSortedCards(cards).map((card) => card.id),
+    viewedCardIds: []
+});
+const ensureDiscussionNavigation = (roomId, room) => {
+    if (room.phase !== 'discussion')
+        return null;
+    const existing = roomDiscussionNavigation.get(roomId);
+    if (existing)
+        return existing;
+    const initial = buildDiscussionNavigation(room.cards);
+    roomDiscussionNavigation.set(roomId, initial);
+    return initial;
+};
+const emitDiscussionNavigationToSocket = (socket, roomId, room) => {
+    const state = room ? ensureDiscussionNavigation(roomId, room) : roomDiscussionNavigation.get(roomId);
+    if (state) {
+        socket.emit('discussion-navigation', state);
+    }
+};
+const canControlDiscussionNavigation = (room, userName, userRole) => {
+    if (userRole === 'admin' || room.owner === userName) {
+        return true;
+    }
+    const facilitator = roomFacilitators.get(room.id);
+    return (facilitator === null || facilitator === void 0 ? void 0 : facilitator.userName) === userName;
+};
+const normalizeDiscussionNavigation = (room, state) => {
+    const availableIds = new Set(room.cards.map((card) => card.id));
+    const unviewedCardIds = state.unviewedCardIds.filter((id) => availableIds.has(id));
+    const viewedCardIds = state.viewedCardIds.filter((id) => availableIds.has(id));
+    const knownIds = new Set([...unviewedCardIds, ...viewedCardIds]);
+    const appended = room.cards
+        .map((card) => card.id)
+        .filter((id) => !knownIds.has(id));
+    if (unviewedCardIds.length + viewedCardIds.length + appended.length === 0) {
+        return null;
+    }
+    return {
+        unviewedCardIds: [...unviewedCardIds, ...appended],
+        viewedCardIds
+    };
+};
 const getCardTypeByColumn = (column) => {
     if (column === 1)
         return 'disliked';
@@ -341,6 +404,7 @@ const roomChats = new Map();
 const roomWhiteboards = new Map();
 const roomRetroRatings = new Map();
 const roomFacilitators = new Map();
+const roomDiscussionNavigation = new Map();
 const roomSprintVipVotes = new Map();
 const getRemainingSeconds = (endAt) => {
     return Math.max(0, Math.ceil((endAt - Date.now()) / 1000));
@@ -499,6 +563,23 @@ const buildPersonalSprintVipState = (room, userName) => {
     const myVote = userName && votes ? votes.get(userName) : undefined;
     return Object.assign(Object.assign({}, buildSprintVipState(room)), { myVote });
 };
+const resolveRoomUserForSocket = (room, connectedSocket) => {
+    const trackedUserName = typeof connectedSocket.data.userName === 'string' ? connectedSocket.data.userName : undefined;
+    if (trackedUserName) {
+        const byName = room.users.find((roomUser) => roomUser.name === trackedUserName);
+        if (byName)
+            return byName;
+    }
+    const trackedUserId = typeof connectedSocket.data.userId === 'string' ? connectedSocket.data.userId : connectedSocket.id;
+    return room.users.find((roomUser) => roomUser.id === trackedUserId || roomUser.id === connectedSocket.id);
+};
+const resolveVoterNameForSocket = (room, connectedSocket) => {
+    var _a;
+    if (typeof connectedSocket.data.userName === 'string') {
+        return connectedSocket.data.userName;
+    }
+    return (_a = resolveRoomUserForSocket(room, connectedSocket)) === null || _a === void 0 ? void 0 : _a.name;
+};
 const emitSprintVipStateToRoom = (roomId) => __awaiter(void 0, void 0, void 0, function* () {
     const room = yield RoomService_1.RoomService.getRoom(roomId);
     if (!room)
@@ -507,14 +588,14 @@ const emitSprintVipStateToRoom = (roomId) => __awaiter(void 0, void 0, void 0, f
     const sockets = yield io.in(roomId).fetchSockets();
     const base = buildSprintVipState(room);
     for (const remoteSocket of sockets) {
-        const user = room.users.find((roomUser) => roomUser.id === remoteSocket.id);
-        const myVote = user && votes ? votes.get(user.name) : undefined;
+        const voterName = resolveVoterNameForSocket(room, remoteSocket);
+        const myVote = voterName && votes ? votes.get(voterName) : undefined;
         remoteSocket.emit('sprint-vip-state', Object.assign(Object.assign({}, base), { myVote }));
     }
 });
 const emitSprintVipStateToSocket = (socket, room) => {
-    const user = room.users.find((roomUser) => roomUser.id === socket.id);
-    socket.emit('sprint-vip-state', buildPersonalSprintVipState(room, user === null || user === void 0 ? void 0 : user.name));
+    const voterName = resolveVoterNameForSocket(room, socket);
+    socket.emit('sprint-vip-state', buildPersonalSprintVipState(room, voterName));
 };
 io.on('connection', (socket) => {
     connectionCount++;
@@ -546,6 +627,7 @@ io.on('connection', (socket) => {
             socket.join(roomId);
             currentUser = user;
             socket.data.userId = user.id;
+            socket.data.userName = user.name;
             console.log('Session restored successfully:', { roomId, userId });
             socket.emit('room-joined', {
                 room,
@@ -560,6 +642,7 @@ io.on('connection', (socket) => {
             socket.emit('whiteboard-history', { strokes: roomWhiteboards.get(roomId) || [] });
             emitRetroRatingStateToSocket(socket, room);
             emitSprintVipStateToSocket(socket, room);
+            emitDiscussionNavigationToSocket(socket, roomId, room);
         }
         catch (error) {
             console.error('Error restoring session:', error);
@@ -601,6 +684,7 @@ io.on('connection', (socket) => {
             });
             socket.join(roomId);
             socket.data.userId = socket.id;
+            socket.data.userName = effectiveUsername;
             currentUser = room.users.find((user) => user.id === socket.id) || {
                 id: socket.id,
                 name: effectiveUsername,
@@ -677,9 +761,12 @@ io.on('connection', (socket) => {
                 socket.emit('error', 'Room not found');
                 return;
             }
+            const joinedUser = room.users.find((roomUser) => roomUser.name === effectiveUsername);
             socket.join(roomId);
-            currentUser = user;
-            socket.data.userId = user.id;
+            currentUser = joinedUser
+                ? Object.assign(Object.assign({}, joinedUser), { roomId }) : user;
+            socket.data.userId = currentUser.id;
+            socket.data.userName = effectiveUsername;
             console.log('User joined room successfully:', { roomId, username: effectiveUsername, isRejoin: !!existingUser });
             socket.emit('room-joined', {
                 room,
@@ -695,6 +782,7 @@ io.on('connection', (socket) => {
             socket.emit('whiteboard-history', { strokes: roomWhiteboards.get(roomId) || [] });
             emitRetroRatingStateToSocket(socket, room);
             emitSprintVipStateToSocket(socket, room);
+            emitDiscussionNavigationToSocket(socket, roomId, room);
             if (!existingUser) {
                 socket.to(roomId).emit('user-joined', user);
             }
@@ -966,75 +1054,125 @@ io.on('connection', (socket) => {
         }
     }));
     socket.on('change-phase', ({ phase }) => __awaiter(void 0, void 0, void 0, function* () {
-        if (!(currentUser === null || currentUser === void 0 ? void 0 : currentUser.roomId))
-            return;
         const allowedPhases = ['creation', 'voting', 'discussion', 'rating'];
         if (!allowedPhases.includes(phase)) {
             socket.emit('error', 'Invalid phase');
             return;
         }
+        let actor = currentUser;
+        if (!(actor === null || actor === void 0 ? void 0 : actor.roomId)) {
+            const roomId = [...socket.rooms].find((roomName) => roomName !== socket.id);
+            const userName = typeof socket.data.userName === 'string' ? socket.data.userName : undefined;
+            const userId = typeof socket.data.userId === 'string' ? socket.data.userId : socket.id;
+            if (roomId && userName) {
+                const room = yield RoomService_1.RoomService.getRoom(roomId);
+                const user = room === null || room === void 0 ? void 0 : room.users.find((roomUser) => roomUser.name === userName || roomUser.id === userId);
+                if (user) {
+                    actor = Object.assign(Object.assign({}, user), { roomId });
+                    currentUser = actor;
+                }
+            }
+        }
+        if (!(actor === null || actor === void 0 ? void 0 : actor.roomId)) {
+            socket.emit('error', 'Не удалось сменить этап: сессия не восстановлена');
+            return;
+        }
         console.log('Phase change requested:', {
-            userId: currentUser.id,
-            userName: currentUser.name,
+            userId: actor.id,
+            userName: actor.name,
             phase
         });
         try {
-            const previousRoom = yield RoomService_1.RoomService.getRoom(currentUser.roomId);
-            // Сначала меняем фазу
-            const updatedRoom = yield RoomService_1.RoomService.updatePhase(currentUser.roomId, phase, currentUser.id);
+            const previousRoom = yield RoomService_1.RoomService.getRoom(actor.roomId);
+            const updatedRoom = yield RoomService_1.RoomService.updatePhase(actor.roomId, phase, actor.id, actor.name);
             if (!updatedRoom) {
                 socket.emit('error', 'Failed to change phase');
                 return;
             }
-            // Если фаза обсуждения, сортируем карточки по голосам
             let sortedCards = updatedRoom.cards;
             if (phase === 'discussion') {
                 console.log('Sorting cards for discussion phase');
                 sortedCards = getSortedCards(updatedRoom.cards);
-                console.log('Sorted cards:', sortedCards.map(c => {
-                    var _a, _b, _c, _d;
-                    return ({
-                        id: c.id,
-                        text: c.text,
-                        likes: ((_a = c.likes) === null || _a === void 0 ? void 0 : _a.length) || 0,
-                        dislikes: ((_b = c.dislikes) === null || _b === void 0 ? void 0 : _b.length) || 0,
-                        score: (((_c = c.likes) === null || _c === void 0 ? void 0 : _c.length) || 0) - (((_d = c.dislikes) === null || _d === void 0 ? void 0 : _d.length) || 0)
-                    });
-                }));
             }
-            // После смены фазы сбрасываем состояния готовности всех пользователей
-            const roomWithResetStates = yield RoomService_1.RoomService.resetUsersReadyState(currentUser.roomId);
-            if (roomWithResetStates) {
-                clearRoomTimer(currentUser.roomId, true);
-                if (roomWithResetStates.phase === 'creation') {
-                    roomFacilitators.delete(currentUser.roomId);
-                }
-                if (roomWithResetStates.phase === 'rating') {
-                    roomRetroRatings.set(currentUser.roomId, { votes: new Map(), resultsVisible: false });
-                }
-                // Отправляем оба события для обновления UI
-                io.to(currentUser.roomId).emit('phase-changed', {
-                    phase: roomWithResetStates.phase,
-                    cards: sortedCards
-                });
-                io.to(currentUser.roomId).emit('state-updated', {
-                    cards: sortedCards,
-                    phase: roomWithResetStates.phase,
-                    users: roomWithResetStates.users
-                });
-                if ((previousRoom === null || previousRoom === void 0 ? void 0 : previousRoom.phase) === 'creation' && roomWithResetStates.phase !== 'creation') {
-                    const facilitator = selectRandomFacilitator(roomWithResetStates);
-                    if (facilitator) {
-                        roomFacilitators.set(currentUser.roomId, facilitator);
-                        io.to(currentUser.roomId).emit('facilitator-selected', facilitator);
-                    }
-                }
-                yield emitRetroRatingStateToRoom(currentUser.roomId);
+            const roomWithResetStates = yield RoomService_1.RoomService.resetUsersReadyState(actor.roomId);
+            const roomState = roomWithResetStates || updatedRoom;
+            clearRoomTimer(actor.roomId, true);
+            if (roomState.phase === 'creation') {
+                roomFacilitators.delete(actor.roomId);
+                roomDiscussionNavigation.delete(actor.roomId);
             }
+            if (roomState.phase === 'rating') {
+                roomRetroRatings.set(actor.roomId, { votes: new Map(), resultsVisible: false });
+            }
+            if (roomState.phase === 'discussion') {
+                const navigationState = buildDiscussionNavigation(sortedCards);
+                roomDiscussionNavigation.set(actor.roomId, navigationState);
+                io.to(actor.roomId).emit('discussion-navigation', navigationState);
+            }
+            else {
+                roomDiscussionNavigation.delete(actor.roomId);
+            }
+            io.to(actor.roomId).emit('phase-changed', {
+                phase: roomState.phase,
+                cards: sortedCards
+            });
+            io.to(actor.roomId).emit('state-updated', {
+                cards: sortedCards,
+                phase: roomState.phase,
+                users: roomState.users
+            });
+            if ((previousRoom === null || previousRoom === void 0 ? void 0 : previousRoom.phase) === 'creation' && roomState.phase !== 'creation') {
+                const facilitator = selectRandomFacilitator(roomState);
+                if (facilitator) {
+                    roomFacilitators.set(actor.roomId, facilitator);
+                    io.to(actor.roomId).emit('facilitator-selected', facilitator);
+                }
+            }
+            yield emitRetroRatingStateToRoom(actor.roomId);
         }
         catch (error) {
             console.error('Error changing phase:', error);
             socket.emit('error', 'Failed to change phase');
+        }
+    }));
+    socket.on('set-discussion-navigation', ({ unviewedCardIds, viewedCardIds }) => __awaiter(void 0, void 0, void 0, function* () {
+        let actor = currentUser;
+        if (!(actor === null || actor === void 0 ? void 0 : actor.roomId)) {
+            const roomId = [...socket.rooms].find((roomName) => roomName !== socket.id);
+            const userName = typeof socket.data.userName === 'string' ? socket.data.userName : undefined;
+            const userId = typeof socket.data.userId === 'string' ? socket.data.userId : socket.id;
+            if (roomId && userName) {
+                const room = yield RoomService_1.RoomService.getRoom(roomId);
+                const user = room === null || room === void 0 ? void 0 : room.users.find((roomUser) => roomUser.name === userName || roomUser.id === userId);
+                if (user) {
+                    actor = Object.assign(Object.assign({}, user), { roomId });
+                    currentUser = actor;
+                }
+            }
+        }
+        if (!(actor === null || actor === void 0 ? void 0 : actor.roomId))
+            return;
+        try {
+            const room = yield RoomService_1.RoomService.getRoom(actor.roomId);
+            if (!room || room.phase !== 'discussion')
+                return;
+            if (!canControlDiscussionNavigation(room, actor.name, actor.role))
+                return;
+            const normalized = normalizeDiscussionNavigation(room, {
+                unviewedCardIds: Array.isArray(unviewedCardIds)
+                    ? unviewedCardIds.filter((id) => typeof id === 'string')
+                    : [],
+                viewedCardIds: Array.isArray(viewedCardIds)
+                    ? viewedCardIds.filter((id) => typeof id === 'string')
+                    : []
+            });
+            if (!normalized)
+                return;
+            roomDiscussionNavigation.set(actor.roomId, normalized);
+            io.to(actor.roomId).emit('discussion-navigation', normalized);
+        }
+        catch (error) {
+            console.error('Error updating discussion navigation:', error);
         }
     }));
     socket.on('submit-retro-rating', ({ value }) => __awaiter(void 0, void 0, void 0, function* () {
@@ -1206,6 +1344,7 @@ io.on('connection', (socket) => {
             roomWhiteboards.delete(roomId);
             roomRetroRatings.delete(roomId);
             roomFacilitators.delete(roomId);
+            roomDiscussionNavigation.delete(roomId);
             roomSprintVipVotes.delete(roomId);
             io.to(roomId).emit('room-deleted');
             io.in(roomId).socketsLeave(roomId);

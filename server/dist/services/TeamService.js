@@ -133,6 +133,19 @@ class TeamService {
             return this.convertToTeam(updatedTeam);
         });
     }
+    static getTeamRosterNames(teamId) {
+        return __awaiter(this, void 0, void 0, function* () {
+            yield this.ensureBuiltinTeam();
+            if (teamId === exports.BUILTIN_TEAM_ID) {
+                return [...authNames_1.FIXED_AUTH_NAMES];
+            }
+            const team = yield Team_1.TeamModel.findOne({ id: teamId });
+            if (!team) {
+                return [];
+            }
+            return team.members.map((member) => member.name);
+        });
+    }
     static getUserRole(teamId, username) {
         var _a;
         return __awaiter(this, void 0, void 0, function* () {

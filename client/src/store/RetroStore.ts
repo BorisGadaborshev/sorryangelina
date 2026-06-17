@@ -1,5 +1,5 @@
 import { makeAutoObservable, runInAction } from 'mobx';
-import { AuthProfile, Card, ChatMessage, FacilitatorAnnouncement, Phase, PhaseTimerState, RetroRatingState, Room, RoomState, SprintVipState, Team, User, WhiteboardStroke } from '../types';
+import { AuthProfile, Card, ChatMessage, DiscussionNavigationState, FacilitatorAnnouncement, Phase, PhaseTimerState, RetroRatingState, Room, RoomState, SprintVipState, Team, User, WhiteboardStroke } from '../types';
 import { Socket } from 'socket.io-client';
 import { SocketService } from '../services/socket';
 
@@ -19,6 +19,7 @@ export class RetroStore {
   chatMessages: ChatMessage[] = [];
   whiteboardStrokes: WhiteboardStroke[] = [];
   facilitatorAnnouncement: FacilitatorAnnouncement | null = null;
+  discussionNavigation: DiscussionNavigationState | null = null;
   sprintVip: SprintVipState = { voteCount: 0 };
   retroRating: RetroRatingState = {
     hasVoted: false,
@@ -175,6 +176,12 @@ export class RetroStore {
     });
   }
 
+  setDiscussionNavigation(state: DiscussionNavigationState | null) {
+    runInAction(() => {
+      this.discussionNavigation = state;
+    });
+  }
+
   setSprintVip(state: SprintVipState) {
     runInAction(() => {
       this.sprintVip = state;
@@ -253,6 +260,7 @@ export class RetroStore {
         this.chatMessages = [];
         this.whiteboardStrokes = [];
         this.facilitatorAnnouncement = null;
+        this.discussionNavigation = null;
         this.sprintVip = { voteCount: 0 };
         this.retroRating = { hasVoted: false, votesCount: 0, totalCount: 0, resultsVisible: false };
         console.log('Cleared room and session');
@@ -266,6 +274,10 @@ export class RetroStore {
       this.phase = phase;
       if (phase === 'creation') {
         this.facilitatorAnnouncement = null;
+        this.discussionNavigation = null;
+      }
+      if (phase !== 'discussion') {
+        this.discussionNavigation = null;
       }
     });
   }
@@ -296,6 +308,10 @@ export class RetroStore {
       this.phase = state.phase;
       if (state.phase === 'creation') {
         this.facilitatorAnnouncement = null;
+        this.discussionNavigation = null;
+      }
+      if (state.phase !== 'discussion') {
+        this.discussionNavigation = null;
       }
       this.users = this.normalizeUsers(state.users);
       if (this.currentUser) {
@@ -424,8 +440,15 @@ export class RetroStore {
   }
 
   canChangePhase(): boolean {
-    // Проверяем только роль админа
-    return this.currentUser?.role === 'admin';
+    return this.currentUser?.role === 'admin' || this.room?.owner === this.currentUser?.name;
+  }
+
+  canControlDiscussionNavigation(): boolean {
+    if (!this.currentUser) return false;
+    if (this.currentUser.role === 'admin' || this.room?.owner === this.currentUser.name) {
+      return true;
+    }
+    return this.facilitatorAnnouncement?.userName === this.currentUser.name;
   }
 
   getUserReadyCount(): number {

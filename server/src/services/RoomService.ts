@@ -187,10 +187,10 @@ export class RoomService {
       return null;
     }
 
-    // Находим пользователя по id, иначе по имени (на случай смены socket.id)
-    let user = room.users.find(u => u.id === userId);
-    if (!user && userName) {
-      user = room.users.find(u => u.name === userName);
+    // Находим пользователя по имени, иначе по id (на случай смены socket.id)
+    let user = userName ? room.users.find(u => u.name === userName) : undefined;
+    if (!user) {
+      user = room.users.find(u => u.id === userId);
     }
 
     if (!user) {
@@ -199,17 +199,19 @@ export class RoomService {
     }
 
     const hasAdminRole = user.role === 'admin';
-    
+    const isRoomOwner = user.name === room.owner;
+
     console.log('Checking phase update permissions:', {
       userName: user.name,
       userRole: user.role,
       hasAdminRole,
+      isRoomOwner,
       currentPhase: room.phase,
       requestedPhase: phase
     });
 
-    if (!hasAdminRole) {
-      console.log('Permission denied: user is not admin');
+    if (!hasAdminRole && !isRoomOwner) {
+      console.log('Permission denied: user is not admin or room owner');
       return null;
     }
 

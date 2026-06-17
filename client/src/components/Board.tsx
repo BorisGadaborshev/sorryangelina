@@ -291,7 +291,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
             const canChange = store.canChangePhase();
             const readyCount = store.getUserReadyCount();
             const totalCount = store.getTotalUserCount();
-            const isAdmin = store.currentUser?.role === 'admin';
+            const isAdmin = store.canChangePhase();
 
             const timerControls = (
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mr: 2, whiteSpace: 'nowrap' }}>

@@ -90,9 +90,26 @@ const connectDB = () => __awaiter(void 0, void 0, void 0, function* () {
 
     create index if not exists idx_cards_room on cards(room_id);
     create index if not exists idx_users_room on room_users(room_id);
-    create index if not exists idx_rooms_team on rooms(team_id);
-    create index if not exists idx_team_members_name on team_members(name);
     create unique index if not exists idx_accounts_name_ci on accounts ((lower(name)));
+  `);
+    yield exports.pool.query(`
+    do $$
+    begin
+      if exists (
+        select 1
+        from information_schema.columns
+        where table_schema = 'public' and table_name = 'rooms' and column_name = 'team_id'
+      ) then
+        execute 'create index if not exists idx_rooms_team on rooms(team_id)';
+      end if;
+      if exists (
+        select 1
+        from information_schema.tables
+        where table_schema = 'public' and table_name = 'team_members'
+      ) then
+        execute 'create index if not exists idx_team_members_name on team_members(name)';
+      end if;
+    end $$;
   `);
     console.log('Connected to PostgreSQL and ensured schema');
 });

@@ -981,7 +981,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
     >
       <Paper elevation={3} sx={{ p: 3, width: '100%', maxWidth: 720 }}>
         <Typography variant="h5" sx={{ mb: 2 }}>
-          Retro Board
+          Ретроспектива
         </Typography>
         {store.error && (
           <Typography color="error" sx={{ mb: 2 }}>
