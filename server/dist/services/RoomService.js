@@ -16,10 +16,13 @@ exports.RoomService = void 0;
 const Room_1 = require("../models/Room");
 const types_1 = require("../types");
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
+const NO_ROOM_PASSWORD_MARKER = '__no_room_password__';
 class RoomService {
     static createRoom(roomId, password, owner, username, options = {}) {
         return __awaiter(this, void 0, void 0, function* () {
-            const hashedPassword = yield bcryptjs_1.default.hash(password, 10);
+            const normalizedPassword = (password === null || password === void 0 ? void 0 : password.trim()) || '';
+            const hashSource = normalizedPassword || NO_ROOM_PASSWORD_MARKER;
+            const hashedPassword = yield bcryptjs_1.default.hash(hashSource, 10);
             const user = {
                 id: owner,
                 name: username,
@@ -71,7 +74,18 @@ class RoomService {
             const room = yield Room_1.RoomModel.findOne({ id: roomId });
             if (!room)
                 return false;
-            return bcryptjs_1.default.compare(password, room.password);
+            const isOpenRoom = (yield this.roomHasPassword(room.password)) === false;
+            if (isOpenRoom)
+                return true;
+            const provided = (password === null || password === void 0 ? void 0 : password.trim()) || '';
+            if (!provided)
+                return false;
+            return bcryptjs_1.default.compare(provided, room.password);
+        });
+    }
+    static roomHasPassword(hashedPassword) {
+        return __awaiter(this, void 0, void 0, function* () {
+            return !(yield bcryptjs_1.default.compare(NO_ROOM_PASSWORD_MARKER, hashedPassword));
         });
     }
     static findExistingUser(roomId, username) {
@@ -308,6 +322,23 @@ class RoomService {
         return __awaiter(this, void 0, void 0, function* () {
             const rooms = yield Room_1.RoomModel.find(teamId ? { teamId } : undefined);
             return rooms.map(room => this.convertToRoom(room));
+        });
+    }
+    static getAvailableRoomSummaries(teamId) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const rooms = yield Room_1.RoomModel.find(teamId ? { teamId } : undefined);
+            return Promise.all(rooms.map((room) => __awaiter(this, void 0, void 0, function* () {
+                const converted = this.convertToRoom(room);
+                return {
+                    id: converted.id,
+                    teamId: converted.teamId,
+                    usersCount: converted.users.length,
+                    phase: converted.phase,
+                    owner: converted.owner,
+                    createdAt: converted.createdAt,
+                    hasPassword: yield this.roomHasPassword(room.password)
+                };
+            })));
         });
     }
     static restoreSession(roomId, userId, newSocketId) {

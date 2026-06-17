@@ -79,15 +79,8 @@ app.post('/api/clear-database', (req, res) => __awaiter(void 0, void 0, void 0, 
 app.get('/api/rooms', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         yield TeamService_1.TeamService.ensureBuiltinTeam();
-        const rooms = yield RoomService_1.RoomService.getAllRooms(TeamService_1.BUILTIN_TEAM_ID);
-        res.json(rooms.map(room => ({
-            id: room.id,
-            teamId: room.teamId,
-            usersCount: room.users.length,
-            phase: room.phase,
-            owner: room.owner,
-            createdAt: room.createdAt
-        })));
+        const rooms = yield RoomService_1.RoomService.getAvailableRoomSummaries(TeamService_1.BUILTIN_TEAM_ID);
+        res.json(rooms);
     }
     catch (error) {
         console.error('Error getting rooms:', error);
@@ -174,15 +167,8 @@ app.get('/api/teams/:teamId/rooms', (req, res) => __awaiter(void 0, void 0, void
             res.status(404).json({ error: 'Team not found' });
             return;
         }
-        const rooms = yield RoomService_1.RoomService.getAllRooms(req.params.teamId);
-        res.json(rooms.map(room => ({
-            id: room.id,
-            teamId: room.teamId,
-            usersCount: room.users.length,
-            phase: room.phase,
-            owner: room.owner,
-            createdAt: room.createdAt
-        })));
+        const rooms = yield RoomService_1.RoomService.getAvailableRoomSummaries(req.params.teamId);
+        res.json(rooms);
     }
     catch (error) {
         console.error('Error getting team rooms:', error);

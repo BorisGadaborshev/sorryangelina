@@ -75,15 +75,8 @@ app.post('/api/clear-database', async (req, res) => {
 app.get('/api/rooms', async (req, res) => {
   try {
     await TeamService.ensureBuiltinTeam();
-    const rooms = await RoomService.getAllRooms(BUILTIN_TEAM_ID);
-    res.json(rooms.map(room => ({
-      id: room.id,
-      teamId: room.teamId,
-      usersCount: room.users.length,
-      phase: room.phase,
-      owner: room.owner,
-      createdAt: room.createdAt
-    })));
+    const rooms = await RoomService.getAvailableRoomSummaries(BUILTIN_TEAM_ID);
+    res.json(rooms);
   } catch (error) {
     console.error('Error getting rooms:', error);
     res.status(500).json({ error: 'Failed to get rooms' });
@@ -184,15 +177,8 @@ app.get('/api/teams/:teamId/rooms', async (req, res) => {
       return;
     }
 
-    const rooms = await RoomService.getAllRooms(req.params.teamId);
-    res.json(rooms.map(room => ({
-      id: room.id,
-      teamId: room.teamId,
-      usersCount: room.users.length,
-      phase: room.phase,
-      owner: room.owner,
-      createdAt: room.createdAt
-    })));
+    const rooms = await RoomService.getAvailableRoomSummaries(req.params.teamId);
+    res.json(rooms);
   } catch (error) {
     console.error('Error getting team rooms:', error);
     res.status(500).json({ error: 'Failed to get team rooms' });

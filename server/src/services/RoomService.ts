@@ -2,9 +2,13 @@ import { RoomModel } from '../models/Room';
 import { Room, RoomDocument, User, Card, CardComment, CardReaction, Phase, CreateRoomOptions, COLUMN_COUNT, CARD_REACTION_EMOJIS } from '../types';
 import bcrypt from 'bcryptjs';
 
+const NO_ROOM_PASSWORD_MARKER = '__no_room_password__';
+
 export class RoomService {
-  static async createRoom(roomId: string, password: string, owner: string, username: string, options: CreateRoomOptions = {}): Promise<Room> {
-    const hashedPassword = await bcrypt.hash(password, 10);
+  static async createRoom(roomId: string, password: string | undefined, owner: string, username: string, options: CreateRoomOptions = {}): Promise<Room> {
+    const normalizedPassword = password?.trim() || '';
+    const hashSource = normalizedPassword || NO_ROOM_PASSWORD_MARKER;
+    const hashedPassword = await bcrypt.hash(hashSource, 10);
     const user: User = {
       id: owner,
       name: username,
@@ -53,10 +57,18 @@ export class RoomService {
     return room ? this.convertToRoom(room) : null;
   }
 
-  static async validatePassword(roomId: string, password: string): Promise<boolean> {
+  static async validatePassword(roomId: string, password?: string): Promise<boolean> {
     const room = await RoomModel.findOne({ id: roomId });
     if (!room) return false;
-    return bcrypt.compare(password, room.password);
+    const isOpenRoom = await this.roomHasPassword(room.password) === false;
+    if (isOpenRoom) return true;
+    const provided = password?.trim() || '';
+    if (!provided) return false;
+    return bcrypt.compare(provided, room.password);
+  }
+
+  static async roomHasPassword(hashedPassword: string): Promise<boolean> {
+    return !(await bcrypt.compare(NO_ROOM_PASSWORD_MARKER, hashedPassword));
   }
 
   static async findExistingUser(roomId: string, username: string): Promise<User | null> {
@@ -380,6 +392,22 @@ export class RoomService {
   static async getAllRooms(teamId?: string): Promise<Room[]> {
     const rooms = await RoomModel.find(teamId ? { teamId } : undefined);
     return rooms.map(room => this.convertToRoom(room));
+  }
+
+  static async getAvailableRoomSummaries(teamId?: string) {
+    const rooms = await RoomModel.find(teamId ? { teamId } : undefined);
+    return Promise.all(rooms.map(async (room) => {
+      const converted = this.convertToRoom(room);
+      return {
+        id: converted.id,
+        teamId: converted.teamId,
+        usersCount: converted.users.length,
+        phase: converted.phase,
+        owner: converted.owner,
+        createdAt: converted.createdAt,
+        hasPassword: await this.roomHasPassword(room.password)
+      };
+    }));
   }
 
   static async restoreSession(roomId: string, userId: string, newSocketId: string): Promise<{ room: Room | null, user: User | null }> {

@@ -366,14 +366,14 @@ const Login: React.FC<Props> = observer(({ store }) => {
   };
 
   const handleCreateRoom = async () => {
-    if (!store.authProfile || !store.selectedTeam || !createRoomId.trim() || !createRoomPassword.trim()) return;
+    if (!store.authProfile || !store.selectedTeam || !createRoomId.trim()) return;
 
     setIsLoading(true);
     store.setError(null);
     try {
       await store.socketService?.createRoom(
         createRoomId.trim(),
-        createRoomPassword.trim(),
+        createRoomPassword.trim() || undefined,
         store.authProfile.name,
         store.authProfile.token,
         {
@@ -388,22 +388,43 @@ const Login: React.FC<Props> = observer(({ store }) => {
     }
   };
 
-  const handleJoinRoom = async () => {
-    if (!store.authProfile || !selectedRoomId.trim() || !joinRoomPassword.trim()) return;
+  const joinRoomById = async (roomId: string, password: string) => {
+    if (!store.authProfile) return;
 
     setIsLoading(true);
     setJoinRoomError(null);
     store.setError(null);
     try {
-      await store.socketService?.joinRoom(selectedRoomId.trim(), joinRoomPassword.trim(), store.authProfile.name, store.authProfile.token);
+      await store.socketService?.joinRoom(roomId, password, store.authProfile.name, store.authProfile.token);
       setIsJoinDialogOpen(false);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Не удалось подключиться к комнате';
       setJoinRoomError(message);
       store.setError(null);
+      throw error;
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleJoinRoom = async () => {
+    if (!selectedRoomId.trim()) return;
+    const selectedRoom = availableRooms.find((room) => room.id === selectedRoomId);
+    if (selectedRoom?.hasPassword !== false && !joinRoomPassword.trim()) return;
+    await joinRoomById(selectedRoomId.trim(), joinRoomPassword.trim());
+  };
+
+  const handleRoomClick = async (roomId: string) => {
+    const room = availableRooms.find((item) => item.id === roomId);
+    if (room?.hasPassword === false) {
+      try {
+        await joinRoomById(roomId, '');
+      } catch (error) {
+        store.setError(error instanceof Error ? error.message : 'Не удалось подключиться к комнате');
+      }
+      return;
+    }
+    handleOpenJoinDialog(roomId);
   };
 
   const handleDeleteRoomFromTile = async () => {
@@ -440,29 +461,46 @@ const Login: React.FC<Props> = observer(({ store }) => {
       ? new URL('/', window.location.href).toString()
       : '';
 
-  const inviteTelegramText = inviteRoomPassword.trim()
-    ? [
-        'Привет! Зову вас на ретро.',
-        '',
-        `Комната: ${inviteRoomId}`,
-        `Пароль: ${inviteRoomPassword.trim()}`,
-        '',
-        'Заходите, будем разбирать итоги спринта.'
-      ].join('\n')
-    : '';
+  const inviteRoom = availableRooms.find((room) => room.id === inviteRoomId);
+  const invitePasswordLine = inviteRoomPassword.trim() ? `Пароль: ${inviteRoomPassword.trim()}` : null;
 
-  const inviteMessage = inviteRoomPassword.trim()
+  const buildInviteMessage = (passwordLine: string | null) => {
+    const lines = [
+      'Привет! Зову вас на ретро.',
+      '',
+      `Комната: ${inviteRoomId}`
+    ];
+    if (passwordLine) {
+      lines.push(passwordLine);
+    }
+    lines.push('🔗 Вход:', authLink, '', 'Заходите, будем разбирать итоги спринта.');
+    return lines.join('\n');
+  };
+
+  const inviteTelegramText = invitePasswordLine
     ? [
         'Привет! Зову вас на ретро.',
         '',
         `Комната: ${inviteRoomId}`,
-        `Пароль: ${inviteRoomPassword.trim()}`,
-        '🔗 Вход:',
-        authLink,
+        invitePasswordLine,
         '',
         'Заходите, будем разбирать итоги спринта.'
       ].join('\n')
-    : '';
+    : inviteRoom?.hasPassword === false
+      ? [
+          'Привет! Зову вас на ретро.',
+          '',
+          `Комната: ${inviteRoomId}`,
+          '',
+          'Заходите, будем разбирать итоги спринта.'
+        ].join('\n')
+      : '';
+
+  const inviteMessage = invitePasswordLine
+    ? buildInviteMessage(invitePasswordLine)
+    : inviteRoom?.hasPassword === false
+      ? buildInviteMessage(null)
+      : '';
 
   const handleCopyInvite = async () => {
     if (!inviteMessage) return;
@@ -678,7 +716,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
           <RoomTiles
             rooms={availableRooms}
             currentUserName={store.authProfile?.name || ''}
-            onRoomClick={handleOpenJoinDialog}
+            onRoomClick={handleRoomClick}
             onCreateClick={handleOpenCreateDialog}
             onDeleteClick={handleOpenDeleteDialog}
             onInviteClick={handleOpenInviteDialog}
@@ -703,10 +741,11 @@ const Login: React.FC<Props> = observer(({ store }) => {
           <TextField
             fullWidth
             type="password"
-            label="Пароль комнаты"
+            label="Пароль комнаты (необязательно)"
             margin="normal"
             value={createRoomPassword}
             onChange={(event) => setCreateRoomPassword(event.target.value)}
+            helperText="Оставьте пустым, если вход в комнату должен быть без пароля"
             onKeyDown={(event) => {
               if (event.key === 'Enter') {
                 event.preventDefault();
@@ -720,7 +759,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
           <Button
             variant="contained"
             onClick={handleCreateRoom}
-            disabled={isLoading || !createRoomId.trim() || !createRoomPassword.trim()}
+            disabled={isLoading || !createRoomId.trim()}
           >
             {isLoading ? <CircularProgress size={18} color="inherit" /> : 'Создать'}
           </Button>
@@ -763,7 +802,11 @@ const Login: React.FC<Props> = observer(({ store }) => {
           >
             Отмена
           </Button>
-          <Button variant="contained" onClick={handleJoinRoom} disabled={isLoading || !joinRoomPassword.trim()}>
+          <Button
+            variant="contained"
+            onClick={handleJoinRoom}
+            disabled={isLoading || !joinRoomPassword.trim()}
+          >
             {isLoading ? <CircularProgress size={18} color="inherit" /> : 'Войти'}
           </Button>
         </DialogActions>
@@ -801,26 +844,30 @@ const Login: React.FC<Props> = observer(({ store }) => {
         <DialogTitle>Приглашение в комнату {inviteRoomId}</DialogTitle>
         <DialogContent>
           <DialogContentText sx={{ mb: 1.5 }}>
-            Введите пароль комнаты, чтобы сформировать приглашение для Telegram.
+            {inviteRoom?.hasPassword === false
+              ? 'Комната без пароля — можно сразу скопировать приглашение для Telegram.'
+              : 'Введите пароль комнаты, чтобы сформировать приглашение для Telegram.'}
           </DialogContentText>
-          <TextField
-            autoFocus
-            fullWidth
-            label="Пароль комнаты"
-            margin="normal"
-            value={inviteRoomPassword}
-            onChange={(event) => {
-              setInviteRoomPassword(event.target.value);
-              if (inviteCopySuccess) setInviteCopySuccess(false);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault();
-                handleCopyInvite();
-              }
-            }}
-          />
-          {inviteRoomPassword.trim() && (
+          {inviteRoom?.hasPassword !== false && (
+            <TextField
+              autoFocus
+              fullWidth
+              label="Пароль комнаты"
+              margin="normal"
+              value={inviteRoomPassword}
+              onChange={(event) => {
+                setInviteRoomPassword(event.target.value);
+                if (inviteCopySuccess) setInviteCopySuccess(false);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  handleCopyInvite();
+                }
+              }}
+            />
+          )}
+          {inviteMessage && (
             <TextField
               fullWidth
               margin="normal"
@@ -842,7 +889,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
           <Button
             variant="outlined"
             onClick={handleCopyInvite}
-            disabled={!inviteRoomPassword.trim()}
+            disabled={!inviteMessage}
           >
             Скопировать
           </Button>
@@ -852,7 +899,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
             href={telegramShareLink}
             target="_blank"
             rel="noopener noreferrer"
-            disabled={!inviteRoomPassword.trim()}
+            disabled={!inviteMessage}
           >
             Открыть в Telegram
           </Button>

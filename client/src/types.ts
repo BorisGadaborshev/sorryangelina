@@ -138,6 +138,7 @@ export interface AvailableRoom {
   phase: Phase;
   owner: string;
   createdAt?: string;
+  hasPassword?: boolean;
 }
 
 export type TeamRole = 'admin' | 'user';

@@ -322,7 +322,7 @@ export class SocketService {
     });
   }
 
-  async createRoom(roomId: string, password: string, username: string, token: string, options?: CreateRoomOptions): Promise<void> {
+  async createRoom(roomId: string, password: string | undefined, username: string, token: string, options?: CreateRoomOptions): Promise<void> {
     console.log('Attempting to create room:', roomId);
     try {
       await this.ensureConnection();
