@@ -294,7 +294,9 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
       elevation={2}
       sx={{
         width: '100%',
-        minWidth: isMobile ? '100%' : '300px',
+        maxWidth: '100%',
+        flex: isMobile ? '0 0 auto' : '1 1 0',
+        minWidth: isMobile ? '100%' : 0,
         minHeight: isMobile ? 'auto' : '70vh',
         p: 1.25,
         backgroundColor: columnColor,

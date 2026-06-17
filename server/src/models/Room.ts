@@ -328,6 +328,17 @@ export const RoomModel = {
     await pool.query('delete from rooms where id=$1', [where.id]);
   },
 
+  async getNextRoomAdminUserId(roomId: string, leavingUserId: string): Promise<string | null> {
+    const { rows } = await pool.query(
+      `select id from room_users
+       where room_id = $1 and id != $2
+       order by joined_at asc nulls last, name asc
+       limit 1`,
+      [roomId, leavingUserId]
+    );
+    return rows.length > 0 ? (rows[0] as { id: string }).id : null;
+  },
+
   async setRoomAdmin(roomId: string, adminUserId: string): Promise<RoomDocument | null> {
     const client = await pool.connect();
     try {

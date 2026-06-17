@@ -5,6 +5,7 @@ import { Room, RoomState, User, Card, CardComment, CardReaction, FacilitatorAnno
 export class SocketService {
   private socket: Socket;
   private store: RetroStore;
+  private isRestoringSession = false;
 
   constructor(store: RetroStore) {
     console.log('Initializing socket connection...');
@@ -21,7 +22,7 @@ export class SocketService {
       transports: ['websocket', 'polling'],
       upgrade: true,
       reconnection: true,
-      reconnectionAttempts: 5,
+      reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
       timeout: 20000,
@@ -35,18 +36,7 @@ export class SocketService {
     // Setup enhanced connection handling
     this.socket.on('connect', () => {
       console.log('Socket connected successfully:', this.socket.id);
-      this.store.setError(null);
-
-      const roomId = localStorage.getItem('roomId');
-      const userId = localStorage.getItem('userId');
-      const username = localStorage.getItem('username');
-      const token = this.store.authProfile?.token;
-
-      if (roomId && userId && username && token && !this.store.room) {
-        this.restoreSession(roomId, userId, username, token).catch((error) => {
-          console.error('Failed to restore session after reconnect:', error);
-        });
-      }
+      void this.attemptSessionRestore();
     });
 
     this.socket.on('connect_error', (error) => {
@@ -64,16 +54,17 @@ export class SocketService {
 
     this.socket.on('disconnect', (reason) => {
       console.log('Socket disconnected:', reason);
-      this.store.setError('Connection lost. Attempting to reconnect...');
-      this.store.setRoom(null);
-      
-      if (!this.socket.connected) {
-        setTimeout(() => {
-          console.log('Attempting to reconnect...');
-          this.socket.connect();
-        }, 1000);
+
+      if (reason === 'io client disconnect') {
+        return;
       }
+
+      this.store.persistBoardState();
+      this.store.setReconnecting(true);
+      this.store.setError('Переподключение к комнате...');
     });
+
+    this.bindLifecycleHandlers();
 
     this.setupListeners();
     
@@ -148,6 +139,7 @@ export class SocketService {
       this.store.setRoom(room);
       this.store.updateState(state);
       this.store.setError(null);
+      this.store.setReconnecting(false);
     });
 
     this.socket.on('state-updated', (state: RoomState) => {
@@ -268,6 +260,70 @@ export class SocketService {
       this.store.setRoom(null);
       this.store.setError('Комната была удалена администратором');
     });
+  }
+
+  private bindLifecycleHandlers(): void {
+    const resumeSession = () => {
+      void this.attemptSessionRestore();
+    };
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        resumeSession();
+      }
+    });
+
+    window.addEventListener('pageshow', (event) => {
+      if (event.persisted) {
+        resumeSession();
+      }
+    });
+
+    window.addEventListener('focus', () => {
+      resumeSession();
+    });
+  }
+
+  private async attemptSessionRestore(): Promise<void> {
+    const roomId = localStorage.getItem('roomId');
+    const userId = localStorage.getItem('userId');
+    const username = localStorage.getItem('username');
+    const token = this.store.authProfile?.token;
+
+    if (!roomId || !userId || !username || !token) {
+      return;
+    }
+
+    if (this.socket.connected && this.store.room && !this.store.isReconnecting) {
+      return;
+    }
+
+    if (!this.socket.connected) {
+      this.store.setReconnecting(true);
+      this.socket.connect();
+      return;
+    }
+
+    if (this.isRestoringSession) {
+      return;
+    }
+
+    this.isRestoringSession = true;
+    this.store.setReconnecting(true);
+
+    try {
+      await this.restoreSession(roomId, userId, username, token);
+      this.store.setError(null);
+      this.store.setReconnecting(false);
+    } catch (error) {
+      console.error('Failed to restore session after reconnect:', error);
+      if (!this.store.room) {
+        this.store.clearSession();
+        this.store.setReconnecting(false);
+      }
+    } finally {
+      this.isRestoringSession = false;
+    }
   }
 
   private ensureConnection(): Promise<void> {
@@ -578,7 +634,8 @@ export class SocketService {
           this.socket.off('room-joined', handleSuccess);
           this.socket.off('session-expired', handleExpired);
           this.socket.off('error', handleError);
-          this.store.clearSession();
+          this.store.setRoom(null);
+          this.store.setReconnecting(false);
           reject(new Error('Session expired'));
         };
 
@@ -612,6 +669,7 @@ export class SocketService {
 
           this.store.setRoom(room);
           this.store.updateState(state);
+          this.store.setReconnecting(false);
           resolve();
         };
 
@@ -650,6 +708,8 @@ export class SocketService {
   leaveRoom() {
     if (!this.socket) return;
     this.socket.emit('leave-room');
+    this.store.clearSession();
+    this.store.setCurrentUser(null);
     this.store.setRoom(null);
   }
 } 

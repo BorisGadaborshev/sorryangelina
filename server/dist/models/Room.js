@@ -298,6 +298,15 @@ exports.RoomModel = {
             yield database_1.pool.query('delete from rooms where id=$1', [where.id]);
         });
     },
+    getNextRoomAdminUserId(roomId, leavingUserId) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const { rows } = yield database_1.pool.query(`select id from room_users
+       where room_id = $1 and id != $2
+       order by joined_at asc nulls last, name asc
+       limit 1`, [roomId, leavingUserId]);
+            return rows.length > 0 ? rows[0].id : null;
+        });
+    },
     setRoomAdmin(roomId, adminUserId) {
         return __awaiter(this, void 0, void 0, function* () {
             const client = yield database_1.pool.connect();

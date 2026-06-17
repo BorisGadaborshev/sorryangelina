@@ -395,6 +395,39 @@ const roomRetroRatings = new Map();
 const roomFacilitators = new Map();
 const roomDiscussionNavigation = new Map();
 const roomSprintVipVotes = new Map();
+const roomUserSocketPresence = new Map();
+const addRoomPresence = (roomId, userName, socketId) => {
+    let roomMap = roomUserSocketPresence.get(roomId);
+    if (!roomMap) {
+        roomMap = new Map();
+        roomUserSocketPresence.set(roomId, roomMap);
+    }
+    let sockets = roomMap.get(userName);
+    if (!sockets) {
+        sockets = new Set();
+        roomMap.set(userName, sockets);
+    }
+    sockets.add(socketId);
+};
+const removeRoomPresence = (roomId, userName, socketId) => {
+    const roomMap = roomUserSocketPresence.get(roomId);
+    if (!roomMap) {
+        return true;
+    }
+    const sockets = roomMap.get(userName);
+    if (!sockets) {
+        return true;
+    }
+    sockets.delete(socketId);
+    if (sockets.size === 0) {
+        roomMap.delete(userName);
+        if (roomMap.size === 0) {
+            roomUserSocketPresence.delete(roomId);
+        }
+        return true;
+    }
+    return false;
+};
 const getRemainingSeconds = (endAt) => {
     return Math.max(0, Math.ceil((endAt - Date.now()) / 1000));
 };
@@ -586,6 +619,51 @@ const emitSprintVipStateToSocket = (socket, room) => {
     const voterName = resolveVoterNameForSocket(room, socket);
     socket.emit('sprint-vip-state', buildPersonalSprintVipState(room, voterName));
 };
+const handleUserLeavingRoom = (socket, user) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    const roomId = user.roomId;
+    const shouldRemoveFromRoom = removeRoomPresence(roomId, user.name, socket.id);
+    socket.leave(roomId);
+    delete socket.data.userId;
+    delete socket.data.userName;
+    if (!shouldRemoveFromRoom) {
+        return null;
+    }
+    const room = yield RoomService_1.RoomService.getRoom(roomId);
+    if (!room)
+        return null;
+    const userInRoom = (_a = room.users.find((roomUser) => roomUser.name === user.name)) !== null && _a !== void 0 ? _a : room.users.find((roomUser) => roomUser.id === user.id);
+    const userIdForCleanup = (_b = userInRoom === null || userInRoom === void 0 ? void 0 : userInRoom.id) !== null && _b !== void 0 ? _b : user.id;
+    const updatedRoom = yield RoomService_1.RoomService.removeUser(roomId, userIdForCleanup, user.name);
+    if (!updatedRoom)
+        return null;
+    getRetroRatingState(roomId).votes.delete(userIdForCleanup);
+    const vipVotes = roomSprintVipVotes.get(roomId);
+    if (vipVotes) {
+        vipVotes.delete(user.name);
+        vipVotes.forEach((votedUserName, voterName) => {
+            if (votedUserName === user.name) {
+                vipVotes.delete(voterName);
+            }
+        });
+    }
+    if (updatedRoom.users.length === 0) {
+        roomSprintVipVotes.delete(roomId);
+        roomUserSocketPresence.delete(roomId);
+        console.log('Room is empty:', roomId);
+    }
+    else {
+        io.to(roomId).emit('user-left', user);
+        io.to(roomId).emit('state-updated', {
+            cards: updatedRoom.cards,
+            phase: updatedRoom.phase,
+            users: updatedRoom.users
+        });
+        yield emitRetroRatingStateToRoom(roomId);
+        yield emitSprintVipStateToRoom(roomId);
+    }
+    return updatedRoom;
+});
 io.on('connection', (socket) => {
     connectionCount++;
     console.log(`Client connected (${connectionCount} total):`, socket.id);
@@ -617,6 +695,7 @@ io.on('connection', (socket) => {
             currentUser = user;
             socket.data.userId = user.id;
             socket.data.userName = user.name;
+            addRoomPresence(roomId, user.name, socket.id);
             console.log('Session restored successfully:', { roomId, userId });
             socket.emit('room-joined', {
                 room,
@@ -679,6 +758,7 @@ io.on('connection', (socket) => {
                 roomId,
                 role: 'user'
             };
+            addRoomPresence(roomId, effectiveUsername, socket.id);
             console.log('Room created successfully:', roomId);
             socket.emit('room-joined', {
                 room,
@@ -744,7 +824,8 @@ io.on('connection', (socket) => {
                 console.log('User rejoining room:', { roomId, username: effectiveUsername });
                 user.id = existingUser.id;
             }
-            const room = yield RoomService_1.RoomService.addUser(roomId, user);
+            yield RoomService_1.RoomService.addUser(roomId, user);
+            const room = yield RoomService_1.RoomService.getRoom(roomId);
             if (!room) {
                 socket.emit('error', 'Room not found');
                 return;
@@ -755,6 +836,7 @@ io.on('connection', (socket) => {
                 ? Object.assign(Object.assign({}, joinedUser), { roomId }) : user;
             socket.data.userId = currentUser.id;
             socket.data.userName = effectiveUsername;
+            addRoomPresence(roomId, effectiveUsername, socket.id);
             console.log('User joined room successfully:', { roomId, username: effectiveUsername, isRejoin: !!existingUser });
             socket.emit('room-joined', {
                 room,
@@ -1460,7 +1542,7 @@ io.on('connection', (socket) => {
         if (!(currentUser === null || currentUser === void 0 ? void 0 : currentUser.roomId) || typeof userId !== 'string')
             return;
         try {
-            const updatedRoom = yield RoomService_1.RoomService.transferRoomAdmin(currentUser.roomId, currentUser.id, userId);
+            const updatedRoom = yield RoomService_1.RoomService.transferRoomAdmin(currentUser.roomId, currentUser.id, userId, currentUser.name);
             if (!updatedRoom) {
                 socket.emit('error', 'Не удалось передать права администратора');
                 return;
@@ -1512,6 +1594,19 @@ io.on('connection', (socket) => {
             socket.emit('error', 'Не удалось исключить участника');
         }
     }));
+    socket.on('leave-room', () => __awaiter(void 0, void 0, void 0, function* () {
+        if (!(currentUser === null || currentUser === void 0 ? void 0 : currentUser.roomId))
+            return;
+        try {
+            const leavingUser = currentUser;
+            currentUser = null;
+            yield handleUserLeavingRoom(socket, leavingUser);
+            socket.emit('left-room');
+        }
+        catch (error) {
+            console.error('Error handling leave-room:', error);
+        }
+    }));
     socket.on('delete-room', () => __awaiter(void 0, void 0, void 0, function* () {
         if (!(currentUser === null || currentUser === void 0 ? void 0 : currentUser.roomId)) {
             socket.emit('error', 'Room not found');
@@ -1555,38 +1650,9 @@ io.on('connection', (socket) => {
         if (!currentUser)
             return;
         try {
-            const room = yield RoomService_1.RoomService.getRoom(currentUser.roomId);
-            if (!room)
-                return;
-            const updatedRoom = yield RoomService_1.RoomService.removeUser(currentUser.roomId, currentUser.id);
-            if (!updatedRoom)
-                return;
-            getRetroRatingState(currentUser.roomId).votes.delete(currentUser.id);
-            const vipVotes = roomSprintVipVotes.get(currentUser.roomId);
-            if (vipVotes) {
-                vipVotes.delete(currentUser.name);
-                vipVotes.forEach((votedUserName, voterName) => {
-                    if (votedUserName === (currentUser === null || currentUser === void 0 ? void 0 : currentUser.name)) {
-                        vipVotes.delete(voterName);
-                    }
-                });
-            }
-            if (updatedRoom.users.length === 0) {
-                // If the room is empty, we might want to keep it for some time before deletion
-                // For now, we'll keep the room in the database
-                roomSprintVipVotes.delete(currentUser.roomId);
-                console.log('Room is empty:', currentUser.roomId);
-            }
-            else {
-                socket.to(currentUser.roomId).emit('user-left', currentUser);
-                socket.to(currentUser.roomId).emit('state-updated', {
-                    cards: updatedRoom.cards,
-                    phase: updatedRoom.phase,
-                    users: updatedRoom.users
-                });
-                yield emitRetroRatingStateToRoom(currentUser.roomId);
-                yield emitSprintVipStateToRoom(currentUser.roomId);
-            }
+            const leavingUser = currentUser;
+            currentUser = null;
+            yield handleUserLeavingRoom(socket, leavingUser);
         }
         catch (error) {
             console.error('Error handling disconnect:', error);

@@ -490,6 +490,41 @@ const roomRetroRatings = new Map<string, RetroRatingRoomState>();
 const roomFacilitators = new Map<string, FacilitatorAnnouncement>();
 const roomDiscussionNavigation = new Map<string, DiscussionNavigationState>();
 const roomSprintVipVotes = new Map<string, Map<string, string>>();
+const roomUserSocketPresence = new Map<string, Map<string, Set<string>>>();
+
+const addRoomPresence = (roomId: string, userName: string, socketId: string): void => {
+  let roomMap = roomUserSocketPresence.get(roomId);
+  if (!roomMap) {
+    roomMap = new Map();
+    roomUserSocketPresence.set(roomId, roomMap);
+  }
+  let sockets = roomMap.get(userName);
+  if (!sockets) {
+    sockets = new Set();
+    roomMap.set(userName, sockets);
+  }
+  sockets.add(socketId);
+};
+
+const removeRoomPresence = (roomId: string, userName: string, socketId: string): boolean => {
+  const roomMap = roomUserSocketPresence.get(roomId);
+  if (!roomMap) {
+    return true;
+  }
+  const sockets = roomMap.get(userName);
+  if (!sockets) {
+    return true;
+  }
+  sockets.delete(socketId);
+  if (sockets.size === 0) {
+    roomMap.delete(userName);
+    if (roomMap.size === 0) {
+      roomUserSocketPresence.delete(roomId);
+    }
+    return true;
+  }
+  return false;
+};
 
 const getRemainingSeconds = (endAt: number): number => {
   return Math.max(0, Math.ceil((endAt - Date.now()) / 1000));
@@ -712,6 +747,57 @@ const emitSprintVipStateToSocket = (socket: Socket, room: Room): void => {
   socket.emit('sprint-vip-state', buildPersonalSprintVipState(room, voterName));
 };
 
+const handleUserLeavingRoom = async (socket: Socket, user: User): Promise<Room | null> => {
+  const roomId = user.roomId;
+  const shouldRemoveFromRoom = removeRoomPresence(roomId, user.name, socket.id);
+
+  socket.leave(roomId);
+  delete socket.data.userId;
+  delete socket.data.userName;
+
+  if (!shouldRemoveFromRoom) {
+    return null;
+  }
+
+  const room = await RoomService.getRoom(roomId);
+  if (!room) return null;
+
+  const userInRoom = room.users.find((roomUser) => roomUser.name === user.name)
+    ?? room.users.find((roomUser) => roomUser.id === user.id);
+  const userIdForCleanup = userInRoom?.id ?? user.id;
+
+  const updatedRoom = await RoomService.removeUser(roomId, userIdForCleanup, user.name);
+  if (!updatedRoom) return null;
+
+  getRetroRatingState(roomId).votes.delete(userIdForCleanup);
+  const vipVotes = roomSprintVipVotes.get(roomId);
+  if (vipVotes) {
+    vipVotes.delete(user.name);
+    vipVotes.forEach((votedUserName, voterName) => {
+      if (votedUserName === user.name) {
+        vipVotes.delete(voterName);
+      }
+    });
+  }
+
+  if (updatedRoom.users.length === 0) {
+    roomSprintVipVotes.delete(roomId);
+    roomUserSocketPresence.delete(roomId);
+    console.log('Room is empty:', roomId);
+  } else {
+    io.to(roomId).emit('user-left', user);
+    io.to(roomId).emit('state-updated', {
+      cards: updatedRoom.cards,
+      phase: updatedRoom.phase,
+      users: updatedRoom.users
+    });
+    await emitRetroRatingStateToRoom(roomId);
+    await emitSprintVipStateToRoom(roomId);
+  }
+
+  return updatedRoom;
+};
+
 io.on('connection', (socket) => {
   connectionCount++;
   console.log(`Client connected (${connectionCount} total):`, socket.id);
@@ -748,6 +834,7 @@ io.on('connection', (socket) => {
       currentUser = user;
       socket.data.userId = user.id;
       socket.data.userName = user.name;
+      addRoomPresence(roomId, user.name, socket.id);
       
       console.log('Session restored successfully:', { roomId, userId });
       socket.emit('room-joined', { 
@@ -814,6 +901,7 @@ io.on('connection', (socket) => {
         roomId,
         role: 'user'
       };
+      addRoomPresence(roomId, effectiveUsername, socket.id);
       
       console.log('Room created successfully:', roomId);
       socket.emit('room-joined', { 
@@ -885,8 +973,9 @@ io.on('connection', (socket) => {
         user.id = existingUser.id;
       }
 
-      const room = await RoomService.addUser(roomId, user);
-      
+      await RoomService.addUser(roomId, user);
+
+      const room = await RoomService.getRoom(roomId);
       if (!room) {
         socket.emit('error', 'Room not found');
         return;
@@ -900,6 +989,7 @@ io.on('connection', (socket) => {
         : user;
       socket.data.userId = currentUser.id;
       socket.data.userName = effectiveUsername;
+      addRoomPresence(roomId, effectiveUsername, socket.id);
       
       console.log('User joined room successfully:', { roomId, username: effectiveUsername, isRejoin: !!existingUser });
       socket.emit('room-joined', { 
@@ -1633,7 +1723,12 @@ io.on('connection', (socket) => {
     if (!currentUser?.roomId || typeof userId !== 'string') return;
 
     try {
-      const updatedRoom = await RoomService.transferRoomAdmin(currentUser.roomId, currentUser.id, userId);
+      const updatedRoom = await RoomService.transferRoomAdmin(
+        currentUser.roomId,
+        currentUser.id,
+        userId,
+        currentUser.name
+      );
       if (!updatedRoom) {
         socket.emit('error', 'Не удалось передать права администратора');
         return;
@@ -1688,6 +1783,19 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('leave-room', async () => {
+    if (!currentUser?.roomId) return;
+
+    try {
+      const leavingUser = currentUser;
+      currentUser = null;
+      await handleUserLeavingRoom(socket, leavingUser);
+      socket.emit('left-room');
+    } catch (error) {
+      console.error('Error handling leave-room:', error);
+    }
+  });
+
   socket.on('delete-room', async () => {
     if (!currentUser?.roomId) {
       socket.emit('error', 'Room not found');
@@ -1736,37 +1844,9 @@ io.on('connection', (socket) => {
     if (!currentUser) return;
 
     try {
-      const room = await RoomService.getRoom(currentUser.roomId);
-      if (!room) return;
-
-      const updatedRoom = await RoomService.removeUser(currentUser.roomId, currentUser.id);
-      if (!updatedRoom) return;
-      getRetroRatingState(currentUser.roomId).votes.delete(currentUser.id);
-      const vipVotes = roomSprintVipVotes.get(currentUser.roomId);
-      if (vipVotes) {
-        vipVotes.delete(currentUser.name);
-        vipVotes.forEach((votedUserName, voterName) => {
-          if (votedUserName === currentUser?.name) {
-            vipVotes.delete(voterName);
-          }
-        });
-      }
-
-      if (updatedRoom.users.length === 0) {
-        // If the room is empty, we might want to keep it for some time before deletion
-        // For now, we'll keep the room in the database
-        roomSprintVipVotes.delete(currentUser.roomId);
-        console.log('Room is empty:', currentUser.roomId);
-      } else {
-        socket.to(currentUser.roomId).emit('user-left', currentUser);
-        socket.to(currentUser.roomId).emit('state-updated', {
-          cards: updatedRoom.cards,
-          phase: updatedRoom.phase,
-          users: updatedRoom.users
-        });
-        await emitRetroRatingStateToRoom(currentUser.roomId);
-        await emitSprintVipStateToRoom(currentUser.roomId);
-      }
+      const leavingUser = currentUser;
+      currentUser = null;
+      await handleUserLeavingRoom(socket, leavingUser);
     } catch (error) {
       console.error('Error handling disconnect:', error);
     }

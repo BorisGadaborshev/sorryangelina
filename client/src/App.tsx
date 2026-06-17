@@ -72,7 +72,7 @@ const App = observer(() => {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      {store.room ? (
+      {store.hasBoardSession ? (
         <Board store={store} themeMode={themeMode} onToggleTheme={handleToggleTheme} />
       ) : (
         <Login store={store} />

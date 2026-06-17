@@ -3,6 +3,19 @@ import { AuthProfile, Card, CardComment, CardReaction, ChatMessage, DEFAULT_COLU
 import { Socket } from 'socket.io-client';
 import { SocketService } from '../services/socket';
 
+const BOARD_STATE_KEY = 'retroBoardState';
+
+interface PersistedBoardState {
+  roomId: string;
+  room: Room;
+  phase: Phase;
+  cards: Card[];
+  users: User[];
+  columnTitles: string[];
+  roomFeatures: RoomFeatures;
+  currentUser: User | null;
+}
+
 export class RetroStore {
   socket: Socket | null = null;
   socketService: SocketService | null = null;
@@ -14,6 +27,7 @@ export class RetroStore {
   phase: Phase = 'creation';
   users: User[] = [];
   error: string | null = null;
+  isReconnecting = false;
   voteError: { cardId: string; message: string } | null = null;
   phaseTimer: PhaseTimerState = { durationSeconds: 0, remainingSeconds: 0, running: false };
   chatMessages: ChatMessage[] = [];
@@ -35,15 +49,77 @@ export class RetroStore {
     this.socketService = new SocketService(this);
     this.tryRestoreAuth();
     this.tryRestoreSelectedTeam();
+    this.tryRestoreBoardState();
     this.tryRestoreSession();
 
-    // Обработка закрытия окна/вкладки
     window.addEventListener('beforeunload', () => {
-      // Сохраняем текущее состояние перед закрытием
       if (this.currentUser && this.room) {
         this.saveSession(this.currentUser.id, this.room.id, this.currentUser.name);
+        this.persistBoardState();
       }
     });
+  }
+
+  get hasBoardSession(): boolean {
+    if (this.room) return true;
+    if (!this.authProfile) return false;
+    return Boolean(localStorage.getItem('roomId') && localStorage.getItem('username'));
+  }
+
+  setReconnecting(value: boolean) {
+    runInAction(() => {
+      this.isReconnecting = value;
+    });
+  }
+
+  persistBoardState() {
+    const roomId = this.room?.id ?? localStorage.getItem('roomId');
+    if (!roomId || !this.room) return;
+
+    const snapshot: PersistedBoardState = {
+      roomId,
+      room: this.room,
+      phase: this.phase,
+      cards: this.cards,
+      users: this.users,
+      columnTitles: this.columnTitles,
+      roomFeatures: this.roomFeatures,
+      currentUser: this.currentUser,
+    };
+
+    sessionStorage.setItem(BOARD_STATE_KEY, JSON.stringify(snapshot));
+  }
+
+  private tryRestoreBoardState() {
+    const roomId = localStorage.getItem('roomId');
+    const raw = sessionStorage.getItem(BOARD_STATE_KEY);
+    if (!roomId || !raw || this.room) return;
+
+    try {
+      const parsed = JSON.parse(raw) as PersistedBoardState;
+      if (parsed.roomId !== roomId || !parsed.room) return;
+
+      runInAction(() => {
+        this.room = parsed.room;
+        this.phase = parsed.phase ?? 'creation';
+        this.cards = parsed.cards ?? [];
+        this.users = this.normalizeUsers(parsed.users ?? []);
+        this.columnTitles = parsed.columnTitles?.length === DEFAULT_COLUMN_TITLES.length
+          ? [...parsed.columnTitles]
+          : [...DEFAULT_COLUMN_TITLES];
+        this.roomFeatures = parsed.roomFeatures
+          ? { ...parsed.roomFeatures }
+          : { ...DEFAULT_ROOM_FEATURES };
+        this.currentUser = parsed.currentUser;
+        this.isReconnecting = true;
+      });
+    } catch {
+      sessionStorage.removeItem(BOARD_STATE_KEY);
+    }
+  }
+
+  private clearBoardState() {
+    sessionStorage.removeItem(BOARD_STATE_KEY);
   }
 
   private saveSession(userId: string, roomId: string, username: string) {
@@ -56,6 +132,7 @@ export class RetroStore {
     localStorage.removeItem('userId');
     localStorage.removeItem('roomId');
     localStorage.removeItem('username');
+    this.clearBoardState();
   }
 
   private saveAuth(profile: AuthProfile) {
@@ -101,11 +178,16 @@ export class RetroStore {
 
     if (userId && roomId && username && this.socketService) {
       try {
+        this.setReconnecting(true);
         console.log('Attempting to restore session with:', { userId, roomId, username });
         await this.socketService.restoreSession(roomId, userId, username, this.authProfile?.token);
+        this.setReconnecting(false);
       } catch (error) {
         console.error('Failed to restore session:', error);
-        this.clearSession();
+        if (!this.room) {
+          this.clearSession();
+        }
+        this.setReconnecting(true);
       }
     }
   }
@@ -280,6 +362,7 @@ export class RetroStore {
             console.log('New connection, saved session for:', this.currentUser);
           }
         }
+        this.persistBoardState();
       } else {
         this.currentUser = null;
         this.clearSession();
@@ -293,6 +376,7 @@ export class RetroStore {
         this.roomFeatures = { ...DEFAULT_ROOM_FEATURES };
         this.sprintVip = { voteCount: 0 };
         this.retroRating = { hasVoted: false, votesCount: 0, totalCount: 0, resultsVisible: false };
+        this.isReconnecting = false;
         console.log('Cleared room and session');
       }
     });
@@ -351,6 +435,7 @@ export class RetroStore {
         }
       }
     });
+    this.persistBoardState();
   }
 
   addCard(card: Card) {

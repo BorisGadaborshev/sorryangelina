@@ -45,8 +45,26 @@ export class RoomService {
   }
 
   static async getRoom(roomId: string): Promise<Room | null> {
-    const room = await RoomModel.findOne({ id: roomId });
+    const room = await this.ensureRoomHasAdmin(roomId);
     return room ? this.convertToRoom(room) : null;
+  }
+
+  private static isRoomAdmin(user: User, roomOwner: string): boolean {
+    return user.role === 'admin' || user.name === roomOwner;
+  }
+
+  private static async ensureRoomHasAdmin(roomId: string): Promise<RoomDocument | null> {
+    const room = await RoomModel.findOne({ id: roomId });
+    if (!room || room.users.length === 0) return room;
+
+    const hasAdmin = room.users.some((user) => user.role === 'admin');
+    if (hasAdmin) return room;
+
+    const nextAdminId = await RoomModel.getNextRoomAdminUserId(roomId, '');
+    if (!nextAdminId) return room;
+
+    console.log('Assigning missing room admin:', { roomId, nextAdminId });
+    return RoomModel.setRoomAdmin(roomId, nextAdminId);
   }
 
   static async updateColumnTitles(roomId: string, titles: string[]): Promise<Room | null> {
@@ -152,42 +170,58 @@ export class RoomService {
     return updatedRoom ? this.convertToRoom(updatedRoom) : null;
   }
 
-  static async removeUser(roomId: string, userId: string): Promise<Room | null> {
+  static async removeUser(roomId: string, userId: string, userName?: string): Promise<Room | null> {
     const room = await RoomModel.findOne({ id: roomId });
     if (!room) return null;
 
-    const leaveIndex = room.users.findIndex((user) => user.id === userId);
+    let leaveIndex = room.users.findIndex((user) => user.id === userId);
+    let resolvedUserId = userId;
+    if (leaveIndex === -1 && userName) {
+      leaveIndex = room.users.findIndex((user) => user.name === userName);
+      if (leaveIndex !== -1) {
+        resolvedUserId = room.users[leaveIndex].id;
+      }
+    }
     if (leaveIndex === -1) return this.convertToRoom(room);
 
-    const wasAdmin = room.users[leaveIndex].role === 'admin';
-    const remainingUsers = room.users.filter((user) => user.id !== userId);
+    const leavingUser = room.users[leaveIndex];
+    const wasAdmin = this.isRoomAdmin(leavingUser, room.owner);
+    const remainingUsers = room.users.filter((user) => user.id !== resolvedUserId);
 
     const updatedRoom = await RoomModel.findOneAndUpdate(
       { id: roomId },
       {
-        $pull: { users: { id: userId } }
+        $pull: { users: { id: resolvedUserId } }
       },
       { new: true }
     );
     if (!updatedRoom) return null;
 
     if (wasAdmin && remainingUsers.length > 0) {
-      const nextIndex = leaveIndex < remainingUsers.length ? leaveIndex : 0;
-      const nextAdminId = remainingUsers[nextIndex].id;
-      const roomWithAdmin = await RoomModel.setRoomAdmin(roomId, nextAdminId);
-      return roomWithAdmin ? this.convertToRoom(roomWithAdmin) : this.convertToRoom(updatedRoom);
+      const nextAdminId = await RoomModel.getNextRoomAdminUserId(roomId, resolvedUserId);
+      if (nextAdminId) {
+        const roomWithAdmin = await RoomModel.setRoomAdmin(roomId, nextAdminId);
+        return roomWithAdmin ? this.convertToRoom(roomWithAdmin) : this.convertToRoom(updatedRoom);
+      }
     }
 
-    return this.convertToRoom(updatedRoom);
+    const healedRoom = await this.ensureRoomHasAdmin(roomId);
+    return healedRoom ? this.convertToRoom(healedRoom) : this.convertToRoom(updatedRoom);
   }
 
-  static async transferRoomAdmin(roomId: string, actorUserId: string, targetUserId: string): Promise<Room | null> {
+  static async transferRoomAdmin(
+    roomId: string,
+    actorUserId: string,
+    targetUserId: string,
+    actorUserName?: string
+  ): Promise<Room | null> {
     const room = await RoomModel.findOne({ id: roomId });
     if (!room) return null;
 
-    const actor = room.users.find((user) => user.id === actorUserId);
+    const actor = room.users.find((user) => user.id === actorUserId)
+      ?? (actorUserName ? room.users.find((user) => user.name === actorUserName) : undefined);
     const target = room.users.find((user) => user.id === targetUserId);
-    if (!actor || actor.role !== 'admin' || !target || target.id === actorUserId) {
+    if (!actor || !this.isRoomAdmin(actor, room.owner) || !target || target.id === actor.id) {
       return null;
     }
 
@@ -503,19 +537,26 @@ export class RoomService {
       return { room: null, user: null };
     }
 
-    const updatedUser = {
+    const healedRoom = await this.ensureRoomHasAdmin(roomId);
+    const roomDoc = healedRoom ?? updatedRoom;
+    const syncedUser = roomDoc.users.find((user) => user.name === existingUser.name) ?? {
       ...existingUser,
       id: newSocketId,
       role
     };
 
+    const updatedUser = {
+      ...syncedUser,
+      id: newSocketId
+    };
+
     console.log('Session restoration complete:', {
       user: updatedUser,
       userRole: updatedUser.role,
-      roomUsers: updatedRoom.users.map(u => ({ name: u.name, role: u.role }))
+      roomUsers: roomDoc.users.map(u => ({ name: u.name, role: u.role }))
     });
 
-    const convertedRoom = this.convertToRoom(updatedRoom);
+    const convertedRoom = this.convertToRoom(roomDoc);
     console.log('Converted room after restoration:', {
       users: convertedRoom.users.map(u => ({ name: u.name, role: u.role }))
     });

@@ -207,20 +207,35 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
 
   if (!store.room || !store.currentUser || !isReady) {
     return (
-      <Box sx={{ 
-        height: '100vh', 
-        display: 'flex', 
-        alignItems: 'center', 
-        justifyContent: 'center' 
+      <Box sx={{
+        height: '100vh',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 2,
       }}>
         <CircularProgress />
+        {store.isReconnecting && (
+          <Typography variant="body2" color="text.secondary">
+            Переподключение к комнате...
+          </Typography>
+        )}
       </Box>
     );
   }
 
   const renderColumns = () => {
     const columns = (
-      <Box sx={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 2, width: '100%' }}>
+      <Box sx={{
+        display: 'flex',
+        flexDirection: isMobile ? 'column' : 'row',
+        gap: 2,
+        width: '100%',
+        minWidth: 0,
+        height: isMobile ? 'auto' : '100%',
+        alignItems: 'stretch',
+      }}>
         <RetroColumn
           type="liked"
           columnIndex={0}
@@ -267,6 +282,18 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
 
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
+      {store.isReconnecting && (
+        <Box sx={{
+          px: 2,
+          py: 0.75,
+          bgcolor: 'warning.main',
+          color: 'warning.contrastText',
+          textAlign: 'center',
+          typography: 'body2',
+        }}>
+          Переподключение к комнате...
+        </Box>
+      )}
       <AppBar position="static" color="default" elevation={1} sx={{ bgcolor: 'background.paper', color: 'text.primary' }}>
         <Toolbar sx={{ gap: 1, flexWrap: isMobile ? 'wrap' : 'nowrap', alignItems: 'center', minHeight: 64 }}>
           <Typography
@@ -311,49 +338,108 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
             );
 
             return isAdmin ? (
-              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+              <Box sx={{
+                display: 'flex',
+                alignItems: isMobile ? 'stretch' : 'center',
+                flexDirection: isMobile ? 'column' : 'row',
+                width: isMobile ? '100%' : 'auto',
+                gap: isMobile ? 0.5 : 0,
+              }}>
                 <Tooltip title={`${readyCount} из ${totalCount} участников готовы`}>
                   <Typography 
                     variant="caption" 
                     sx={{ 
-                      mr: 2, 
+                      mr: isMobile ? 0 : 2, 
                       color: readyCount === totalCount ? 'success.light' : 'warning.light',
-                      whiteSpace: 'nowrap'
+                      whiteSpace: 'nowrap',
+                      alignSelf: isMobile ? 'flex-start' : 'center',
                     }}
                   >
                     {readyCount}/{totalCount} готовы
                   </Typography>
                 </Tooltip>
-                <ButtonGroup variant="contained" color="secondary" size="small" sx={{ mr: 2 }}>
-                  <Button
-                    onClick={() => store.socketService?.changePhase('creation')}
-                    disabled={store.phase === 'creation' || !canChange}
-                    sx={{ color: 'white' }}
+                {isMobile ? (
+                  <Box
+                    sx={{
+                      display: 'grid',
+                      gridTemplateColumns: '1fr 1fr',
+                      gap: 0.5,
+                      width: '100%',
+                    }}
                   >
-                    Создание
-                  </Button>
-                  <Button
-                    onClick={() => store.socketService?.changePhase('voting')}
-                    disabled={store.phase === 'voting' || !canChange}
-                    sx={{ color: 'white' }}
-                  >
-                    Голосование
-                  </Button>
-                  <Button
-                    onClick={() => store.socketService?.changePhase('discussion')}
-                    disabled={store.phase === 'discussion' || !canChange}
-                    sx={{ color: 'white' }}
-                  >
-                    Обсуждение
-                  </Button>
-                  <Button
-                    onClick={() => store.socketService?.changePhase('rating')}
-                    disabled={store.phase === 'rating' || !canChange || !features.retroRatingEnabled}
-                    sx={{ color: 'white' }}
-                  >
-                    Оценка
-                  </Button>
-                </ButtonGroup>
+                    <Button
+                      variant="contained"
+                      color="secondary"
+                      size="small"
+                      onClick={() => store.socketService?.changePhase('creation')}
+                      disabled={store.phase === 'creation' || !canChange}
+                      sx={{ color: 'white', minWidth: 0, px: 1 }}
+                    >
+                      Создание
+                    </Button>
+                    <Button
+                      variant="contained"
+                      color="secondary"
+                      size="small"
+                      onClick={() => store.socketService?.changePhase('voting')}
+                      disabled={store.phase === 'voting' || !canChange}
+                      sx={{ color: 'white', minWidth: 0, px: 1 }}
+                    >
+                      Голосование
+                    </Button>
+                    <Button
+                      variant="contained"
+                      color="secondary"
+                      size="small"
+                      onClick={() => store.socketService?.changePhase('discussion')}
+                      disabled={store.phase === 'discussion' || !canChange}
+                      sx={{ color: 'white', minWidth: 0, px: 1 }}
+                    >
+                      Обсуждение
+                    </Button>
+                    <Button
+                      variant="contained"
+                      color="secondary"
+                      size="small"
+                      onClick={() => store.socketService?.changePhase('rating')}
+                      disabled={store.phase === 'rating' || !canChange || !features.retroRatingEnabled}
+                      sx={{ color: 'white', minWidth: 0, px: 1 }}
+                    >
+                      Оценка
+                    </Button>
+                  </Box>
+                ) : (
+                  <ButtonGroup variant="contained" color="secondary" size="small" sx={{ mr: 2 }}>
+                    <Button
+                      onClick={() => store.socketService?.changePhase('creation')}
+                      disabled={store.phase === 'creation' || !canChange}
+                      sx={{ color: 'white' }}
+                    >
+                      Создание
+                    </Button>
+                    <Button
+                      onClick={() => store.socketService?.changePhase('voting')}
+                      disabled={store.phase === 'voting' || !canChange}
+                      sx={{ color: 'white' }}
+                    >
+                      Голосование
+                    </Button>
+                    <Button
+                      onClick={() => store.socketService?.changePhase('discussion')}
+                      disabled={store.phase === 'discussion' || !canChange}
+                      sx={{ color: 'white' }}
+                    >
+                      Обсуждение
+                    </Button>
+                    <Button
+                      onClick={() => store.socketService?.changePhase('rating')}
+                      disabled={store.phase === 'rating' || !canChange || !features.retroRatingEnabled}
+                      sx={{ color: 'white' }}
+                    >
+                      Оценка
+                    </Button>
+                  </ButtonGroup>
+                )}
                 {!isCompactDesktop ? timerControls : null}
               </Box>
             ) : !isCompactDesktop ? (
@@ -549,7 +635,8 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
         p: 1.25, 
         gap: 1.25,
         height: 'calc(100vh - 64px)',
-        overflow: 'hidden'
+        overflow: 'hidden',
+        minWidth: 0,
       }}>
         {isMobile ? (
           <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1, gap: 1 }}>
@@ -689,7 +776,9 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
             </Box>
             <Box sx={{ 
               flexGrow: 1,
+              minWidth: 0,
               overflowY: 'auto',
+              overflowX: 'hidden',
               position: 'relative'
             }}>
               {renderContent()}
