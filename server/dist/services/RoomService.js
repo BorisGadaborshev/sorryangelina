@@ -15,6 +15,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.RoomService = void 0;
 const Room_1 = require("../models/Room");
 const types_1 = require("../types");
+const roomFeatures_1 = require("../utils/roomFeatures");
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const NO_ROOM_PASSWORD_MARKER = '__no_room_password__';
 class RoomService {
@@ -27,7 +28,7 @@ class RoomService {
                 id: owner,
                 name: username,
                 roomId,
-                role: options.userRole || 'user',
+                role: 'admin',
                 isReady: false
             };
             console.log('Creating room:', {
@@ -66,6 +67,16 @@ class RoomService {
             }
             const normalized = titles.map((title) => title.trim());
             const room = yield Room_1.RoomModel.updateColumnTitles(roomId, normalized);
+            return room ? this.convertToRoom(room) : null;
+        });
+    }
+    static updateRoomFeatures(roomId, features) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const current = yield Room_1.RoomModel.findOne({ id: roomId });
+            if (!current)
+                return null;
+            const merged = (0, roomFeatures_1.normalizeRoomFeatures)(Object.assign(Object.assign({}, current.features), features));
+            const room = yield Room_1.RoomModel.updateRoomFeatures(roomId, merged);
             return room ? this.convertToRoom(room) : null;
         });
     }
@@ -140,10 +151,40 @@ class RoomService {
     }
     static removeUser(roomId, userId) {
         return __awaiter(this, void 0, void 0, function* () {
-            const room = yield Room_1.RoomModel.findOneAndUpdate({ id: roomId }, {
+            const room = yield Room_1.RoomModel.findOne({ id: roomId });
+            if (!room)
+                return null;
+            const leaveIndex = room.users.findIndex((user) => user.id === userId);
+            if (leaveIndex === -1)
+                return this.convertToRoom(room);
+            const wasAdmin = room.users[leaveIndex].role === 'admin';
+            const remainingUsers = room.users.filter((user) => user.id !== userId);
+            const updatedRoom = yield Room_1.RoomModel.findOneAndUpdate({ id: roomId }, {
                 $pull: { users: { id: userId } }
             }, { new: true });
-            return room ? this.convertToRoom(room) : null;
+            if (!updatedRoom)
+                return null;
+            if (wasAdmin && remainingUsers.length > 0) {
+                const nextIndex = leaveIndex < remainingUsers.length ? leaveIndex : 0;
+                const nextAdminId = remainingUsers[nextIndex].id;
+                const roomWithAdmin = yield Room_1.RoomModel.setRoomAdmin(roomId, nextAdminId);
+                return roomWithAdmin ? this.convertToRoom(roomWithAdmin) : this.convertToRoom(updatedRoom);
+            }
+            return this.convertToRoom(updatedRoom);
+        });
+    }
+    static transferRoomAdmin(roomId, actorUserId, targetUserId) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const room = yield Room_1.RoomModel.findOne({ id: roomId });
+            if (!room)
+                return null;
+            const actor = room.users.find((user) => user.id === actorUserId);
+            const target = room.users.find((user) => user.id === targetUserId);
+            if (!actor || actor.role !== 'admin' || !target || target.id === actorUserId) {
+                return null;
+            }
+            const updatedRoom = yield Room_1.RoomModel.setRoomAdmin(roomId, targetUserId);
+            return updatedRoom ? this.convertToRoom(updatedRoom) : null;
         });
     }
     static addCard(roomId, card) {
@@ -267,6 +308,12 @@ class RoomService {
             const card = current.cards.find(c => c.id === cardId);
             if (!card)
                 return null;
+            const features = (0, roomFeatures_1.normalizeRoomFeatures)(current.features);
+            if (voteType === 'dislike' && !features.dislikesEnabled) {
+                throw new Error('Дизлайки отключены в этой комнате');
+            }
+            const likesLimit = features.likesPerUser;
+            const dislikesLimit = features.dislikesPerUser;
             const likesUsed = current.cards.reduce((acc, currentCard) => {
                 return acc + ((currentCard.likes || []).includes(userId) ? 1 : 0);
             }, 0);
@@ -278,14 +325,14 @@ class RoomService {
             // Vote limits per user across the room.
             if (voteType === 'like' && !alreadyLiked) {
                 const nextLikesUsed = likesUsed + 1;
-                if (nextLikesUsed > 3) {
-                    throw new Error('Вы можете поставить не более 3 лайков');
+                if (nextLikesUsed > likesLimit) {
+                    throw new Error(`Вы можете поставить не более ${likesLimit} лайков`);
                 }
             }
             if (voteType === 'dislike' && !alreadyDisliked) {
                 const nextDislikesUsed = dislikesUsed + 1;
-                if (nextDislikesUsed > 3) {
-                    throw new Error('Вы можете поставить не более 3 дизлайков');
+                if (nextDislikesUsed > dislikesLimit) {
+                    throw new Error(`Вы можете поставить не более ${dislikesLimit} дизлайков`);
                 }
             }
             // If user clicks the same vote again → toggle off (remove only)
@@ -456,6 +503,7 @@ class RoomService {
     }
     static convertToRoom(doc) {
         const { id, teamId, owner, phase, columnTitles, createdAt, users, cards } = doc;
+        const features = (0, roomFeatures_1.normalizeRoomFeatures)(doc.features);
         const hasAdmin = Boolean(users === null || users === void 0 ? void 0 : users.some((user) => user.role === 'admin'));
         console.log('Converting room document:', {
             teamId,
@@ -469,6 +517,7 @@ class RoomService {
             owner,
             phase,
             columnTitles: doc.columnTitles,
+            features,
             createdAt,
             users: users ? users.map(user => ({
                 id: user.id,

@@ -1,6 +1,7 @@
 // Postgres access helpers
 import { pool } from '../config/database';
-import { Room, RoomDocument, User, Card, CardComment, CardReaction, COLUMN_COUNT } from '../types';
+import { Room, RoomDocument, User, Card, CardComment, CardReaction, RoomFeatures, COLUMN_COUNT } from '../types';
+import { normalizeRoomFeatures } from '../utils/roomFeatures';
 
 const attachSocialDataToCards = async (cards: Card[]): Promise<Card[]> => {
   if (cards.length === 0) return cards;
@@ -59,7 +60,7 @@ export const RoomModel = {
       );
       for (const user of doc.users || []) {
         await client.query(
-          `insert into room_users (id, name, room_id, role, is_ready, mood) values ($1,$2,$3,$4,$5,$6)
+          `insert into room_users (id, name, room_id, role, is_ready, mood, joined_at) values ($1,$2,$3,$4,$5,$6, now())
            on conflict (room_id, id) do update set name = excluded.name, role = excluded.role, is_ready = excluded.is_ready, mood = excluded.mood`,
           [user.id, user.name, doc.id, user.role, user.isReady ?? false, user.mood ?? null]
         );
@@ -76,7 +77,7 @@ export const RoomModel = {
 
   async findOne(where: { id: string }): Promise<RoomDocument | null> {
     const { rows } = await pool.query(
-      'select id, password, team_id, owner, phase, created_at, column_titles from rooms where id=$1',
+      'select id, password, team_id, owner, phase, created_at, column_titles, features from rooms where id=$1',
       [where.id]
     );
     if (rows.length === 0) return null;
@@ -88,8 +89,12 @@ export const RoomModel = {
       phase: Room['phase'];
       created_at: string;
       column_titles: string[] | null;
+      features: RoomFeatures | null;
     };
-    const usersRes = await pool.query('select id, name, role, is_ready, mood from room_users where room_id=$1', [where.id]);
+    const usersRes = await pool.query(
+      'select id, name, role, is_ready, mood from room_users where room_id=$1 order by joined_at asc nulls last, name asc',
+      [where.id]
+    );
     const cardsRes = await pool.query('select id, text, type, created_by, column_index, image_url from cards where room_id=$1', [where.id]);
     const cardRows = cardsRes.rows as Array<{ id: string; text: string; type: Card['type']; created_by: string; column_index: number; image_url: string | null }>;
     const votesRes = await pool.query('select card_id, user_id, vote from card_votes where card_id = any($1::text[])', [cardRows.map((r) => r.id)]);
@@ -120,6 +125,7 @@ export const RoomModel = {
       columnTitles: Array.isArray(roomRow.column_titles) && roomRow.column_titles.length === COLUMN_COUNT
         ? roomRow.column_titles
         : undefined,
+      features: normalizeRoomFeatures(roomRow.features),
       createdAt: roomRow.created_at,
       users,
       cards
@@ -129,6 +135,14 @@ export const RoomModel = {
   async updateColumnTitles(roomId: string, titles: string[]): Promise<RoomDocument | null> {
     await pool.query('update rooms set column_titles=$1::jsonb, updated_at=now() where id=$2', [
       JSON.stringify(titles),
+      roomId
+    ]);
+    return this.findOne({ id: roomId });
+  },
+
+  async updateRoomFeatures(roomId: string, features: RoomFeatures): Promise<RoomDocument | null> {
+    await pool.query('update rooms set features=$1::jsonb, updated_at=now() where id=$2', [
+      JSON.stringify(features),
       roomId
     ]);
     return this.findOne({ id: roomId });
@@ -245,7 +259,7 @@ export const RoomModel = {
         if (update.$addToSet.users) {
           const u: User = update.$addToSet.users;
           await client.query(
-            `insert into room_users (id, name, room_id, role, is_ready, mood) values ($1,$2,$3,$4,$5,$6)
+            `insert into room_users (id, name, room_id, role, is_ready, mood, joined_at) values ($1,$2,$3,$4,$5,$6, now())
              on conflict (room_id, id) do update set name = excluded.name, role = excluded.role, is_ready = excluded.is_ready, mood = excluded.mood`,
             [u.id, u.name, roomId, u.role, u.isReady ?? false, u.mood ?? null]
           );
@@ -312,6 +326,29 @@ export const RoomModel = {
 
   async deleteOne(where: { id: string }): Promise<void> {
     await pool.query('delete from rooms where id=$1', [where.id]);
+  },
+
+  async setRoomAdmin(roomId: string, adminUserId: string): Promise<RoomDocument | null> {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(`update room_users set role = 'user' where room_id = $1`, [roomId]);
+      const { rowCount } = await client.query(
+        `update room_users set role = 'admin' where room_id = $1 and id = $2`,
+        [roomId, adminUserId]
+      );
+      if (!rowCount) {
+        await client.query('ROLLBACK');
+        return null;
+      }
+      await client.query('COMMIT');
+      return this.findOne({ id: roomId });
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
   },
 
   async deleteMany(): Promise<void> {

@@ -13,6 +13,7 @@ exports.RoomModel = void 0;
 // Postgres access helpers
 const database_1 = require("../config/database");
 const types_1 = require("../types");
+const roomFeatures_1 = require("../utils/roomFeatures");
 const attachSocialDataToCards = (cards) => __awaiter(void 0, void 0, void 0, function* () {
     if (cards.length === 0)
         return cards;
@@ -54,7 +55,7 @@ exports.RoomModel = {
                 yield client.query(`insert into rooms (id, password, team_id, owner, phase) values ($1,$2,$3,$4,$5)
          on conflict (id) do nothing`, [doc.id, doc.password, (_a = doc.teamId) !== null && _a !== void 0 ? _a : null, doc.owner, doc.phase]);
                 for (const user of doc.users || []) {
-                    yield client.query(`insert into room_users (id, name, room_id, role, is_ready, mood) values ($1,$2,$3,$4,$5,$6)
+                    yield client.query(`insert into room_users (id, name, room_id, role, is_ready, mood, joined_at) values ($1,$2,$3,$4,$5,$6, now())
            on conflict (room_id, id) do update set name = excluded.name, role = excluded.role, is_ready = excluded.is_ready, mood = excluded.mood`, [user.id, user.name, doc.id, user.role, (_b = user.isReady) !== null && _b !== void 0 ? _b : false, (_c = user.mood) !== null && _c !== void 0 ? _c : null]);
                 }
                 yield client.query('COMMIT');
@@ -72,11 +73,11 @@ exports.RoomModel = {
     findOne(where) {
         var _a;
         return __awaiter(this, void 0, void 0, function* () {
-            const { rows } = yield database_1.pool.query('select id, password, team_id, owner, phase, created_at, column_titles from rooms where id=$1', [where.id]);
+            const { rows } = yield database_1.pool.query('select id, password, team_id, owner, phase, created_at, column_titles, features from rooms where id=$1', [where.id]);
             if (rows.length === 0)
                 return null;
             const roomRow = rows[0];
-            const usersRes = yield database_1.pool.query('select id, name, role, is_ready, mood from room_users where room_id=$1', [where.id]);
+            const usersRes = yield database_1.pool.query('select id, name, role, is_ready, mood from room_users where room_id=$1 order by joined_at asc nulls last, name asc', [where.id]);
             const cardsRes = yield database_1.pool.query('select id, text, type, created_by, column_index, image_url from cards where room_id=$1', [where.id]);
             const cardRows = cardsRes.rows;
             const votesRes = yield database_1.pool.query('select card_id, user_id, vote from card_votes where card_id = any($1::text[])', [cardRows.map((r) => r.id)]);
@@ -110,6 +111,7 @@ exports.RoomModel = {
                 columnTitles: Array.isArray(roomRow.column_titles) && roomRow.column_titles.length === types_1.COLUMN_COUNT
                     ? roomRow.column_titles
                     : undefined,
+                features: (0, roomFeatures_1.normalizeRoomFeatures)(roomRow.features),
                 createdAt: roomRow.created_at,
                 users,
                 cards
@@ -120,6 +122,15 @@ exports.RoomModel = {
         return __awaiter(this, void 0, void 0, function* () {
             yield database_1.pool.query('update rooms set column_titles=$1::jsonb, updated_at=now() where id=$2', [
                 JSON.stringify(titles),
+                roomId
+            ]);
+            return this.findOne({ id: roomId });
+        });
+    },
+    updateRoomFeatures(roomId, features) {
+        return __awaiter(this, void 0, void 0, function* () {
+            yield database_1.pool.query('update rooms set features=$1::jsonb, updated_at=now() where id=$2', [
+                JSON.stringify(features),
                 roomId
             ]);
             return this.findOne({ id: roomId });
@@ -220,7 +231,7 @@ exports.RoomModel = {
                 if (update.$addToSet) {
                     if (update.$addToSet.users) {
                         const u = update.$addToSet.users;
-                        yield client.query(`insert into room_users (id, name, room_id, role, is_ready, mood) values ($1,$2,$3,$4,$5,$6)
+                        yield client.query(`insert into room_users (id, name, room_id, role, is_ready, mood, joined_at) values ($1,$2,$3,$4,$5,$6, now())
              on conflict (room_id, id) do update set name = excluded.name, role = excluded.role, is_ready = excluded.is_ready, mood = excluded.mood`, [u.id, u.name, roomId, u.role, (_a = u.isReady) !== null && _a !== void 0 ? _a : false, (_b = u.mood) !== null && _b !== void 0 ? _b : null]);
                     }
                     if (update.$addToSet[`cards.$.likes`] || update.$addToSet[`cards.$.dislikes`]) {
@@ -285,6 +296,29 @@ exports.RoomModel = {
     deleteOne(where) {
         return __awaiter(this, void 0, void 0, function* () {
             yield database_1.pool.query('delete from rooms where id=$1', [where.id]);
+        });
+    },
+    setRoomAdmin(roomId, adminUserId) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const client = yield database_1.pool.connect();
+            try {
+                yield client.query('BEGIN');
+                yield client.query(`update room_users set role = 'user' where room_id = $1`, [roomId]);
+                const { rowCount } = yield client.query(`update room_users set role = 'admin' where room_id = $1 and id = $2`, [roomId, adminUserId]);
+                if (!rowCount) {
+                    yield client.query('ROLLBACK');
+                    return null;
+                }
+                yield client.query('COMMIT');
+                return this.findOne({ id: roomId });
+            }
+            catch (e) {
+                yield client.query('ROLLBACK');
+                throw e;
+            }
+            finally {
+                client.release();
+            }
         });
     },
     deleteMany() {

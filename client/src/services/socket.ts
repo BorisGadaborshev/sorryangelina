@@ -1,6 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { RetroStore } from '../store/RetroStore';
-import { Room, RoomState, User, Card, CardComment, CardReaction, FacilitatorAnnouncement, DiscussionNavigationState, Phase, PhaseTimerState, ChatMessage, Mood, RetroRatingState, SprintVipState, WhiteboardStroke, CreateRoomOptions } from '../types';
+import { Room, RoomState, User, Card, CardComment, CardReaction, FacilitatorAnnouncement, DiscussionNavigationState, Phase, PhaseTimerState, ChatMessage, Mood, RetroRatingState, RoomFeatures, SprintVipState, WhiteboardStroke, CreateRoomOptions } from '../types';
 
 export class SocketService {
   private socket: Socket;
@@ -86,6 +86,12 @@ export class SocketService {
     this.socket.on('error', (error: string) => {
       console.error('Server error:', error);
       this.store.setError(error);
+    });
+
+    this.socket.on('kicked', () => {
+      this.store.setError('Вас исключили из комнаты');
+      this.store.setRoom(null);
+      this.store.clearSession();
     });
 
     this.socket.on('room-joined', ({ room, state, userId }: { room: Room; state: RoomState; userId: string }) => {
@@ -241,6 +247,10 @@ export class SocketService {
 
     this.socket.on('column-titles-updated', ({ titles }: { titles: string[] }) => {
       this.store.setColumnTitles(titles);
+    });
+
+    this.socket.on('room-features-updated', ({ features }: { features: RoomFeatures }) => {
+      this.store.setRoomFeatures(features);
     });
 
     this.socket.on('sprint-vip-state', (state: SprintVipState) => {
@@ -546,6 +556,10 @@ export class SocketService {
     this.socket.emit('set-column-titles', { titles });
   }
 
+  setRoomFeatures(features: RoomFeatures): void {
+    this.socket.emit('set-room-features', { features });
+  }
+
   async restoreSession(roomId: string, userId: string, username: string, token?: string): Promise<void> {
     console.log('Attempting to restore session:', { roomId, userId, username });
     try {
@@ -626,6 +640,11 @@ export class SocketService {
   kickUser(userId: string) {
     if (!this.socket || !this.store.isAdmin) return;
     this.socket.emit('kick-user', { userId });
+  }
+
+  transferRoomAdmin(userId: string) {
+    if (!this.socket || !this.store.isAdmin) return;
+    this.socket.emit('transfer-room-admin', { userId });
   }
 
   leaveRoom() {

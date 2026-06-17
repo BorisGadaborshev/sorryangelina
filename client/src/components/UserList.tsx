@@ -37,8 +37,10 @@ const UserList: React.FC<UserListProps> = observer(({
   store
 }) => {
   const [rosterUsers, setRosterUsers] = useState<string[]>([]);
-  const [isOfflineExpanded, setIsOfflineExpanded] = useState(false);
-  const teamId = store.room?.teamId || store.selectedTeam?.id;
+  const [isOfflineExpanded, setIsOfflineExpanded] = useState(true);
+  const teamId = store.room?.teamId
+    || store.selectedTeam?.id
+    || (store.authProfile?.type === 'fixed' ? BUILTIN_TEAM_ID : undefined);
   const isBuiltinTeam = teamId === BUILTIN_TEAM_ID;
   const currentUser = users.find(u => u.id === currentUserId);
   const isAdmin = currentUser?.role === 'admin';
@@ -50,6 +52,7 @@ const UserList: React.FC<UserListProps> = observer(({
   };
 
   const handleVoteSprintVip = (userName: string) => {
+    if (!store.roomFeatures.sprintVipEnabled) return;
     if (!currentUser || userName === currentUser.name) return;
     store.socketService?.voteSprintVip(userName);
   };
@@ -83,6 +86,13 @@ const UserList: React.FC<UserListProps> = observer(({
   const handleKickUser = (userId: string) => {
     if (isAdmin && userId !== currentUserId) {
       store.socketService?.kickUser(userId);
+    }
+  };
+
+  const handleTransferAdmin = (event: React.MouseEvent, userId: string) => {
+    event.stopPropagation();
+    if (isAdmin && userId !== currentUserId) {
+      store.socketService?.transferRoomAdmin(userId);
     }
   };
 
@@ -142,6 +152,7 @@ const UserList: React.FC<UserListProps> = observer(({
           </>
         )}
       </Box>
+      {store.roomFeatures.sprintVipEnabled && (
       <Box sx={{ px: 1, pb: 1 }}>
         <Typography variant="subtitle2" gutterBottom>
           VIP спринта
@@ -156,12 +167,13 @@ const UserList: React.FC<UserListProps> = observer(({
           </Typography>
         )}
       </Box>
+      )}
       <List>
         {users.map((user) => {
           const moodMeta = getMoodMeta(user.mood);
           const isSprintVip = store.sprintVip.vipUserName === user.name;
           const isMyVipVote = myVipVote === user.name;
-          const canVoteForUser = Boolean(currentUser && user.name !== currentUser.name);
+          const canVoteForUser = store.roomFeatures.sprintVipEnabled && Boolean(currentUser && user.name !== currentUser.name);
           return (
           <ListItem
             key={user.id}
@@ -258,6 +270,17 @@ const UserList: React.FC<UserListProps> = observer(({
                   {user.isReady ? <CheckCircleIcon /> : <RadioButtonUncheckedIcon />}
                 </Box>
               </Tooltip>
+              {isAdmin && user.id !== currentUserId && user.role !== 'admin' && (
+                <Tooltip title="Назначить администратором">
+                  <IconButton
+                    size="small"
+                    color="primary"
+                    onClick={(event) => handleTransferAdmin(event, user.id)}
+                  >
+                    <AdminPanelSettingsIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              )}
               {isAdmin && user.id !== currentUserId && (
                 <Tooltip title="Исключить пользователя">
                   <IconButton

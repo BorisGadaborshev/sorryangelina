@@ -12,12 +12,49 @@ export type Phase = 'creation' | 'voting' | 'discussion' | 'rating';
 export const DEFAULT_COLUMN_TITLES = ['Было хорошо', 'Было не очень', 'А давайте!:'] as const;
 export const COLUMN_COUNT = DEFAULT_COLUMN_TITLES.length;
 
+export type VoteLimit = 1 | 3 | 5;
+
+export interface RoomFeatures {
+  mediaEnabled: boolean;
+  reactionsEnabled: boolean;
+  commentsEnabled: boolean;
+  moveCardsEnabled: boolean;
+  anonymousEnabled: boolean;
+  likesPerUser: VoteLimit;
+  dislikesPerUser: VoteLimit;
+  dislikesEnabled: boolean;
+  musicEnabled: boolean;
+  retroRatingEnabled: boolean;
+  sprintVipEnabled: boolean;
+  drawingEnabled: boolean;
+  cardEditingEnabled: boolean;
+  chatEnabled: boolean;
+}
+
+export const DEFAULT_ROOM_FEATURES: RoomFeatures = {
+  mediaEnabled: true,
+  reactionsEnabled: true,
+  commentsEnabled: true,
+  moveCardsEnabled: true,
+  anonymousEnabled: true,
+  likesPerUser: 3,
+  dislikesPerUser: 3,
+  dislikesEnabled: true,
+  musicEnabled: true,
+  retroRatingEnabled: true,
+  sprintVipEnabled: true,
+  drawingEnabled: true,
+  cardEditingEnabled: true,
+  chatEnabled: true
+};
+
 export interface Room {
   id: string;
   teamId?: string;
   owner: string;
   phase: Phase;
   columnTitles?: string[];
+  features?: RoomFeatures;
   users: User[];
   cards: Card[];
 }

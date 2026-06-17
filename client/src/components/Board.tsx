@@ -2,13 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { observer } from 'mobx-react-lite';
 import { Box, AppBar, Toolbar, Typography, Button, ButtonGroup, CircularProgress, IconButton, Tooltip, Tabs, Tab, useMediaQuery, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, FormControl, Select, MenuItem, Menu, Slider, Divider } from '@mui/material';
 import { DragDropContext, DropResult } from '@hello-pangea/dnd';
-import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
-import ChevronRightIcon from '@mui/icons-material/ChevronRight';
-import PeopleIcon from '@mui/icons-material/People';
-import ExitToAppIcon from '@mui/icons-material/ExitToApp';
-import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
-import DarkModeIcon from '@mui/icons-material/DarkMode';
-import LightModeIcon from '@mui/icons-material/LightMode';
+import SettingsIcon from '@mui/icons-material/Settings';
+import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import MusicNoteIcon from '@mui/icons-material/MusicNote';
 import PauseIcon from '@mui/icons-material/Pause';
@@ -17,7 +12,6 @@ import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
 import BrushIcon from '@mui/icons-material/Brush';
 import CleaningServicesIcon from '@mui/icons-material/CleaningServices';
-import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import RetroColumn from './RetroColumn';
 import UserList from './UserList';
 import { RetroStore } from '../store/RetroStore';
@@ -25,6 +19,7 @@ import DiscussionView from './DiscussionView';
 import ChatTerminal from './ChatTerminal';
 import CollaborativeWhiteboard from './CollaborativeWhiteboard';
 import RetroRatingView from './RetroRatingView';
+import RoomSettingsSidebar from './RoomSettingsSidebar';
 import { Mood, Phase } from '../types';
 
 interface Props {
@@ -53,7 +48,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   const isMobile = useMediaQuery('(max-width:600px)');
   const isCompactDesktop = useMediaQuery('(max-width:1280px)');
   const [mobileTab, setMobileTab] = useState<number>(0); // 0 - доска, 1 - участники
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [selectedTimerSeconds, setSelectedTimerSeconds] = useState<number>(300);
   const [moreAnchorEl, setMoreAnchorEl] = useState<null | HTMLElement>(null);
   const [timerAnchorEl, setTimerAnchorEl] = useState<null | HTMLElement>(null);
@@ -137,7 +132,12 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   };
 
   const isTimerMenuOpen = Boolean(timerAnchorEl);
-  const canDrawOnBoard = !isMobile && (store.phase === 'creation' || store.phase === 'voting');
+  const features = store.roomFeatures;
+  const canDrawOnBoard = !isMobile
+    && features.drawingEnabled
+    && (store.phase === 'creation' || store.phase === 'voting');
+  const canUseChat = features.chatEnabled;
+  const canPlayTimerMusic = features.musicEnabled;
 
   useEffect(() => {
     const audio = timerAudioRef.current;
@@ -150,7 +150,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
     const audio = timerAudioRef.current;
     if (!audio) return;
 
-    if (store.phaseTimer.running && !isTimerMusicPaused && !isTimerAudioUnavailable) {
+    if (store.phaseTimer.running && !isTimerMusicPaused && !isTimerAudioUnavailable && canPlayTimerMusic) {
       audio.play()
         .then(() => setIsTimerAudioBlocked(false))
         .catch(() => setIsTimerAudioBlocked(true));
@@ -161,7 +161,13 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
     if (!store.phaseTimer.running) {
       audio.currentTime = 0;
     }
-  }, [store.phaseTimer.running, isTimerMusicPaused, isTimerAudioUnavailable]);
+  }, [store.phaseTimer.running, isTimerMusicPaused, isTimerAudioUnavailable, canPlayTimerMusic]);
+
+  useEffect(() => {
+    if (!canUseChat && isChatVisible) {
+      setIsChatVisible(false);
+    }
+  }, [canUseChat, isChatVisible]);
 
   useEffect(() => {
     const previous = previousTimerRef.current;
@@ -184,6 +190,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
     const { destination, source, draggableId } = result;
     if (!destination) return;
     if (store.phase !== 'creation') return;
+    if (!features.moveCardsEnabled) return;
     if (destination.droppableId === source.droppableId) return;
 
     const destinationColumn = Number(destination.droppableId.replace('column-', ''));
@@ -218,27 +225,27 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
           type="liked"
           columnIndex={0}
           store={store}
-          enableDragDrop={store.phase === 'creation'}
+          enableDragDrop={store.phase === 'creation' && features.moveCardsEnabled}
           onAddCardStart={() => setIsDrawEnabled(false)}
         />
         <RetroColumn
           type="disliked"
           columnIndex={1}
           store={store}
-          enableDragDrop={store.phase === 'creation'}
+          enableDragDrop={store.phase === 'creation' && features.moveCardsEnabled}
           onAddCardStart={() => setIsDrawEnabled(false)}
         />
         <RetroColumn
           type="suggestion"
           columnIndex={2}
           store={store}
-          enableDragDrop={store.phase === 'creation'}
+          enableDragDrop={store.phase === 'creation' && features.moveCardsEnabled}
           onAddCardStart={() => setIsDrawEnabled(false)}
         />
       </Box>
     );
 
-    if (store.phase !== 'creation') {
+    if (store.phase !== 'creation' || !features.moveCardsEnabled) {
       return columns;
     }
 
@@ -341,7 +348,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                   </Button>
                   <Button
                     onClick={() => store.socketService?.changePhase('rating')}
-                    disabled={store.phase === 'rating' || !canChange}
+                    disabled={store.phase === 'rating' || !canChange || !features.retroRatingEnabled}
                     sx={{ color: 'white' }}
                   >
                     Оценка
@@ -354,21 +361,14 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
             ) : null;
             
           })()}
-          {store.currentUser?.role === 'admin' && !isCompactDesktop && (
-            <Tooltip title="Удалить комнату">
+          {!isCompactDesktop && !isMobile && (
+            <Tooltip title="Настройки">
               <IconButton
                 color="inherit"
-                onClick={() => setIsDeleteDialogOpen(true)}
+                onClick={() => setIsSettingsOpen(true)}
                 size="small"
               >
-                <DeleteForeverIcon />
-              </IconButton>
-            </Tooltip>
-          )}
-          {!isCompactDesktop && (
-            <Tooltip title={themeMode === 'dark' ? 'Включить светлую тему' : 'Включить темную тему'}>
-              <IconButton color="inherit" onClick={onToggleTheme} size="small">
-                {themeMode === 'dark' ? <LightModeIcon /> : <DarkModeIcon />}
+                <SettingsIcon />
               </IconButton>
             </Tooltip>
           )}
@@ -386,19 +386,8 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                 anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
                 transformOrigin={{ vertical: 'top', horizontal: 'right' }}
               >
-                {store.currentUser?.role === 'admin' && (
-                  <MenuItem onClick={() => { setMoreAnchorEl(null); setIsDeleteDialogOpen(true); }}>
-                    Удалить комнату
-                  </MenuItem>
-                )}
-                <MenuItem onClick={() => { setMoreAnchorEl(null); onToggleTheme(); }}>
-                  {themeMode === 'dark' ? 'Светлая тема' : 'Темная тема'}
-                </MenuItem>
-                <MenuItem onClick={() => { setMoreAnchorEl(null); setIsUserListVisible(!isUserListVisible); }}>
-                  {isUserListVisible ? 'Скрыть участников' : 'Показать участников'}
-                </MenuItem>
-                <MenuItem onClick={() => { setMoreAnchorEl(null); store.socketService?.leaveRoom(); }}>
-                  Выйти из комнаты
+                <MenuItem onClick={() => { setMoreAnchorEl(null); setIsSettingsOpen(true); }}>
+                  Настройки
                 </MenuItem>
               </Menu>
             </>
@@ -415,22 +404,24 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                     <AccessTimeIcon />
                   </IconButton>
                 </Tooltip>
-                <Tooltip title={isChatVisible ? 'Скрыть чат' : 'Показать чат'}>
+                {canUseChat && (
+                  <Tooltip title={isChatVisible ? 'Скрыть чат' : 'Показать чат'}>
+                    <IconButton
+                      color="inherit"
+                      onClick={() => setIsChatVisible(!isChatVisible)}
+                      size="small"
+                    >
+                      <ChatBubbleOutlineIcon />
+                    </IconButton>
+                  </Tooltip>
+                )}
+                <Tooltip title="Настройки">
                   <IconButton
                     color="inherit"
-                    onClick={() => setIsChatVisible(!isChatVisible)}
+                    onClick={() => setIsSettingsOpen(true)}
                     size="small"
                   >
-                    <ChatBubbleOutlineIcon />
-                  </IconButton>
-                </Tooltip>
-                <Tooltip title="Выйти из комнаты">
-                  <IconButton
-                    color="inherit"
-                    onClick={() => store.socketService?.leaveRoom()}
-                    size="small"
-                  >
-                    <ExitToAppIcon />
+                    <SettingsIcon />
                   </IconButton>
                 </Tooltip>
               </Box>
@@ -438,31 +429,6 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                 <Tab label="Доска" />
                 <Tab label={`Участники (${store.users.length})`} />
               </Tabs>
-            </Box>
-          ) : !isCompactDesktop ? (
-            <Box sx={{ ml: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
-              <IconButton
-                color="inherit"
-                onClick={() => setIsUserListVisible(!isUserListVisible)}
-                size="small"
-              >
-                <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                  <PeopleIcon sx={{ mr: 0.5 }} />
-                  <Typography variant="caption" sx={{ mr: 1 }}>
-                    {store.users.length}
-                  </Typography>
-                  {isUserListVisible ? <ChevronRightIcon /> : <ChevronLeftIcon />}
-                </Box>
-              </IconButton>
-              <Tooltip title="Выйти из комнаты">
-                <IconButton
-                  color="inherit"
-                  onClick={() => store.socketService?.leaveRoom()}
-                  size="small"
-                >
-                  <ExitToAppIcon />
-                </IconButton>
-              </Tooltip>
             </Box>
           ) : (
             <Box sx={{ ml: 1 }} />
@@ -479,6 +445,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                 Осталось: {formatDuration(store.phaseTimer.remainingSeconds)}
               </Typography>
 
+              {canPlayTimerMusic && (
               <Box sx={{ mb: 1.5 }}>
                 <Typography variant="subtitle2" sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 1 }}>
                   <MusicNoteIcon fontSize="small" />
@@ -517,6 +484,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                   </Typography>
                 )}
               </Box>
+              )}
 
               {store.currentUser?.role === 'admin' && (
                 <>
@@ -601,7 +569,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                 {renderContent()}
               </Box>
             )}
-            {isChatVisible && (
+            {canUseChat && isChatVisible && (
               <Box sx={{ flexShrink: 0 }}>
                 <ChatTerminal store={store} compact />
               </Box>
@@ -633,15 +601,17 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
               </Box>
               <Box sx={{ p: 0.75, borderTop: '1px solid', borderColor: 'divider', display: 'flex', justifyContent: 'center' }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap', justifyContent: 'center' }}>
-                  <Tooltip title={isChatVisible ? 'Скрыть чат' : 'Показать чат'}>
-                    <IconButton
-                      size="small"
-                      color={isChatVisible ? 'primary' : 'default'}
-                      onClick={() => setIsChatVisible(!isChatVisible)}
-                    >
-                      <ChatBubbleOutlineIcon />
-                    </IconButton>
-                  </Tooltip>
+                  {canUseChat && (
+                    <Tooltip title={isChatVisible ? 'Скрыть чат' : 'Показать чат'}>
+                      <IconButton
+                        size="small"
+                        color={isChatVisible ? 'primary' : 'default'}
+                        onClick={() => setIsChatVisible(!isChatVisible)}
+                      >
+                        <ChatBubbleOutlineIcon />
+                      </IconButton>
+                    </Tooltip>
+                  )}
                   {canDrawOnBoard && (
                     <>
                       <Tooltip title={isDrawEnabled ? 'Выключить рисование' : 'Включить рисование'}>
@@ -734,7 +704,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                 </>
               )}
             </Box>
-            {isChatVisible && (
+            {canUseChat && isChatVisible && (
               <Box
                 sx={{
                   width: 330,
@@ -751,27 +721,15 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
         )}
       </Box>
 
-      <Dialog open={isDeleteDialogOpen} onClose={() => setIsDeleteDialogOpen(false)}>
-        <DialogTitle>Удалить комнату?</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            Комната будет удалена для всех участников. Это действие нельзя отменить.
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setIsDeleteDialogOpen(false)}>Отмена</Button>
-          <Button
-            color="error"
-            variant="contained"
-            onClick={() => {
-              setIsDeleteDialogOpen(false);
-              store.socketService?.deleteRoom();
-            }}
-          >
-            Удалить комнату
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <RoomSettingsSidebar
+        store={store}
+        open={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        themeMode={themeMode}
+        onToggleTheme={onToggleTheme}
+        isUserListVisible={isUserListVisible}
+        onToggleUserList={() => setIsUserListVisible((prev) => !prev)}
+      />
 
       <Dialog
         open={Boolean(store.facilitatorAnnouncement)}

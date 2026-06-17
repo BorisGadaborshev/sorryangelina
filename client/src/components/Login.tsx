@@ -71,7 +71,9 @@ const Login: React.FC<Props> = observer(({ store }) => {
   const [inviteRoomId, setInviteRoomId] = useState('');
   const [inviteRoomPassword, setInviteRoomPassword] = useState('');
   const [inviteCopySuccess, setInviteCopySuccess] = useState(false);
-  const [isFixedUsersUnlocked, setIsFixedUsersUnlocked] = useState(false);
+  const [isFixedUsersUnlocked, setIsFixedUsersUnlocked] = useState(
+    () => localStorage.getItem('fixedUsersUnlocked') === 'true'
+  );
   const [isSuboDialogOpen, setIsSuboDialogOpen] = useState(false);
   const [suboInput, setSuboInput] = useState('');
   const [suboError, setSuboError] = useState<string | null>(null);
@@ -540,6 +542,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
       return;
     }
     setIsFixedUsersUnlocked(true);
+    localStorage.setItem('fixedUsersUnlocked', 'true');
     setIsSuboDialogOpen(false);
     setSuboInput('');
     setSuboError(null);

@@ -2,7 +2,8 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server, Socket } from 'socket.io';
 import cors from 'cors';
-import { Room, User, Card, RoomState, Mood, Phase } from './types';
+import { Room, User, Card, RoomState, Mood, Phase, RoomFeatures } from './types';
+import { normalizeRoomFeatures } from './utils/roomFeatures';
 import bcrypt from 'bcryptjs';
 import { RoomService } from './services/RoomService';
 import { BUILTIN_TEAM_ID, TeamService } from './services/TeamService';
@@ -397,6 +398,8 @@ const normalizeDiscussionNavigation = (
 
 const canInteractWithCardSocial = (phase: Phase): boolean =>
   phase === 'creation' || phase === 'voting' || phase === 'discussion';
+
+const getRoomFeatures = (room: Room) => normalizeRoomFeatures(room.features);
 
 const getCardTypeByColumn = (column: number): Card['type'] => {
   if (column === 1) return 'disliked';
@@ -800,8 +803,7 @@ io.on('connection', (socket) => {
       }
 
       const room = await RoomService.createRoom(roomId, password, socket.id, effectiveUsername, {
-        teamId: normalizedTeamId,
-        userRole: teamRole
+        teamId: normalizedTeamId
       });
       socket.join(roomId);
       socket.data.userId = socket.id;
@@ -874,7 +876,7 @@ io.on('connection', (socket) => {
         id: socket.id,
         name: effectiveUsername,
         roomId,
-        role: teamRole || 'user'
+        role: 'user'
       };
 
       // If user exists, we'll reuse their original ID for card ownership
@@ -940,7 +942,8 @@ io.on('connection', (socket) => {
       const room = await RoomService.getRoom(currentUser.roomId);
       if (!room || room.phase !== 'creation') return;
 
-      const safeImageUrl = normalizeImageUrl(imageUrl);
+      const features = getRoomFeatures(room);
+      const safeImageUrl = features.mediaEnabled ? normalizeImageUrl(imageUrl) : undefined;
 
       const card: Card = {
         id: Date.now().toString(),
@@ -987,6 +990,9 @@ io.on('connection', (socket) => {
       const room = await RoomService.getRoom(currentUser.roomId);
       if (!room || (room.phase !== 'creation' && room.phase !== 'discussion')) return;
 
+      const features = getRoomFeatures(room);
+      if (!features.cardEditingEnabled) return;
+
       const card = room.cards.find(c => c.id === cardId);
       if (!card) return;
       const isAdmin = room.users.some((user) => user.name === currentUserName && user.role === 'admin');
@@ -997,7 +1003,7 @@ io.on('connection', (socket) => {
         updates.text = text;
       }
       if (typeof imageUrl !== 'undefined') {
-        updates.imageUrl = normalizeImageUrl(imageUrl);
+        updates.imageUrl = features.mediaEnabled ? normalizeImageUrl(imageUrl) : undefined;
       }
       if (Object.keys(updates).length === 0) return;
 
@@ -1026,6 +1032,7 @@ io.on('connection', (socket) => {
     try {
       const room = await RoomService.getRoom(currentUser.roomId);
       if (!room || (room.phase !== 'creation' && room.phase !== 'discussion')) return;
+      if (!getRoomFeatures(room).cardEditingEnabled) return;
 
       const card = room.cards.find(c => c.id === cardId);
       if (!card) return;
@@ -1053,6 +1060,7 @@ io.on('connection', (socket) => {
     try {
       const room = await RoomService.getRoom(currentUser.roomId);
       if (!room || !canInteractWithCardSocial(room.phase)) return;
+      if (!getRoomFeatures(room).commentsEnabled) return;
       if (typeof cardId !== 'string' || typeof text !== 'string') return;
 
       const result = await RoomService.addCardComment(
@@ -1080,6 +1088,7 @@ io.on('connection', (socket) => {
     try {
       const room = await RoomService.getRoom(currentUser.roomId);
       if (!room || !canInteractWithCardSocial(room.phase)) return;
+      if (!getRoomFeatures(room).reactionsEnabled) return;
       if (typeof cardId !== 'string' || typeof emoji !== 'string') return;
 
       const updatedCard = await RoomService.toggleCardReaction(
@@ -1107,6 +1116,7 @@ io.on('connection', (socket) => {
     try {
       const room = await RoomService.getRoom(currentUser.roomId);
       if (!room || room.phase !== 'creation') return;
+      if (!getRoomFeatures(room).moveCardsEnabled) return;
 
       const card = room.cards.find((currentCard) => currentCard.id === cardId);
       if (!card) return;
@@ -1134,6 +1144,9 @@ io.on('connection', (socket) => {
       const room = await RoomService.getRoom(currentUser.roomId);
       if (!room || room.phase !== 'voting') return;
 
+      const features = getRoomFeatures(room);
+      if (voteType === 'dislike' && !features.dislikesEnabled) return;
+
       const card = room.cards.find(c => c.id === cardId);
       if (!card) return;
 
@@ -1156,7 +1169,7 @@ io.on('connection', (socket) => {
     } catch (error) {
       console.error('Error voting for card:', error);
       const message = error instanceof Error ? error.message : 'Failed to vote for card';
-      if (error instanceof Error && message.includes('не более 3')) {
+      if (error instanceof Error && message.includes('не более')) {
         socket.emit('vote-error', { cardId, message });
         return;
       }
@@ -1193,6 +1206,7 @@ io.on('connection', (socket) => {
     try {
       const room = await RoomService.getRoom(currentUser.roomId);
       if (!room) return;
+      if (!getRoomFeatures(room).sprintVipEnabled) return;
 
       const targetName = typeof userName === 'string' ? userName.trim() : '';
       const votes = roomSprintVipVotes.get(currentUser.roomId) || new Map<string, string>();
@@ -1272,6 +1286,14 @@ io.on('connection', (socket) => {
     if (!actor?.roomId) {
       socket.emit('error', 'Не удалось сменить этап: сессия не восстановлена');
       return;
+    }
+
+    if (phase === 'rating') {
+      const roomForFeatures = await RoomService.getRoom(actor.roomId);
+      if (roomForFeatures && !getRoomFeatures(roomForFeatures).retroRatingEnabled) {
+        socket.emit('error', 'Оценка ретро отключена в настройках комнаты');
+        return;
+      }
     }
 
     console.log('Phase change requested:', {
@@ -1420,6 +1442,7 @@ io.on('connection', (socket) => {
     try {
       const room = await RoomService.getRoom(currentUser.roomId);
       if (!room || room.phase !== 'rating') return;
+      if (!getRoomFeatures(room).retroRatingEnabled) return;
 
       const ratingState = getRetroRatingState(currentUser.roomId);
       if (!ratingState.votes.has(currentUser.id)) {
@@ -1438,6 +1461,7 @@ io.on('connection', (socket) => {
     try {
       const room = await RoomService.getRoom(currentUser.roomId);
       if (!room || room.phase !== 'rating') return;
+      if (!getRoomFeatures(room).retroRatingEnabled) return;
 
       const isAdmin = room.users.some(
         (user) => user.name === currentUser?.name && user.role === 'admin'
@@ -1534,8 +1558,10 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('send-chat-message', ({ text }) => {
+  socket.on('send-chat-message', async ({ text }) => {
     if (!currentUser?.roomId) return;
+    const room = await RoomService.getRoom(currentUser.roomId);
+    if (!room || !getRoomFeatures(room).chatEnabled) return;
     const normalized = typeof text === 'string' ? text.trim() : '';
     if (!normalized) return;
 
@@ -1551,8 +1577,10 @@ io.on('connection', (socket) => {
     io.to(currentUser.roomId).emit('chat-message', message);
   });
 
-  socket.on('whiteboard-stroke', (payload) => {
+  socket.on('whiteboard-stroke', async (payload) => {
     if (!currentUser?.roomId) return;
+    const room = await RoomService.getRoom(currentUser.roomId);
+    if (!room || !getRoomFeatures(room).drawingEnabled) return;
     const stroke = normalizeWhiteboardStroke(payload);
     if (!stroke) return;
     const current = roomWhiteboards.get(currentUser.roomId) || [];
@@ -1561,10 +1589,103 @@ io.on('connection', (socket) => {
     io.to(currentUser.roomId).emit('whiteboard-stroke', stroke);
   });
 
-  socket.on('clear-whiteboard', () => {
+  socket.on('clear-whiteboard', async () => {
     if (!currentUser?.roomId) return;
+    const room = await RoomService.getRoom(currentUser.roomId);
+    if (!room || !getRoomFeatures(room).drawingEnabled) return;
     roomWhiteboards.set(currentUser.roomId, []);
     io.to(currentUser.roomId).emit('whiteboard-cleared');
+  });
+
+  socket.on('set-room-features', async ({ features }) => {
+    let actor = currentUser;
+    if (!actor?.roomId) {
+      const roomId = [...socket.rooms].find((roomName) => roomName !== socket.id);
+      const userName = typeof socket.data.userName === 'string' ? socket.data.userName : undefined;
+      const userId = typeof socket.data.userId === 'string' ? socket.data.userId : socket.id;
+      if (roomId && userName) {
+        const room = await RoomService.getRoom(roomId);
+        const user = room?.users.find((roomUser) => roomUser.name === userName || roomUser.id === userId);
+        if (user) {
+          actor = { ...user, roomId };
+          currentUser = actor;
+        }
+      }
+    }
+
+    if (!actor?.roomId || !features || typeof features !== 'object') return;
+
+    try {
+      const room = await RoomService.getRoom(actor.roomId);
+      if (!room) return;
+      if (!canControlDiscussionNavigation(room, actor.name, actor.role)) return;
+
+      const updatedRoom = await RoomService.updateRoomFeatures(actor.roomId, features as Partial<RoomFeatures>);
+      if (!updatedRoom?.features) return;
+
+      io.to(actor.roomId).emit('room-features-updated', { features: updatedRoom.features });
+    } catch (error) {
+      console.error('Error updating room features:', error);
+    }
+  });
+
+  socket.on('transfer-room-admin', async ({ userId }) => {
+    if (!currentUser?.roomId || typeof userId !== 'string') return;
+
+    try {
+      const updatedRoom = await RoomService.transferRoomAdmin(currentUser.roomId, currentUser.id, userId);
+      if (!updatedRoom) {
+        socket.emit('error', 'Не удалось передать права администратора');
+        return;
+      }
+
+      io.to(currentUser.roomId).emit('state-updated', {
+        cards: updatedRoom.cards,
+        phase: updatedRoom.phase,
+        users: updatedRoom.users
+      });
+    } catch (error) {
+      console.error('Error transferring room admin:', error);
+      socket.emit('error', 'Не удалось передать права администратора');
+    }
+  });
+
+  socket.on('kick-user', async ({ userId }) => {
+    if (!currentUser?.roomId || typeof userId !== 'string' || userId === currentUser.id) return;
+
+    try {
+      const room = await RoomService.getRoom(currentUser.roomId);
+      if (!room) return;
+
+      const actor = room.users.find((user) => user.id === currentUser?.id || user.name === currentUser?.name);
+      if (!actor || actor.role !== 'admin') {
+        socket.emit('error', 'Только администратор может исключать участников');
+        return;
+      }
+
+      const roomId = currentUser.roomId;
+      const updatedRoom = await RoomService.removeUser(roomId, userId);
+      if (!updatedRoom) return;
+
+      const socketsInRoom = await io.in(roomId).fetchSockets();
+      for (const roomSocket of socketsInRoom) {
+        if (roomSocket.data.userId === userId) {
+          roomSocket.emit('kicked');
+          roomSocket.leave(roomId);
+        }
+      }
+
+      io.to(roomId).emit('state-updated', {
+        cards: updatedRoom.cards,
+        phase: updatedRoom.phase,
+        users: updatedRoom.users
+      });
+      await emitRetroRatingStateToRoom(roomId);
+      await emitSprintVipStateToRoom(roomId);
+    } catch (error) {
+      console.error('Error kicking user:', error);
+      socket.emit('error', 'Не удалось исключить участника');
+    }
   });
 
   socket.on('delete-room', async () => {

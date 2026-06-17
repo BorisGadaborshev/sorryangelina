@@ -125,12 +125,17 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
         suggestion: '#e1bee7'
       }[card.type];
 
+  const features = store.roomFeatures;
   const isEditingAllowed = (store.phase === 'creation' || (store.phase === 'discussion' && store.canEditCard(card)));
   const currentUserId = store.currentUser?.id || '';
   const hasLiked = card.likes?.includes(currentUserId) || false;
   const hasDisliked = card.dislikes?.includes(currentUserId) || false;
   const canEdit = store.canEditCard(card);
-  const canUseSocial = store.phase !== 'rating';
+  const canUseSocial = store.phase !== 'rating' && (features.reactionsEnabled || features.commentsEnabled);
+  const showReactions = features.reactionsEnabled;
+  const showComments = features.commentsEnabled;
+  const showDislikes = features.dislikesEnabled;
+  const showAuthor = !features.anonymousEnabled && Boolean(card.createdBy);
   const comments = card.comments || [];
   const commentCount = comments.length;
 
@@ -166,30 +171,34 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
               variant="outlined"
               size="small"
             />
-            <TextField
-              value={imageUrl}
-              onChange={(event) => setImageUrl(event.target.value)}
-              variant="outlined"
-              size="small"
-              placeholder="Ссылка на изображение"
-            />
-            <Button component="label" size="small" variant="outlined">
-              Загрузить файл
-              <input hidden type="file" accept="image/*" onChange={handleSelectImageFile} />
-            </Button>
-            {imageUrl.trim() && (
-              <Box
-                component="img"
-                src={imageUrl.trim()}
-                alt="preview"
-                sx={{
-                  maxWidth: '100%',
-                  maxHeight: 220,
-                  objectFit: 'contain',
-                  borderRadius: 1,
-                  border: '1px solid rgba(0,0,0,0.1)'
-                }}
-              />
+            {features.mediaEnabled && (
+              <>
+                <TextField
+                  value={imageUrl}
+                  onChange={(event) => setImageUrl(event.target.value)}
+                  variant="outlined"
+                  size="small"
+                  placeholder="Ссылка на изображение"
+                />
+                <Button component="label" size="small" variant="outlined">
+                  Загрузить файл
+                  <input hidden type="file" accept="image/*" onChange={handleSelectImageFile} />
+                </Button>
+                {imageUrl.trim() && (
+                  <Box
+                    component="img"
+                    src={imageUrl.trim()}
+                    alt="preview"
+                    sx={{
+                      maxWidth: '100%',
+                      maxHeight: 220,
+                      objectFit: 'contain',
+                      borderRadius: 1,
+                      border: '1px solid rgba(0,0,0,0.1)'
+                    }}
+                  />
+                )}
+              </>
             )}
             <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
               <IconButton size="small" onClick={() => setIsEditing(false)}>
@@ -203,9 +212,16 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
         ) : (
           <>
             <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
-              <Typography variant="body1" sx={{ flex: 1, wordBreak: 'break-word' }}>
-                {card.text}
-              </Typography>
+              <Box sx={{ flex: 1 }}>
+                <Typography variant="body1" sx={{ wordBreak: 'break-word' }}>
+                  {card.text}
+                </Typography>
+                {showAuthor && (
+                  <Typography variant="caption" sx={{ opacity: 0.7, display: 'block', mt: 0.5 }}>
+                    {card.createdBy}
+                  </Typography>
+                )}
+              </Box>
               {canEdit && isEditingAllowed && (
                 <>
                   <IconButton
@@ -247,7 +263,7 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
               }}
             />
 
-            {card.imageUrl && !imageLoadError && (
+            {features.mediaEnabled && card.imageUrl && !imageLoadError && (
               <Box
                 component="img"
                 src={card.imageUrl}
@@ -262,13 +278,13 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
                 }}
               />
             )}
-            {card.imageUrl && imageLoadError && (
+            {features.mediaEnabled && card.imageUrl && imageLoadError && (
               <Typography variant="caption" color="error" sx={{ mt: 1, display: 'block' }}>
                 Не удалось загрузить изображение по этой ссылке
               </Typography>
             )}
 
-            {canUseSocial && groupedReactions.length > 0 && (
+            {showReactions && groupedReactions.length > 0 && (
               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 1 }}>
                 {groupedReactions.map((group) => (
                   <Box
@@ -307,7 +323,7 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
               </Box>
             ))}
 
-            {canUseSocial && showCommentInput && (
+            {showComments && showCommentInput && (
               <Box
                 sx={{
                   display: 'flex',
@@ -358,6 +374,7 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
                     {card.likes?.length || 0}
                   </Typography>
                 </Box>
+                {showDislikes && (
                 <Box sx={{ display: 'flex', alignItems: 'center' }}>
                   <Tooltip title="Тухлый помидор">
                     <IconButton
@@ -374,6 +391,7 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
                     {card.dislikes?.length || 0}
                   </Typography>
                 </Box>
+                )}
               </Box>
             )}
 
@@ -393,6 +411,7 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
                   pt: 0.5
                 }}
               >
+                {showReactions && (
                 <IconButton
                   size="small"
                   onClick={(event) => setReactionAnchorEl(event.currentTarget)}
@@ -410,6 +429,8 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
                 >
                   <AddReaction sx={{ fontSize: 18 }} />
                 </IconButton>
+                )}
+                {showComments && (
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
                   <IconButton
                     size="small"
@@ -431,13 +452,14 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
                     {commentCount}
                   </Typography>
                 </Box>
+                )}
               </Box>
             )}
           </>
         )}
       </CardContent>
 
-      {canUseSocial && !isEditing && (
+      {showReactions && canUseSocial && !isEditing && (
         <Popover
             open={isReactionPickerOpen}
             anchorEl={reactionAnchorEl}

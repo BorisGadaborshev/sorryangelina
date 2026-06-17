@@ -456,6 +456,7 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
                           onClick={(e) => setImageAnchorEl(e.currentTarget)}
                           color={newCardImageUrl.trim() ? 'primary' : 'default'}
                           sx={{ p: 0.5, opacity: 0.7, '&:hover': { backgroundColor: 'transparent', opacity: 1 } }}
+                          disabled={!store.roomFeatures.mediaEnabled}
                         >
                           <ImageIcon fontSize="small" />
                         </IconButton>

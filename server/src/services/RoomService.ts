@@ -1,5 +1,6 @@
 import { RoomModel } from '../models/Room';
-import { Room, RoomDocument, User, Card, CardComment, CardReaction, Phase, CreateRoomOptions, COLUMN_COUNT, CARD_REACTION_EMOJIS } from '../types';
+import { Room, RoomDocument, User, Card, CardComment, CardReaction, Phase, CreateRoomOptions, RoomFeatures, COLUMN_COUNT, CARD_REACTION_EMOJIS } from '../types';
+import { normalizeRoomFeatures } from '../utils/roomFeatures';
 import bcrypt from 'bcryptjs';
 
 const NO_ROOM_PASSWORD_MARKER = '__no_room_password__';
@@ -13,7 +14,7 @@ export class RoomService {
       id: owner,
       name: username,
       roomId,
-      role: options.userRole || 'user',
+      role: 'admin',
       isReady: false
     };
     
@@ -54,6 +55,14 @@ export class RoomService {
     }
     const normalized = titles.map((title) => title.trim());
     const room = await RoomModel.updateColumnTitles(roomId, normalized);
+    return room ? this.convertToRoom(room) : null;
+  }
+
+  static async updateRoomFeatures(roomId: string, features: Partial<RoomFeatures>): Promise<Room | null> {
+    const current = await RoomModel.findOne({ id: roomId });
+    if (!current) return null;
+    const merged = normalizeRoomFeatures({ ...current.features, ...features });
+    const room = await RoomModel.updateRoomFeatures(roomId, merged);
     return room ? this.convertToRoom(room) : null;
   }
 
@@ -144,14 +153,46 @@ export class RoomService {
   }
 
   static async removeUser(roomId: string, userId: string): Promise<Room | null> {
-    const room = await RoomModel.findOneAndUpdate(
+    const room = await RoomModel.findOne({ id: roomId });
+    if (!room) return null;
+
+    const leaveIndex = room.users.findIndex((user) => user.id === userId);
+    if (leaveIndex === -1) return this.convertToRoom(room);
+
+    const wasAdmin = room.users[leaveIndex].role === 'admin';
+    const remainingUsers = room.users.filter((user) => user.id !== userId);
+
+    const updatedRoom = await RoomModel.findOneAndUpdate(
       { id: roomId },
-      { 
+      {
         $pull: { users: { id: userId } }
       },
       { new: true }
     );
-    return room ? this.convertToRoom(room) : null;
+    if (!updatedRoom) return null;
+
+    if (wasAdmin && remainingUsers.length > 0) {
+      const nextIndex = leaveIndex < remainingUsers.length ? leaveIndex : 0;
+      const nextAdminId = remainingUsers[nextIndex].id;
+      const roomWithAdmin = await RoomModel.setRoomAdmin(roomId, nextAdminId);
+      return roomWithAdmin ? this.convertToRoom(roomWithAdmin) : this.convertToRoom(updatedRoom);
+    }
+
+    return this.convertToRoom(updatedRoom);
+  }
+
+  static async transferRoomAdmin(roomId: string, actorUserId: string, targetUserId: string): Promise<Room | null> {
+    const room = await RoomModel.findOne({ id: roomId });
+    if (!room) return null;
+
+    const actor = room.users.find((user) => user.id === actorUserId);
+    const target = room.users.find((user) => user.id === targetUserId);
+    if (!actor || actor.role !== 'admin' || !target || target.id === actorUserId) {
+      return null;
+    }
+
+    const updatedRoom = await RoomModel.setRoomAdmin(roomId, targetUserId);
+    return updatedRoom ? this.convertToRoom(updatedRoom) : null;
   }
 
   static async addCard(roomId: string, card: Card): Promise<Room | null> {
@@ -324,6 +365,14 @@ export class RoomService {
     const card = current.cards.find(c => c.id === cardId);
     if (!card) return null;
 
+    const features = normalizeRoomFeatures(current.features);
+    if (voteType === 'dislike' && !features.dislikesEnabled) {
+      throw new Error('Дизлайки отключены в этой комнате');
+    }
+
+    const likesLimit = features.likesPerUser;
+    const dislikesLimit = features.dislikesPerUser;
+
     const likesUsed = current.cards.reduce((acc, currentCard) => {
       return acc + ((currentCard.likes || []).includes(userId) ? 1 : 0);
     }, 0);
@@ -337,14 +386,14 @@ export class RoomService {
     // Vote limits per user across the room.
     if (voteType === 'like' && !alreadyLiked) {
       const nextLikesUsed = likesUsed + 1;
-      if (nextLikesUsed > 3) {
-        throw new Error('Вы можете поставить не более 3 лайков');
+      if (nextLikesUsed > likesLimit) {
+        throw new Error(`Вы можете поставить не более ${likesLimit} лайков`);
       }
     }
     if (voteType === 'dislike' && !alreadyDisliked) {
       const nextDislikesUsed = dislikesUsed + 1;
-      if (nextDislikesUsed > 3) {
-        throw new Error('Вы можете поставить не более 3 дизлайков');
+      if (nextDislikesUsed > dislikesLimit) {
+        throw new Error(`Вы можете поставить не более ${dislikesLimit} дизлайков`);
       }
     }
 
@@ -558,6 +607,7 @@ export class RoomService {
 
   private static convertToRoom(doc: RoomDocument): Room {
     const { id, teamId, owner, phase, columnTitles, createdAt, users, cards } = doc;
+    const features = normalizeRoomFeatures(doc.features);
     const hasAdmin = Boolean(users?.some((user) => user.role === 'admin'));
     console.log('Converting room document:', {
       teamId,
@@ -572,6 +622,7 @@ export class RoomService {
       owner,
       phase,
       columnTitles: doc.columnTitles,
+      features,
       createdAt,
       users: users ? users.map(user => ({
         id: user.id,

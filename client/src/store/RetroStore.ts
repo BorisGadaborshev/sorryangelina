@@ -1,5 +1,5 @@
 import { makeAutoObservable, runInAction } from 'mobx';
-import { AuthProfile, Card, CardComment, CardReaction, ChatMessage, DEFAULT_COLUMN_TITLES, DiscussionNavigationState, FacilitatorAnnouncement, Phase, PhaseTimerState, RetroRatingState, Room, RoomState, SprintVipState, Team, User, WhiteboardStroke } from '../types';
+import { AuthProfile, Card, CardComment, CardReaction, ChatMessage, DEFAULT_COLUMN_TITLES, DEFAULT_ROOM_FEATURES, DiscussionNavigationState, FacilitatorAnnouncement, Phase, PhaseTimerState, RetroRatingState, Room, RoomFeatures, RoomState, SprintVipState, Team, User, WhiteboardStroke } from '../types';
 import { Socket } from 'socket.io-client';
 import { SocketService } from '../services/socket';
 
@@ -21,6 +21,7 @@ export class RetroStore {
   facilitatorAnnouncement: FacilitatorAnnouncement | null = null;
   discussionNavigation: DiscussionNavigationState | null = null;
   columnTitles: string[] = [...DEFAULT_COLUMN_TITLES];
+  roomFeatures: RoomFeatures = { ...DEFAULT_ROOM_FEATURES };
   sprintVip: SprintVipState = { voteCount: 0 };
   retroRating: RetroRatingState = {
     hasVoted: false,
@@ -33,6 +34,7 @@ export class RetroStore {
     makeAutoObservable(this, {}, { autoBind: true });
     this.socketService = new SocketService(this);
     this.tryRestoreAuth();
+    this.tryRestoreSelectedTeam();
     this.tryRestoreSession();
 
     // Обработка закрытия окна/вкладки
@@ -75,6 +77,20 @@ export class RetroStore {
       }
     } catch (error) {
       localStorage.removeItem('authProfile');
+    }
+  }
+
+  private tryRestoreSelectedTeam() {
+    const raw = localStorage.getItem('selectedTeam');
+    if (!raw) return;
+
+    try {
+      const parsed = JSON.parse(raw) as Team;
+      if (parsed?.id && parsed?.name) {
+        this.selectedTeam = parsed;
+      }
+    } catch (error) {
+      localStorage.removeItem('selectedTeam');
     }
   }
 
@@ -210,6 +226,11 @@ export class RetroStore {
   setSelectedTeam(team: Team | null) {
     runInAction(() => {
       this.selectedTeam = team;
+      if (team) {
+        localStorage.setItem('selectedTeam', JSON.stringify(team));
+      } else {
+        localStorage.removeItem('selectedTeam');
+      }
     });
   }
 
@@ -233,6 +254,7 @@ export class RetroStore {
         } else {
           this.columnTitles = [...DEFAULT_COLUMN_TITLES];
         }
+        this.roomFeatures = room.features ? { ...room.features } : { ...DEFAULT_ROOM_FEATURES };
         const savedUsername = localStorage.getItem('username');
         console.log('Current users in room:', room.users.map(u => ({ name: u.name, role: u.role })));
         
@@ -268,6 +290,7 @@ export class RetroStore {
         this.facilitatorAnnouncement = null;
         this.discussionNavigation = null;
         this.columnTitles = [...DEFAULT_COLUMN_TITLES];
+        this.roomFeatures = { ...DEFAULT_ROOM_FEATURES };
         this.sprintVip = { voteCount: 0 };
         this.retroRating = { hasVoted: false, votesCount: 0, totalCount: 0, resultsVisible: false };
         console.log('Cleared room and session');
@@ -461,6 +484,7 @@ export class RetroStore {
   }
 
   canEditCard(card: Card): boolean {
+    if (!this.roomFeatures.cardEditingEnabled) return false;
     return this.currentUser?.role === 'admin' || this.currentUser?.name === card.createdBy;
   }
 
@@ -496,6 +520,20 @@ export class RetroStore {
   requestColumnTitlesUpdate(titles: string[]) {
     this.setColumnTitles(titles);
     this.socketService?.setColumnTitles(titles);
+  }
+
+  setRoomFeatures(features: RoomFeatures) {
+    runInAction(() => {
+      this.roomFeatures = { ...features };
+      if (this.room) {
+        this.room = { ...this.room, features: { ...features } };
+      }
+    });
+  }
+
+  requestRoomFeaturesUpdate(features: RoomFeatures) {
+    this.setRoomFeatures(features);
+    this.socketService?.setRoomFeatures(features);
   }
 
   getUserReadyCount(): number {
