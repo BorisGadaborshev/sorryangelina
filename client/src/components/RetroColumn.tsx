@@ -5,12 +5,14 @@ import { useTheme } from '@mui/material/styles';
 import { Droppable, Draggable } from '@hello-pangea/dnd';
 import { RetroStore } from '../store/RetroStore';
 import RetroCard from './RetroCard';
-import { Card } from '../types';
+import { Card, DEFAULT_COLUMN_TITLES } from '../types';
 import EmojiEmotionsIcon from '@mui/icons-material/EmojiEmotions';
 import ImageIcon from '@mui/icons-material/Image';
 import MicIcon from '@mui/icons-material/Mic';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
+import CheckIcon from '@mui/icons-material/Check';
+import CloseIcon from '@mui/icons-material/Close';
 
 const getSpeechRecognition = (): SpeechRecognitionConstructor | null =>
   window.SpeechRecognition || window.webkitSpeechRecognition || null;
@@ -55,6 +57,7 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
   const [speechError, setSpeechError] = useState<string | null>(null);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState('');
+  const [titleAtEditStart, setTitleAtEditStart] = useState('');
   const [isHeaderHovered, setIsHeaderHovered] = useState(false);
   const textFieldRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -77,6 +80,7 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
 
   const startEditingTitle = () => {
     if (!canEditTitle) return;
+    setTitleAtEditStart(displayTitle);
     setDraftTitle(displayTitle);
     setIsEditingTitle(true);
   };
@@ -90,9 +94,10 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
     store.requestColumnTitlesUpdate(next);
   };
 
-  const cancelTitleEdit = () => {
+  const resetTitleEdit = () => {
+    const originalTitle = titleAtEditStart || DEFAULT_COLUMN_TITLES[columnIndex];
+    setDraftTitle(originalTitle);
     setIsEditingTitle(false);
-    setDraftTitle(displayTitle);
   };
 
   useEffect(() => {
@@ -314,26 +319,45 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
         }}
       >
         {isEditingTitle ? (
-          <TextField
-            size="small"
-            value={draftTitle}
-            onChange={(event) => setDraftTitle(event.target.value)}
-            onBlur={commitTitle}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault();
-                commitTitle();
-              }
-              if (event.key === 'Escape') {
-                event.preventDefault();
-                cancelTitleEdit();
-              }
-            }}
-            autoFocus
-            fullWidth
-            inputProps={{ maxLength: 80 }}
-            sx={{ maxWidth: 280 }}
-          />
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25, flex: 1, maxWidth: 360 }}>
+            <TextField
+              size="small"
+              value={draftTitle}
+              onChange={(event) => setDraftTitle(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  commitTitle();
+                }
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  resetTitleEdit();
+                }
+              }}
+              autoFocus
+              fullWidth
+              inputProps={{ maxLength: 80 }}
+            />
+            <Tooltip title="Сохранить">
+              <IconButton
+                size="small"
+                color="primary"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={commitTitle}
+              >
+                <CheckIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="Вернуть исходное название">
+              <IconButton
+                size="small"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={resetTitleEdit}
+              >
+                <CloseIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </Box>
         ) : (
           <>
             <Typography variant="h6" align="center" sx={{ flex: 1 }}>

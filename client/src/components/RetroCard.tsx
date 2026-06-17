@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { observer } from 'mobx-react-lite';
 import { Card as CardType } from '../types';
-import { Card, CardContent, Typography, IconButton, TextField, Box, Tooltip, Alert, Button } from '@mui/material';
-import { Delete, Edit } from '@mui/icons-material';
+import { Card, CardContent, Typography, IconButton, TextField, Box, Tooltip, Alert, Button, Menu, MenuItem, ListItemIcon, ListItemText } from '@mui/material';
+import { Delete, Edit, MoreVert } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import { RetroStore } from '../store/RetroStore';
 
@@ -17,7 +17,9 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
   const [text, setText] = useState(card.text);
   const [imageUrl, setImageUrl] = useState(card.imageUrl || '');
   const [imageLoadError, setImageLoadError] = useState(false);
+  const [menuAnchorEl, setMenuAnchorEl] = useState<null | HTMLElement>(null);
   const theme = useTheme();
+  const isMenuOpen = Boolean(menuAnchorEl);
 
   useEffect(() => {
     setImageLoadError(false);
@@ -42,6 +44,25 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
     if (store.canEditCard(card) && store.socket && (store.phase === 'creation' || store.phase === 'discussion')) {
       store.socket.emit('delete-card', { cardId: card.id });
     }
+  };
+
+  const handleMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
+    event.stopPropagation();
+    setMenuAnchorEl(event.currentTarget);
+  };
+
+  const handleMenuClose = () => {
+    setMenuAnchorEl(null);
+  };
+
+  const handleEditFromMenu = () => {
+    handleMenuClose();
+    handleEdit();
+  };
+
+  const handleDeleteFromMenu = () => {
+    handleMenuClose();
+    handleDelete();
   };
 
   const handleSelectImageFile = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -202,14 +223,35 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
                 </Box>
               </Box>
               {canEdit && isEditingAllowed && (
-                <Box>
-                  <IconButton size="small" onClick={handleEdit}>
-                    <Edit />
+                <>
+                  <IconButton
+                    size="small"
+                    onClick={handleMenuOpen}
+                    aria-label="Действия с карточкой"
+                  >
+                    <MoreVert />
                   </IconButton>
-                  <IconButton size="small" onClick={handleDelete}>
-                    <Delete />
-                  </IconButton>
-                </Box>
+                  <Menu
+                    anchorEl={menuAnchorEl}
+                    open={isMenuOpen}
+                    onClose={handleMenuClose}
+                    anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                    transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+                  >
+                    <MenuItem onClick={handleEditFromMenu}>
+                      <ListItemIcon>
+                        <Edit fontSize="small" />
+                      </ListItemIcon>
+                      <ListItemText>Редактировать</ListItemText>
+                    </MenuItem>
+                    <MenuItem onClick={handleDeleteFromMenu}>
+                      <ListItemIcon>
+                        <Delete fontSize="small" />
+                      </ListItemIcon>
+                      <ListItemText>Удалить</ListItemText>
+                    </MenuItem>
+                  </Menu>
+                </>
               )}
             </Box>
             {store.voteError?.cardId === card.id && (
