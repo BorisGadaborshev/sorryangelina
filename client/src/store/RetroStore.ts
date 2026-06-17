@@ -66,6 +66,16 @@ export class RetroStore {
     return Boolean(localStorage.getItem('roomId') && localStorage.getItem('username'));
   }
 
+  get canRenderBoard(): boolean {
+    return Boolean(this.room && this.currentUser);
+  }
+
+  get hasCachedBoardState(): boolean {
+    return Boolean(
+      sessionStorage.getItem(BOARD_STATE_KEY) || localStorage.getItem(BOARD_STATE_KEY)
+    );
+  }
+
   setReconnecting(value: boolean) {
     runInAction(() => {
       this.isReconnecting = value;
@@ -88,11 +98,24 @@ export class RetroStore {
     };
 
     sessionStorage.setItem(BOARD_STATE_KEY, JSON.stringify(snapshot));
+    try {
+      localStorage.setItem(BOARD_STATE_KEY, JSON.stringify(snapshot));
+    } catch {
+      // Ignore quota errors for large boards.
+    }
+  }
+
+  hydrateBoardFromCache(): boolean {
+    if (this.room) {
+      return this.canRenderBoard;
+    }
+    this.tryRestoreBoardState();
+    return this.canRenderBoard;
   }
 
   private tryRestoreBoardState() {
     const roomId = localStorage.getItem('roomId');
-    const raw = sessionStorage.getItem(BOARD_STATE_KEY);
+    const raw = sessionStorage.getItem(BOARD_STATE_KEY) ?? localStorage.getItem(BOARD_STATE_KEY);
     if (!roomId || !raw || this.room) return;
 
     try {
@@ -111,15 +134,16 @@ export class RetroStore {
           ? { ...parsed.roomFeatures }
           : { ...DEFAULT_ROOM_FEATURES };
         this.currentUser = parsed.currentUser;
-        this.isReconnecting = true;
       });
     } catch {
       sessionStorage.removeItem(BOARD_STATE_KEY);
+      localStorage.removeItem(BOARD_STATE_KEY);
     }
   }
 
   private clearBoardState() {
     sessionStorage.removeItem(BOARD_STATE_KEY);
+    localStorage.removeItem(BOARD_STATE_KEY);
   }
 
   private saveSession(userId: string, roomId: string, username: string) {
@@ -177,8 +201,11 @@ export class RetroStore {
     const username = localStorage.getItem('username');
 
     if (userId && roomId && username && this.socketService) {
+      const hasCachedBoard = this.canRenderBoard;
       try {
-        this.setReconnecting(true);
+        if (!hasCachedBoard) {
+          this.setReconnecting(true);
+        }
         console.log('Attempting to restore session with:', { userId, roomId, username });
         await this.socketService.restoreSession(roomId, userId, username, this.authProfile?.token);
         this.setReconnecting(false);
@@ -186,8 +213,8 @@ export class RetroStore {
         console.error('Failed to restore session:', error);
         if (!this.room) {
           this.clearSession();
+          this.setReconnecting(false);
         }
-        this.setReconnecting(true);
       }
     }
   }

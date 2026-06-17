@@ -60,8 +60,9 @@ export class SocketService {
       }
 
       this.store.persistBoardState();
-      this.store.setReconnecting(true);
-      this.store.setError('Переподключение к комнате...');
+      if (!this.store.canRenderBoard) {
+        this.store.setReconnecting(true);
+      }
     });
 
     this.bindLifecycleHandlers();
@@ -264,6 +265,9 @@ export class SocketService {
 
   private bindLifecycleHandlers(): void {
     const resumeSession = () => {
+      if (!this.store.canRenderBoard) {
+        this.store.hydrateBoardFromCache();
+      }
       void this.attemptSessionRestore();
     };
 
@@ -298,8 +302,12 @@ export class SocketService {
       return;
     }
 
+    const hasCachedBoard = this.store.canRenderBoard;
+
     if (!this.socket.connected) {
-      this.store.setReconnecting(true);
+      if (!hasCachedBoard) {
+        this.store.setReconnecting(true);
+      }
       this.socket.connect();
       return;
     }
@@ -309,7 +317,9 @@ export class SocketService {
     }
 
     this.isRestoringSession = true;
-    this.store.setReconnecting(true);
+    if (!hasCachedBoard) {
+      this.store.setReconnecting(true);
+    }
 
     try {
       await this.restoreSession(roomId, userId, username, token);

@@ -39,7 +39,7 @@ const WHITEBOARD_COLORS = ['#111111', '#006dff', '#00a878', '#ff6b00', '#e11d48'
 const TIMER_MUSIC_SRC = '/audio/timer-music.mp3';
 
 const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) => {
-  const [isReady, setIsReady] = useState(false);
+  const [isReady, setIsReady] = useState(() => Boolean(store.room));
   const [isUserListVisible, setIsUserListVisible] = useState(true);
   const [isChatVisible, setIsChatVisible] = useState(false);
   const [isDrawEnabled, setIsDrawEnabled] = useState(false);
@@ -66,11 +66,15 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   const [isTimerAudioUnavailable, setIsTimerAudioUnavailable] = useState(false);
 
   useEffect(() => {
+    if (store.room) {
+      setIsReady(true);
+      return;
+    }
     const timer = setTimeout(() => {
       setIsReady(true);
     }, 100);
     return () => clearTimeout(timer);
-  }, []);
+  }, [store.room]);
 
   const currentUserName = store.currentUser?.name;
   const currentRoomId = store.room?.id;
@@ -205,7 +209,20 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
     setIsMoodDialogOpen(false);
   };
 
-  if (!store.room || !store.currentUser || !isReady) {
+  if (!store.canRenderBoard) {
+    if (!store.hasBoardSession && !store.hasCachedBoardState) {
+      return (
+        <Box sx={{
+          height: '100vh',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}>
+          <CircularProgress />
+        </Box>
+      );
+    }
+
     return (
       <Box sx={{
         height: '100vh',
@@ -216,14 +233,18 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
         gap: 2,
       }}>
         <CircularProgress />
-        {store.isReconnecting && (
-          <Typography variant="body2" color="text.secondary">
-            Переподключение к комнате...
-          </Typography>
-        )}
+        <Typography variant="body2" color="text.secondary">
+          Загрузка доски...
+        </Typography>
       </Box>
     );
   }
+
+  if (!isReady) {
+    return null;
+  }
+
+  const currentUser = store.currentUser!;
 
   const renderColumns = () => {
     const columns = (
@@ -282,7 +303,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
 
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-      {store.isReconnecting && (
+      {store.isReconnecting && !store.cards.length && (
         <Box sx={{
           px: 2,
           py: 0.75,
@@ -291,7 +312,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
           textAlign: 'center',
           typography: 'body2',
         }}>
-          Переподключение к комнате...
+          Загрузка доски...
         </Box>
       )}
       <AppBar position="static" color="default" elevation={1} sx={{ bgcolor: 'background.paper', color: 'text.primary' }}>
@@ -645,7 +666,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                 <UserList 
                   users={store.users}
                   onlineUsers={store.users.map(u => u.id)}
-                  currentUserId={store.currentUser.id}
+                  currentUserId={currentUser.id}
                   currentPhase={store.phase}
                   onReadyStateChange={handleReadyStateChange}
                   store={store}
@@ -680,7 +701,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                 <UserList 
                   users={store.users}
                   onlineUsers={store.users.map(u => u.id)}
-                  currentUserId={store.currentUser.id}
+                  currentUserId={currentUser.id}
                   currentPhase={store.phase}
                   onReadyStateChange={handleReadyStateChange}
                   store={store}
