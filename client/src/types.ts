@@ -22,6 +22,24 @@ export interface Room {
   cards: Card[];
 }
 
+export interface CardComment {
+  id: string;
+  cardId: string;
+  userId: string;
+  userName: string;
+  text: string;
+  createdAt: string;
+}
+
+export interface CardReaction {
+  emoji: string;
+  userId: string;
+  userName: string;
+}
+
+export const CARD_REACTION_EMOJIS = ['👍', '👎', '👏', '❤️', '🔥', '🎉', '🥰', '😨', '😂'] as const;
+export type CardReactionEmoji = typeof CARD_REACTION_EMOJIS[number];
+
 export interface Card {
   id: string;
   text: string;
@@ -31,6 +49,8 @@ export interface Card {
   dislikes: string[];
   column: number;
   imageUrl?: string;
+  comments?: CardComment[];
+  reactions?: CardReaction[];
 }
 
 export interface RoomState {

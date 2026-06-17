@@ -13,6 +13,37 @@ exports.RoomModel = void 0;
 // Postgres access helpers
 const database_1 = require("../config/database");
 const types_1 = require("../types");
+const attachSocialDataToCards = (cards) => __awaiter(void 0, void 0, void 0, function* () {
+    if (cards.length === 0)
+        return cards;
+    const cardIds = cards.map((card) => card.id);
+    const commentsRes = yield database_1.pool.query('select id, card_id, user_id, user_name, text, created_at from card_comments where card_id = any($1::text[]) order by created_at asc', [cardIds]);
+    const reactionsRes = yield database_1.pool.query('select card_id, user_id, user_name, emoji from card_reactions where card_id = any($1::text[])', [cardIds]);
+    const commentsByCard = new Map();
+    for (const row of commentsRes.rows) {
+        const entry = commentsByCard.get(row.card_id) || [];
+        entry.push({
+            id: row.id,
+            cardId: row.card_id,
+            userId: row.user_id,
+            userName: row.user_name,
+            text: row.text,
+            createdAt: row.created_at
+        });
+        commentsByCard.set(row.card_id, entry);
+    }
+    const reactionsByCard = new Map();
+    for (const row of reactionsRes.rows) {
+        const entry = reactionsByCard.get(row.card_id) || [];
+        entry.push({
+            emoji: row.emoji,
+            userId: row.user_id,
+            userName: row.user_name
+        });
+        reactionsByCard.set(row.card_id, entry);
+    }
+    return cards.map((card) => (Object.assign(Object.assign({}, card), { comments: commentsByCard.get(card.id) || [], reactions: reactionsByCard.get(card.id) || [] })));
+});
 exports.RoomModel = {
     create(doc) {
         var _a, _b, _c;
@@ -57,7 +88,7 @@ exports.RoomModel = {
             }
             const userRows = usersRes.rows;
             const users = userRows.map((r) => { var _a; return ({ id: r.id, name: r.name, roomId: roomRow.id, role: r.role, isReady: r.is_ready, mood: (_a = r.mood) !== null && _a !== void 0 ? _a : undefined }); });
-            const cards = cardRows.map((r) => {
+            const cards = yield attachSocialDataToCards(cardRows.map((r) => {
                 var _a, _b, _c;
                 return ({
                     id: r.id,
@@ -69,7 +100,7 @@ exports.RoomModel = {
                     column: r.column_index,
                     imageUrl: (_c = r.image_url) !== null && _c !== void 0 ? _c : undefined
                 });
-            });
+            }));
             return {
                 id: roomRow.id,
                 password: roomRow.password,
@@ -92,6 +123,43 @@ exports.RoomModel = {
                 roomId
             ]);
             return this.findOne({ id: roomId });
+        });
+    },
+    addCardComment(comment) {
+        return __awaiter(this, void 0, void 0, function* () {
+            yield database_1.pool.query('insert into card_comments (id, card_id, user_id, user_name, text) values ($1,$2,$3,$4,$5)', [comment.id, comment.cardId, comment.userId, comment.userName, comment.text]);
+            const { rows } = yield database_1.pool.query('select id, card_id, user_id, user_name, text, created_at from card_comments where id=$1', [comment.id]);
+            const row = rows[0];
+            return {
+                id: row.id,
+                cardId: row.card_id,
+                userId: row.user_id,
+                userName: row.user_name,
+                text: row.text,
+                createdAt: row.created_at
+            };
+        });
+    },
+    getCardReactions(cardId) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const { rows } = yield database_1.pool.query('select card_id, user_id, user_name, emoji from card_reactions where card_id=$1', [cardId]);
+            return rows.map((row) => ({
+                emoji: row.emoji,
+                userId: row.user_id,
+                userName: row.user_name
+            }));
+        });
+    },
+    toggleCardReaction(cardId, userId, userName, emoji) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const existing = yield database_1.pool.query('select 1 from card_reactions where card_id=$1 and user_id=$2 and emoji=$3', [cardId, userId, emoji]);
+            if (existing.rows.length > 0) {
+                yield database_1.pool.query('delete from card_reactions where card_id=$1 and user_id=$2 and emoji=$3', [cardId, userId, emoji]);
+            }
+            else {
+                yield database_1.pool.query('insert into card_reactions (card_id, user_id, user_name, emoji) values ($1,$2,$3,$4)', [cardId, userId, userName, emoji]);
+            }
+            return this.getCardReactions(cardId);
         });
     },
     findOneAndUpdate(filter, update, options) {

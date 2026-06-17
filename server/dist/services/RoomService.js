@@ -159,6 +159,46 @@ class RoomService {
             return room ? this.convertToRoom(room) : null;
         });
     }
+    static addCardComment(roomId, cardId, userId, userName, text) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const trimmed = text.trim();
+            if (!trimmed)
+                return null;
+            const room = yield Room_1.RoomModel.findOne({ id: roomId });
+            if (!room)
+                return null;
+            const card = room.cards.find((currentCard) => currentCard.id === cardId);
+            if (!card)
+                return null;
+            const comment = yield Room_1.RoomModel.addCardComment({
+                id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                cardId,
+                userId,
+                userName,
+                text: trimmed,
+                createdAt: new Date().toISOString()
+            });
+            return {
+                card: Object.assign(Object.assign({}, card), { comments: [...(card.comments || []), comment] }),
+                comment
+            };
+        });
+    }
+    static toggleCardReaction(roomId, cardId, userId, userName, emoji) {
+        return __awaiter(this, void 0, void 0, function* () {
+            if (!types_1.CARD_REACTION_EMOJIS.includes(emoji)) {
+                return null;
+            }
+            const room = yield Room_1.RoomModel.findOne({ id: roomId });
+            if (!room)
+                return null;
+            const card = room.cards.find((currentCard) => currentCard.id === cardId);
+            if (!card)
+                return null;
+            const reactions = yield Room_1.RoomModel.toggleCardReaction(cardId, userId, userName, emoji);
+            return Object.assign(Object.assign({}, card), { reactions });
+        });
+    }
     static updatePhase(roomId, phase, userId, userName) {
         return __awaiter(this, void 0, void 0, function* () {
             console.log('Attempting to update phase:', { roomId, phase, userId });

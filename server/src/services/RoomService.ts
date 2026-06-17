@@ -1,5 +1,5 @@
 import { RoomModel } from '../models/Room';
-import { Room, RoomDocument, User, Card, Phase, CreateRoomOptions, COLUMN_COUNT } from '../types';
+import { Room, RoomDocument, User, Card, CardComment, CardReaction, Phase, CreateRoomOptions, COLUMN_COUNT, CARD_REACTION_EMOJIS } from '../types';
 import bcrypt from 'bcryptjs';
 
 export class RoomService {
@@ -179,6 +179,62 @@ export class RoomService {
       { new: true }
     );
     return room ? this.convertToRoom(room) : null;
+  }
+
+  static async addCardComment(
+    roomId: string,
+    cardId: string,
+    userId: string,
+    userName: string,
+    text: string
+  ): Promise<{ card: Card; comment: CardComment } | null> {
+    const trimmed = text.trim();
+    if (!trimmed) return null;
+
+    const room = await RoomModel.findOne({ id: roomId });
+    if (!room) return null;
+    const card = room.cards.find((currentCard) => currentCard.id === cardId);
+    if (!card) return null;
+
+    const comment = await RoomModel.addCardComment({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      cardId,
+      userId,
+      userName,
+      text: trimmed,
+      createdAt: new Date().toISOString()
+    });
+
+    return {
+      card: {
+        ...card,
+        comments: [...(card.comments || []), comment]
+      },
+      comment
+    };
+  }
+
+  static async toggleCardReaction(
+    roomId: string,
+    cardId: string,
+    userId: string,
+    userName: string,
+    emoji: string
+  ): Promise<Card | null> {
+    if (!CARD_REACTION_EMOJIS.includes(emoji as typeof CARD_REACTION_EMOJIS[number])) {
+      return null;
+    }
+
+    const room = await RoomModel.findOne({ id: roomId });
+    if (!room) return null;
+    const card = room.cards.find((currentCard) => currentCard.id === cardId);
+    if (!card) return null;
+
+    const reactions = await RoomModel.toggleCardReaction(cardId, userId, userName, emoji);
+    return {
+      ...card,
+      reactions
+    };
   }
 
   static async updatePhase(

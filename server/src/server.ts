@@ -409,6 +409,9 @@ const normalizeDiscussionNavigation = (
   };
 };
 
+const canInteractWithCardSocial = (phase: Phase): boolean =>
+  phase === 'creation' || phase === 'voting' || phase === 'discussion';
+
 const getCardTypeByColumn = (column: number): Card['type'] => {
   if (column === 1) return 'disliked';
   if (column === 2) return 'suggestion';
@@ -961,7 +964,9 @@ io.on('connection', (socket) => {
         likes: [],
         dislikes: [],
         column,
-        imageUrl: safeImageUrl
+        imageUrl: safeImageUrl,
+        comments: [],
+        reactions: []
       };
 
       const updatedRoom = await RoomService.addCard(currentUser.roomId, card);
@@ -1053,6 +1058,60 @@ io.on('connection', (socket) => {
     } catch (error) {
       console.error('Error deleting card:', error);
       socket.emit('error', 'Failed to delete card');
+    }
+  });
+
+  socket.on('add-card-comment', async ({ cardId, text }) => {
+    if (!currentUser) return;
+
+    try {
+      const room = await RoomService.getRoom(currentUser.roomId);
+      if (!room || !canInteractWithCardSocial(room.phase)) return;
+      if (typeof cardId !== 'string' || typeof text !== 'string') return;
+
+      const result = await RoomService.addCardComment(
+        currentUser.roomId,
+        cardId,
+        currentUser.id,
+        currentUser.name,
+        text
+      );
+      if (!result) return;
+
+      io.to(currentUser.roomId).emit('card-comment-added', {
+        cardId,
+        comment: result.comment
+      });
+    } catch (error) {
+      console.error('Error adding card comment:', error);
+      socket.emit('error', 'Failed to add card comment');
+    }
+  });
+
+  socket.on('toggle-card-reaction', async ({ cardId, emoji }) => {
+    if (!currentUser) return;
+
+    try {
+      const room = await RoomService.getRoom(currentUser.roomId);
+      if (!room || !canInteractWithCardSocial(room.phase)) return;
+      if (typeof cardId !== 'string' || typeof emoji !== 'string') return;
+
+      const updatedCard = await RoomService.toggleCardReaction(
+        currentUser.roomId,
+        cardId,
+        currentUser.id,
+        currentUser.name,
+        emoji
+      );
+      if (!updatedCard) return;
+
+      io.to(currentUser.roomId).emit('card-reaction-updated', {
+        cardId,
+        reactions: updatedCard.reactions || []
+      });
+    } catch (error) {
+      console.error('Error toggling card reaction:', error);
+      socket.emit('error', 'Failed to toggle card reaction');
     }
   });
 

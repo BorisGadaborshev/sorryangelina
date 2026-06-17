@@ -364,6 +364,7 @@ const normalizeDiscussionNavigation = (room, state) => {
         viewedCardIds
     };
 };
+const canInteractWithCardSocial = (phase) => phase === 'creation' || phase === 'voting' || phase === 'discussion';
 const getCardTypeByColumn = (column) => {
     if (column === 1)
         return 'disliked';
@@ -818,7 +819,9 @@ io.on('connection', (socket) => {
                 likes: [],
                 dislikes: [],
                 column,
-                imageUrl: safeImageUrl
+                imageUrl: safeImageUrl,
+                comments: [],
+                reactions: []
             };
             const updatedRoom = yield RoomService_1.RoomService.addCard(currentUser.roomId, card);
             if (updatedRoom) {
@@ -911,6 +914,50 @@ io.on('connection', (socket) => {
         catch (error) {
             console.error('Error deleting card:', error);
             socket.emit('error', 'Failed to delete card');
+        }
+    }));
+    socket.on('add-card-comment', ({ cardId, text }) => __awaiter(void 0, void 0, void 0, function* () {
+        if (!currentUser)
+            return;
+        try {
+            const room = yield RoomService_1.RoomService.getRoom(currentUser.roomId);
+            if (!room || !canInteractWithCardSocial(room.phase))
+                return;
+            if (typeof cardId !== 'string' || typeof text !== 'string')
+                return;
+            const result = yield RoomService_1.RoomService.addCardComment(currentUser.roomId, cardId, currentUser.id, currentUser.name, text);
+            if (!result)
+                return;
+            io.to(currentUser.roomId).emit('card-comment-added', {
+                cardId,
+                comment: result.comment
+            });
+        }
+        catch (error) {
+            console.error('Error adding card comment:', error);
+            socket.emit('error', 'Failed to add card comment');
+        }
+    }));
+    socket.on('toggle-card-reaction', ({ cardId, emoji }) => __awaiter(void 0, void 0, void 0, function* () {
+        if (!currentUser)
+            return;
+        try {
+            const room = yield RoomService_1.RoomService.getRoom(currentUser.roomId);
+            if (!room || !canInteractWithCardSocial(room.phase))
+                return;
+            if (typeof cardId !== 'string' || typeof emoji !== 'string')
+                return;
+            const updatedCard = yield RoomService_1.RoomService.toggleCardReaction(currentUser.roomId, cardId, currentUser.id, currentUser.name, emoji);
+            if (!updatedCard)
+                return;
+            io.to(currentUser.roomId).emit('card-reaction-updated', {
+                cardId,
+                reactions: updatedCard.reactions || []
+            });
+        }
+        catch (error) {
+            console.error('Error toggling card reaction:', error);
+            socket.emit('error', 'Failed to toggle card reaction');
         }
     }));
     socket.on('move-card', ({ cardId, column }) => __awaiter(void 0, void 0, void 0, function* () {

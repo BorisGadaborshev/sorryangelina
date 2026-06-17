@@ -1,5 +1,5 @@
 import { makeAutoObservable, runInAction } from 'mobx';
-import { AuthProfile, Card, ChatMessage, DEFAULT_COLUMN_TITLES, DiscussionNavigationState, FacilitatorAnnouncement, Phase, PhaseTimerState, RetroRatingState, Room, RoomState, SprintVipState, Team, User, WhiteboardStroke } from '../types';
+import { AuthProfile, Card, CardComment, CardReaction, ChatMessage, DEFAULT_COLUMN_TITLES, DiscussionNavigationState, FacilitatorAnnouncement, Phase, PhaseTimerState, RetroRatingState, Room, RoomState, SprintVipState, Team, User, WhiteboardStroke } from '../types';
 import { Socket } from 'socket.io-client';
 import { SocketService } from '../services/socket';
 
@@ -343,6 +343,24 @@ export class RetroStore {
       const index = this.cards.findIndex(c => c.id === updatedCard.id);
       if (index !== -1) {
         this.cards[index] = updatedCard;
+      }
+    });
+  }
+
+  addCardComment(cardId: string, comment: CardComment) {
+    runInAction(() => {
+      const card = this.cards.find((currentCard) => currentCard.id === cardId);
+      if (card) {
+        card.comments = [...(card.comments || []), comment];
+      }
+    });
+  }
+
+  setCardReactions(cardId: string, reactions: CardReaction[]) {
+    runInAction(() => {
+      const card = this.cards.find((currentCard) => currentCard.id === cardId);
+      if (card) {
+        card.reactions = reactions;
       }
     });
   }

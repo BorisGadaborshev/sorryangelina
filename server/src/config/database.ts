@@ -76,6 +76,24 @@ export const connectDB = async (): Promise<void> => {
       primary key (card_id, user_id)
     );
 
+    create table if not exists card_comments (
+      id text primary key,
+      card_id text not null references cards(id) on delete cascade,
+      user_id text not null,
+      user_name text not null,
+      text text not null,
+      created_at timestamptz default now()
+    );
+
+    create table if not exists card_reactions (
+      card_id text not null references cards(id) on delete cascade,
+      user_id text not null,
+      user_name text not null,
+      emoji text not null,
+      created_at timestamptz default now(),
+      primary key (card_id, user_id, emoji)
+    );
+
     alter table rooms add column if not exists team_id text references teams(id) on delete set null;
     alter table cards add column if not exists image_url text;
     alter table room_users add column if not exists mood text;
@@ -84,6 +102,8 @@ export const connectDB = async (): Promise<void> => {
     alter table rooms add constraint rooms_phase_check check (phase in ('creation','voting','discussion','rating'));
 
     create index if not exists idx_cards_room on cards(room_id);
+    create index if not exists idx_card_comments_card on card_comments(card_id);
+    create index if not exists idx_card_reactions_card on card_reactions(card_id);
     create index if not exists idx_users_room on room_users(room_id);
     create unique index if not exists idx_accounts_name_ci on accounts ((lower(name)));
   `);

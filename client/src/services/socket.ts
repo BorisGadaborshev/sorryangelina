@@ -1,6 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { RetroStore } from '../store/RetroStore';
-import { Room, RoomState, User, Card, FacilitatorAnnouncement, DiscussionNavigationState, Phase, PhaseTimerState, ChatMessage, Mood, RetroRatingState, SprintVipState, WhiteboardStroke, CreateRoomOptions } from '../types';
+import { Room, RoomState, User, Card, CardComment, CardReaction, FacilitatorAnnouncement, DiscussionNavigationState, Phase, PhaseTimerState, ChatMessage, Mood, RetroRatingState, SprintVipState, WhiteboardStroke, CreateRoomOptions } from '../types';
 
 export class SocketService {
   private socket: Socket;
@@ -183,6 +183,14 @@ export class SocketService {
       console.log('Card voted:', { cardId, likes, dislikes });
       this.store.updateVotes(cardId, likes, dislikes);
       this.store.clearVoteError();
+    });
+
+    this.socket.on('card-comment-added', ({ cardId, comment }: { cardId: string; comment: CardComment }) => {
+      this.store.addCardComment(cardId, comment);
+    });
+
+    this.socket.on('card-reaction-updated', ({ cardId, reactions }: { cardId: string; reactions: CardReaction[] }) => {
+      this.store.setCardReactions(cardId, reactions);
     });
 
     this.socket.on('vote-error', ({ cardId, message }: { cardId: string; message: string }) => {
@@ -464,6 +472,14 @@ export class SocketService {
   voteCard(cardId: string, voteType: 'like' | 'dislike'): void {
     console.log('Voting for card:', { cardId, voteType });
     this.socket.emit('vote-card', { cardId, voteType });
+  }
+
+  addCardComment(cardId: string, text: string): void {
+    this.socket.emit('add-card-comment', { cardId, text });
+  }
+
+  toggleCardReaction(cardId: string, emoji: string): void {
+    this.socket.emit('toggle-card-reaction', { cardId, emoji });
   }
 
   async changePhase(phase: Phase): Promise<void> {

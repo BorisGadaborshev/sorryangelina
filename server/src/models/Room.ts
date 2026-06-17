@@ -1,6 +1,51 @@
 // Postgres access helpers
 import { pool } from '../config/database';
-import { Room, RoomDocument, User, Card, COLUMN_COUNT } from '../types';
+import { Room, RoomDocument, User, Card, CardComment, CardReaction, COLUMN_COUNT } from '../types';
+
+const attachSocialDataToCards = async (cards: Card[]): Promise<Card[]> => {
+  if (cards.length === 0) return cards;
+
+  const cardIds = cards.map((card) => card.id);
+  const commentsRes = await pool.query(
+    'select id, card_id, user_id, user_name, text, created_at from card_comments where card_id = any($1::text[]) order by created_at asc',
+    [cardIds]
+  );
+  const reactionsRes = await pool.query(
+    'select card_id, user_id, user_name, emoji from card_reactions where card_id = any($1::text[])',
+    [cardIds]
+  );
+
+  const commentsByCard = new Map<string, CardComment[]>();
+  for (const row of commentsRes.rows as Array<{ id: string; card_id: string; user_id: string; user_name: string; text: string; created_at: string }>) {
+    const entry = commentsByCard.get(row.card_id) || [];
+    entry.push({
+      id: row.id,
+      cardId: row.card_id,
+      userId: row.user_id,
+      userName: row.user_name,
+      text: row.text,
+      createdAt: row.created_at
+    });
+    commentsByCard.set(row.card_id, entry);
+  }
+
+  const reactionsByCard = new Map<string, CardReaction[]>();
+  for (const row of reactionsRes.rows as Array<{ card_id: string; user_id: string; user_name: string; emoji: string }>) {
+    const entry = reactionsByCard.get(row.card_id) || [];
+    entry.push({
+      emoji: row.emoji,
+      userId: row.user_id,
+      userName: row.user_name
+    });
+    reactionsByCard.set(row.card_id, entry);
+  }
+
+  return cards.map((card) => ({
+    ...card,
+    comments: commentsByCard.get(card.id) || [],
+    reactions: reactionsByCard.get(card.id) || []
+  }));
+};
 
 export const RoomModel = {
   async create(doc: RoomDocument): Promise<RoomDocument> {
@@ -56,7 +101,7 @@ export const RoomModel = {
     }
     const userRows = usersRes.rows as Array<{ id: string; name: string; role: User['role']; is_ready: boolean; mood: User['mood'] | null }>;
     const users: User[] = userRows.map((r) => ({ id: r.id, name: r.name, roomId: roomRow.id, role: r.role, isReady: r.is_ready, mood: r.mood ?? undefined }));
-    const cards: Card[] = cardRows.map((r) => ({
+    const cards: Card[] = await attachSocialDataToCards(cardRows.map((r) => ({
       id: r.id,
       text: r.text,
       type: r.type,
@@ -65,7 +110,7 @@ export const RoomModel = {
       dislikes: cardIdToVotes.get(r.id)?.dislikes || [],
       column: r.column_index,
       imageUrl: r.image_url ?? undefined
-    }));
+    })));
     return {
       id: roomRow.id,
       password: roomRow.password,
@@ -87,6 +132,54 @@ export const RoomModel = {
       roomId
     ]);
     return this.findOne({ id: roomId });
+  },
+
+  async addCardComment(comment: CardComment): Promise<CardComment> {
+    await pool.query(
+      'insert into card_comments (id, card_id, user_id, user_name, text) values ($1,$2,$3,$4,$5)',
+      [comment.id, comment.cardId, comment.userId, comment.userName, comment.text]
+    );
+    const { rows } = await pool.query(
+      'select id, card_id, user_id, user_name, text, created_at from card_comments where id=$1',
+      [comment.id]
+    );
+    const row = rows[0] as { id: string; card_id: string; user_id: string; user_name: string; text: string; created_at: string };
+    return {
+      id: row.id,
+      cardId: row.card_id,
+      userId: row.user_id,
+      userName: row.user_name,
+      text: row.text,
+      createdAt: row.created_at
+    };
+  },
+
+  async getCardReactions(cardId: string): Promise<CardReaction[]> {
+    const { rows } = await pool.query(
+      'select card_id, user_id, user_name, emoji from card_reactions where card_id=$1',
+      [cardId]
+    );
+    return (rows as Array<{ card_id: string; user_id: string; user_name: string; emoji: string }>).map((row) => ({
+      emoji: row.emoji,
+      userId: row.user_id,
+      userName: row.user_name
+    }));
+  },
+
+  async toggleCardReaction(cardId: string, userId: string, userName: string, emoji: string): Promise<CardReaction[]> {
+    const existing = await pool.query(
+      'select 1 from card_reactions where card_id=$1 and user_id=$2 and emoji=$3',
+      [cardId, userId, emoji]
+    );
+    if (existing.rows.length > 0) {
+      await pool.query('delete from card_reactions where card_id=$1 and user_id=$2 and emoji=$3', [cardId, userId, emoji]);
+    } else {
+      await pool.query(
+        'insert into card_reactions (card_id, user_id, user_name, emoji) values ($1,$2,$3,$4)',
+        [cardId, userId, userName, emoji]
+      );
+    }
+    return this.getCardReactions(cardId);
   },
 
   async findOneAndUpdate(filter: any, update: any, options?: { new?: boolean }): Promise<RoomDocument | null> {
