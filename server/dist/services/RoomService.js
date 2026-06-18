@@ -417,31 +417,35 @@ class RoomService {
             })));
         });
     }
-    static restoreSession(roomId, userId, newSocketId) {
+    static restoreSession(roomId, userId, newSocketId, username) {
         var _a;
         return __awaiter(this, void 0, void 0, function* () {
-            console.log('Starting session restoration:', { roomId, userId, newSocketId });
+            console.log('Starting session restoration:', { roomId, userId, newSocketId, username });
             const room = yield Room_1.RoomModel.findOne({ id: roomId });
             if (!room) {
                 console.log('Room not found during session restoration');
                 return { room: null, user: null };
             }
-            const existingUser = room.users.find(user => user.id === userId);
+            let existingUser = room.users.find(user => user.id === userId);
+            if (!existingUser && username) {
+                existingUser = room.users.find(user => user.name === username);
+            }
             if (!existingUser) {
                 console.log('User not found during session restoration');
                 return { room: null, user: null };
             }
-            console.log('Found existing user:', existingUser);
-            const role = existingUser.role || 'user';
+            const resolvedUser = existingUser;
+            console.log('Found existing user:', resolvedUser);
+            const role = resolvedUser.role || 'user';
             console.log('Role determination during restore:', {
-                username: existingUser.name,
+                username: resolvedUser.name,
                 assignedRole: role,
-                currentRole: existingUser.role
+                currentRole: resolvedUser.role
             });
             // Update socket ID and role for the existing user
             const updatedRoom = yield Room_1.RoomModel.findOneAndUpdate({
                 id: roomId,
-                'users.id': userId
+                'users.name': resolvedUser.name
             }, {
                 $set: {
                     'users.$.id': newSocketId,
@@ -454,7 +458,7 @@ class RoomService {
             }
             const healedRoom = yield this.ensureRoomHasAdmin(roomId);
             const roomDoc = healedRoom !== null && healedRoom !== void 0 ? healedRoom : updatedRoom;
-            const syncedUser = (_a = roomDoc.users.find((user) => user.name === existingUser.name)) !== null && _a !== void 0 ? _a : Object.assign(Object.assign({}, existingUser), { id: newSocketId, role });
+            const syncedUser = (_a = roomDoc.users.find((user) => user.name === resolvedUser.name)) !== null && _a !== void 0 ? _a : Object.assign(Object.assign({}, resolvedUser), { id: newSocketId, role });
             const updatedUser = Object.assign(Object.assign({}, syncedUser), { id: newSocketId });
             console.log('Session restoration complete:', {
                 user: updatedUser,
@@ -465,9 +469,16 @@ class RoomService {
             console.log('Converted room after restoration:', {
                 users: convertedRoom.users.map(u => ({ name: u.name, role: u.role }))
             });
+            const convertedUser = convertedRoom.users.find((user) => user.name === resolvedUser.name);
             return {
                 room: convertedRoom,
-                user: updatedUser
+                user: convertedUser
+                    ? Object.assign(Object.assign({}, convertedUser), { id: newSocketId }) : {
+                    id: newSocketId,
+                    name: resolvedUser.name,
+                    roomId,
+                    role
+                }
             };
         });
     }

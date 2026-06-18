@@ -621,7 +621,9 @@ const emitSprintVipStateToSocket = (socket, room) => {
 };
 const handleUserLeavingRoom = (socket, user) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
-    const roomId = user.roomId;
+    const roomId = user.roomId || (typeof socket.data.roomId === 'string' ? socket.data.roomId : '');
+    if (!roomId)
+        return null;
     const shouldRemoveFromRoom = removeRoomPresence(roomId, user.name, socket.id);
     socket.leave(roomId);
     delete socket.data.userId;
@@ -673,15 +675,15 @@ io.on('connection', (socket) => {
         timestamp: new Date().toISOString()
     });
     let currentUser = null;
-    socket.on('restore-session', ({ roomId, userId, token }) => __awaiter(void 0, void 0, void 0, function* () {
-        console.log('Attempting to restore session:', { roomId, userId });
+    socket.on('restore-session', ({ roomId, userId, username, token }) => __awaiter(void 0, void 0, void 0, function* () {
+        console.log('Attempting to restore session:', { roomId, userId, username });
         const auth = (0, jwt_1.verifyAuthToken)(token);
         if (!auth) {
             socket.emit('session-expired');
             return;
         }
         try {
-            const { room, user } = yield RoomService_1.RoomService.restoreSession(roomId, userId, socket.id);
+            const { room, user } = yield RoomService_1.RoomService.restoreSession(roomId, userId, socket.id, username || auth.name);
             if (!room || !user) {
                 console.log('Failed to restore session:', { roomId, userId });
                 socket.emit('session-expired');
@@ -692,18 +694,25 @@ io.on('connection', (socket) => {
                 return;
             }
             socket.join(roomId);
-            currentUser = user;
-            socket.data.userId = user.id;
-            socket.data.userName = user.name;
+            currentUser = Object.assign(Object.assign({}, user), { roomId });
+            socket.data.userId = currentUser.id;
+            socket.data.userName = currentUser.name;
+            socket.data.roomId = roomId;
             addRoomPresence(roomId, user.name, socket.id);
-            console.log('Session restored successfully:', { roomId, userId });
+            console.log('Session restored successfully:', { roomId, userId: currentUser.id });
             socket.emit('room-joined', {
                 room,
                 state: {
                     cards: room.cards,
                     phase: room.phase,
                     users: room.users
-                }
+                },
+                userId: currentUser.id
+            });
+            socket.to(roomId).emit('state-updated', {
+                cards: room.cards,
+                phase: room.phase,
+                users: room.users
             });
             emitTimerToSocket(socket, roomId);
             socket.emit('chat-history', { messages: roomChats.get(roomId) || [] });
@@ -752,6 +761,7 @@ io.on('connection', (socket) => {
             socket.join(roomId);
             socket.data.userId = socket.id;
             socket.data.userName = effectiveUsername;
+            socket.data.roomId = roomId;
             currentUser = room.users.find((user) => user.id === socket.id) || {
                 id: socket.id,
                 name: effectiveUsername,
@@ -819,10 +829,9 @@ io.on('connection', (socket) => {
                 roomId,
                 role: 'user'
             };
-            // If user exists, we'll reuse their original ID for card ownership
             if (existingUser) {
                 console.log('User rejoining room:', { roomId, username: effectiveUsername });
-                user.id = existingUser.id;
+                user.role = existingUser.role || 'user';
             }
             yield RoomService_1.RoomService.addUser(roomId, user);
             const room = yield RoomService_1.RoomService.getRoom(roomId);
@@ -836,6 +845,7 @@ io.on('connection', (socket) => {
                 ? Object.assign(Object.assign({}, joinedUser), { roomId }) : user;
             socket.data.userId = currentUser.id;
             socket.data.userName = effectiveUsername;
+            socket.data.roomId = roomId;
             addRoomPresence(roomId, effectiveUsername, socket.id);
             console.log('User joined room successfully:', { roomId, username: effectiveUsername, isRejoin: !!existingUser });
             socket.emit('room-joined', {

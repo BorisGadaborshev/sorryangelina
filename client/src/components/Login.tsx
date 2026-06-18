@@ -385,6 +385,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
     setIsLoading(true);
     store.setError(null);
     try {
+      sessionStorage.setItem('roomPassword', createRoomPassword.trim());
       await store.socketService?.createRoom(
         createRoomId.trim(),
         createRoomPassword.trim() || undefined,
@@ -409,6 +410,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
     setJoinRoomError(null);
     store.setError(null);
     try {
+      sessionStorage.setItem('roomPassword', password);
       await store.socketService?.joinRoom(roomId, password, store.authProfile.name, store.authProfile.token);
       setIsJoinDialogOpen(false);
     } catch (error) {

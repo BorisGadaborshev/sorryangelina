@@ -748,7 +748,9 @@ const emitSprintVipStateToSocket = (socket: Socket, room: Room): void => {
 };
 
 const handleUserLeavingRoom = async (socket: Socket, user: User): Promise<Room | null> => {
-  const roomId = user.roomId;
+  const roomId = user.roomId || (typeof socket.data.roomId === 'string' ? socket.data.roomId : '');
+  if (!roomId) return null;
+
   const shouldRemoveFromRoom = removeRoomPresence(roomId, user.name, socket.id);
 
   socket.leave(roomId);
@@ -809,16 +811,21 @@ io.on('connection', (socket) => {
   
   let currentUser: User | null = null;
 
-  socket.on('restore-session', async ({ roomId, userId, token }) => {
-    console.log('Attempting to restore session:', { roomId, userId });
+  socket.on('restore-session', async ({ roomId, userId, username, token }) => {
+    console.log('Attempting to restore session:', { roomId, userId, username });
     const auth = verifyAuthToken(token);
     if (!auth) {
       socket.emit('session-expired');
       return;
     }
-    
+
     try {
-      const { room, user } = await RoomService.restoreSession(roomId, userId, socket.id);
+      const { room, user } = await RoomService.restoreSession(
+        roomId,
+        userId,
+        socket.id,
+        username || auth.name
+      );
       
       if (!room || !user) {
         console.log('Failed to restore session:', { roomId, userId });
@@ -831,19 +838,26 @@ io.on('connection', (socket) => {
       }
 
       socket.join(roomId);
-      currentUser = user;
-      socket.data.userId = user.id;
-      socket.data.userName = user.name;
+      currentUser = { ...user, roomId };
+      socket.data.userId = currentUser.id;
+      socket.data.userName = currentUser.name;
+      socket.data.roomId = roomId;
       addRoomPresence(roomId, user.name, socket.id);
       
-      console.log('Session restored successfully:', { roomId, userId });
+      console.log('Session restored successfully:', { roomId, userId: currentUser.id });
       socket.emit('room-joined', { 
         room, 
         state: { 
           cards: room.cards, 
           phase: room.phase, 
           users: room.users 
-        } 
+        },
+        userId: currentUser.id
+      });
+      socket.to(roomId).emit('state-updated', {
+        cards: room.cards,
+        phase: room.phase,
+        users: room.users
       });
       emitTimerToSocket(socket, roomId);
       socket.emit('chat-history', { messages: roomChats.get(roomId) || [] });
@@ -895,6 +909,7 @@ io.on('connection', (socket) => {
       socket.join(roomId);
       socket.data.userId = socket.id;
       socket.data.userName = effectiveUsername;
+      socket.data.roomId = roomId;
       currentUser = room.users.find((user) => user.id === socket.id) || {
         id: socket.id,
         name: effectiveUsername,
@@ -967,10 +982,9 @@ io.on('connection', (socket) => {
         role: 'user'
       };
 
-      // If user exists, we'll reuse their original ID for card ownership
       if (existingUser) {
         console.log('User rejoining room:', { roomId, username: effectiveUsername });
-        user.id = existingUser.id;
+        user.role = existingUser.role || 'user';
       }
 
       await RoomService.addUser(roomId, user);
@@ -989,6 +1003,7 @@ io.on('connection', (socket) => {
         : user;
       socket.data.userId = currentUser.id;
       socket.data.userName = effectiveUsername;
+      socket.data.roomId = roomId;
       addRoomPresence(roomId, effectiveUsername, socket.id);
       
       console.log('User joined room successfully:', { roomId, username: effectiveUsername, isRejoin: !!existingUser });

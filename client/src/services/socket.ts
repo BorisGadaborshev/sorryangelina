@@ -7,6 +7,8 @@ export class SocketService {
   private store: RetroStore;
   private isRestoringSession = false;
   private sessionSyncRequired = false;
+  private lastSessionSyncAt = 0;
+  private static readonly SESSION_SYNC_COOLDOWN_MS = 1500;
 
   constructor(store: RetroStore) {
     console.log('Initializing socket connection...');
@@ -151,6 +153,7 @@ export class SocketService {
       this.store.setError(null);
       this.store.setReconnecting(false);
       this.sessionSyncRequired = false;
+      this.lastSessionSyncAt = Date.now();
     });
 
     this.socket.on('state-updated', (state: RoomState) => {
@@ -275,6 +278,14 @@ export class SocketService {
 
   private bindLifecycleHandlers(): void {
     const resumeSession = () => {
+      const hasSession = Boolean(
+        localStorage.getItem('roomId') &&
+        localStorage.getItem('username') &&
+        this.store.authProfile?.token
+      );
+      if (!hasSession) return;
+
+      this.sessionSyncRequired = true;
       if (!this.store.canRenderBoard) {
         this.store.hydrateBoardFromCache();
       }
@@ -294,7 +305,9 @@ export class SocketService {
     });
 
     window.addEventListener('focus', () => {
-      resumeSession();
+      if (document.visibilityState === 'visible') {
+        resumeSession();
+      }
     });
   }
 
@@ -308,7 +321,11 @@ export class SocketService {
       return;
     }
 
-    if (!this.sessionSyncRequired && this.socket.connected && this.store.room) {
+    const now = Date.now();
+    if (
+      !this.sessionSyncRequired &&
+      now - this.lastSessionSyncAt < SocketService.SESSION_SYNC_COOLDOWN_MS
+    ) {
       return;
     }
 
@@ -335,11 +352,23 @@ export class SocketService {
       await this.restoreSession(roomId, userId, username, token);
       this.store.setError(null);
       this.store.setReconnecting(false);
+      this.lastSessionSyncAt = Date.now();
     } catch (error) {
       console.error('Failed to restore session after reconnect:', error);
-      if (!this.store.room) {
-        this.store.clearSession();
+      try {
+        const roomPassword = sessionStorage.getItem('roomPassword') || '';
+        await this.joinRoom(roomId, roomPassword, username, token);
+        this.store.setError(null);
         this.store.setReconnecting(false);
+        this.sessionSyncRequired = false;
+        this.lastSessionSyncAt = Date.now();
+      } catch (joinError) {
+        console.error('Rejoin failed after restore error:', joinError);
+        this.sessionSyncRequired = true;
+        if (!this.store.room) {
+          this.store.clearSession();
+          this.store.setReconnecting(false);
+        }
       }
     } finally {
       this.isRestoringSession = false;
@@ -654,9 +683,7 @@ export class SocketService {
           this.socket.off('room-joined', handleSuccess);
           this.socket.off('session-expired', handleExpired);
           this.socket.off('error', handleError);
-          this.store.setRoom(null);
-          this.store.setReconnecting(false);
-          this.sessionSyncRequired = false;
+          this.sessionSyncRequired = true;
           reject(new Error('Session expired'));
         };
 
@@ -692,6 +719,7 @@ export class SocketService {
           this.store.updateState(state);
           this.store.setReconnecting(false);
           this.sessionSyncRequired = false;
+          this.lastSessionSyncAt = Date.now();
           resolve();
         };
 

@@ -493,38 +493,48 @@ export class RoomService {
     }));
   }
 
-  static async restoreSession(roomId: string, userId: string, newSocketId: string): Promise<{ room: Room | null, user: User | null }> {
-    console.log('Starting session restoration:', { roomId, userId, newSocketId });
+  static async restoreSession(
+    roomId: string,
+    userId: string,
+    newSocketId: string,
+    username?: string
+  ): Promise<{ room: Room | null, user: User | null }> {
+    console.log('Starting session restoration:', { roomId, userId, newSocketId, username });
     const room = await RoomModel.findOne({ id: roomId });
     if (!room) {
       console.log('Room not found during session restoration');
       return { room: null, user: null };
     }
 
-    const existingUser = room.users.find(user => user.id === userId);
+    let existingUser = room.users.find(user => user.id === userId);
+    if (!existingUser && username) {
+      existingUser = room.users.find(user => user.name === username);
+    }
     if (!existingUser) {
       console.log('User not found during session restoration');
       return { room: null, user: null };
     }
 
-    console.log('Found existing user:', existingUser);
+    const resolvedUser = existingUser;
 
-    const role = existingUser.role || 'user' as const;
+    console.log('Found existing user:', resolvedUser);
+
+    const role = resolvedUser.role || 'user' as const;
 
     console.log('Role determination during restore:', {
-      username: existingUser.name,
+      username: resolvedUser.name,
       assignedRole: role,
-      currentRole: existingUser.role
+      currentRole: resolvedUser.role
     });
 
     // Update socket ID and role for the existing user
     const updatedRoom = await RoomModel.findOneAndUpdate(
-      { 
+      {
         id: roomId,
-        'users.id': userId 
+        'users.name': resolvedUser.name
       },
-      { 
-        $set: { 
+      {
+        $set: {
           'users.$.id': newSocketId,
           'users.$.role': role
         }
@@ -539,8 +549,8 @@ export class RoomService {
 
     const healedRoom = await this.ensureRoomHasAdmin(roomId);
     const roomDoc = healedRoom ?? updatedRoom;
-    const syncedUser = roomDoc.users.find((user) => user.name === existingUser.name) ?? {
-      ...existingUser,
+    const syncedUser = roomDoc.users.find((user) => user.name === resolvedUser.name) ?? {
+      ...resolvedUser,
       id: newSocketId,
       role
     };
@@ -561,9 +571,18 @@ export class RoomService {
       users: convertedRoom.users.map(u => ({ name: u.name, role: u.role }))
     });
 
+    const convertedUser = convertedRoom.users.find((user) => user.name === resolvedUser.name);
+
     return {
       room: convertedRoom,
-      user: updatedUser
+      user: convertedUser
+        ? { ...convertedUser, id: newSocketId }
+        : {
+            id: newSocketId,
+            name: resolvedUser.name,
+            roomId,
+            role
+          }
     };
   }
 
