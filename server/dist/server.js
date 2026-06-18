@@ -49,6 +49,7 @@ app.use((0, cors_1.default)({
         ]
         : "http://localhost:3000",
     methods: ['GET', 'POST', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Subo-Access'],
     credentials: true
 }));
 app.use(express_1.default.json());
@@ -152,6 +153,18 @@ app.post('/api/teams/:teamId/join', (req, res) => __awaiter(void 0, void 0, void
     }
 }));
 app.get('/api/teams/:teamId/members', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const authHeader = req.headers.authorization;
+    const token = (authHeader === null || authHeader === void 0 ? void 0 : authHeader.startsWith('Bearer ')) ? authHeader.slice(7) : undefined;
+    const auth = (0, jwt_1.verifyAuthToken)(token);
+    const accessCode = typeof req.headers['x-subo-access'] === 'string'
+        ? req.headers['x-subo-access']
+        : undefined;
+    if (req.params.teamId === TeamService_1.BUILTIN_TEAM_ID) {
+        if (!TeamService_1.TeamService.canAccessBuiltinRoster(auth, accessCode)) {
+            res.status(403).json({ error: 'Access code required' });
+            return;
+        }
+    }
     try {
         const members = yield TeamService_1.TeamService.getTeamRosterNames(req.params.teamId);
         res.json({ members });
@@ -212,7 +225,12 @@ app.delete('/api/rooms/:roomId', (req, res) => __awaiter(void 0, void 0, void 0,
         res.status(500).json({ error: 'Failed to delete room' });
     }
 }));
-app.get('/api/auth/fixed-users', (req, res) => {
+app.post('/api/auth/fixed-users', (req, res) => {
+    const { accessCode } = req.body;
+    if (!TeamService_1.TeamService.verifyBuiltinAccessCode(accessCode)) {
+        res.status(403).json({ error: 'Invalid access code' });
+        return;
+    }
     res.json({ users: AccountService_1.AccountService.getFixedUsers() });
 });
 const buildAuthResponse = (profile) => {

@@ -16,6 +16,14 @@ const slugifyTeamId = (name: string): string => {
 };
 
 export class TeamService {
+  static verifyBuiltinAccessCode(code: string | undefined): boolean {
+    return code?.trim() === BUILTIN_TEAM_PASSWORD;
+  }
+
+  static canAccessBuiltinRoster(auth: { type: string } | null, accessCode?: string): boolean {
+    return auth?.type === 'fixed' || this.verifyBuiltinAccessCode(accessCode);
+  }
+
   static async ensureBuiltinTeam(): Promise<Team> {
     const existing = await TeamModel.findOne({ id: BUILTIN_TEAM_ID });
     if (existing) {
@@ -70,13 +78,15 @@ export class TeamService {
   static async getAllTeams(): Promise<AvailableTeam[]> {
     await this.ensureBuiltinTeam();
     const teams = await TeamModel.find();
-    return teams.map((team) => ({
-      id: team.id,
-      name: team.name,
-      owner: team.owner,
-      membersCount: team.members.length,
-      createdAt: team.createdAt
-    }));
+    return teams
+      .filter((team) => team.id !== BUILTIN_TEAM_ID)
+      .map((team) => ({
+        id: team.id,
+        name: team.name,
+        owner: team.owner,
+        membersCount: team.members.length,
+        createdAt: team.createdAt
+      }));
   }
 
   static async getTeam(teamId: string): Promise<Team | null> {

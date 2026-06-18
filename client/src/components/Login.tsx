@@ -82,9 +82,13 @@ const Login: React.FC<Props> = observer(({ store }) => {
   const selectedTeam = store.selectedTeam;
   const isFixedAuth = store.authProfile?.type === 'fixed';
 
-  const fetchFixedUsers = useCallback(async () => {
+  const fetchFixedUsers = useCallback(async (accessCode: string) => {
     try {
-      const response = await fetch(`${getApiBase()}/api/auth/fixed-users`);
+      const response = await fetch(`${getApiBase()}/api/auth/fixed-users`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accessCode }),
+      });
       if (!response.ok) {
         throw new Error('Failed to fetch fixed users');
       }
@@ -92,6 +96,9 @@ const Login: React.FC<Props> = observer(({ store }) => {
       setFixedUsers(data.users);
       setFixedName((prev) => (prev || data.users[0] || ''));
     } catch (error) {
+      setIsFixedUsersUnlocked(false);
+      localStorage.removeItem('fixedUsersUnlocked');
+      localStorage.removeItem('suboAccessCode');
       store.setError('Не удалось загрузить фиксированные ФИО');
     }
   }, [store]);
@@ -134,8 +141,15 @@ const Login: React.FC<Props> = observer(({ store }) => {
   }, [store]);
 
   useEffect(() => {
-    fetchFixedUsers();
-  }, [fetchFixedUsers]);
+    if (!isFixedUsersUnlocked) return;
+    const accessCode = localStorage.getItem('suboAccessCode');
+    if (!accessCode) {
+      setIsFixedUsersUnlocked(false);
+      localStorage.removeItem('fixedUsersUnlocked');
+      return;
+    }
+    void fetchFixedUsers(accessCode);
+  }, [fetchFixedUsers, isFixedUsersUnlocked]);
 
   useEffect(() => {
     if (store.authProfile && (!isFixedAuth || isChoosingTeam)) {
@@ -545,6 +559,8 @@ const Login: React.FC<Props> = observer(({ store }) => {
     }
     setIsFixedUsersUnlocked(true);
     localStorage.setItem('fixedUsersUnlocked', 'true');
+    localStorage.setItem('suboAccessCode', normalized);
+    void fetchFixedUsers(normalized);
     setIsSuboDialogOpen(false);
     setSuboInput('');
     setSuboError(null);
@@ -553,7 +569,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
   const renderAuthBlock = () => (
     <>
       <Tabs value={authTab} onChange={(_, value) => setAuthTab(value)} variant="scrollable" allowScrollButtonsMobile sx={{ mb: 2 }}>
-        <Tab label="Команда &quot;Карты и Партнеры&quot;" />
+        <Tab label={isFixedUsersUnlocked ? 'Команда "Карты и Партнеры"' : 'Вход по СУБО'} />
         <Tab label="Вход в учетку" />
         <Tab label="Новая учетка" />
         <Tab label="Гость" />
@@ -567,7 +583,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
                 Для просмотра списка ФИО введите номер СУБО.
               </Typography>
               <Button fullWidth variant="outlined" onClick={() => setIsSuboDialogOpen(true)}>
-                Команда "Карты и Партнеры"
+                Ввести номер СУБО
               </Button>
             </Box>
           ) : (

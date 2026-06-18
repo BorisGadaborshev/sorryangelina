@@ -41,6 +41,7 @@ app.use(cors({
       ]
     : "http://localhost:3000",
   methods: ['GET', 'POST', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Subo-Access'],
   credentials: true
 }));
 
@@ -161,6 +162,20 @@ app.post('/api/teams/:teamId/join', async (req, res) => {
 });
 
 app.get('/api/teams/:teamId/members', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
+  const auth = verifyAuthToken(token);
+  const accessCode = typeof req.headers['x-subo-access'] === 'string'
+    ? req.headers['x-subo-access']
+    : undefined;
+
+  if (req.params.teamId === BUILTIN_TEAM_ID) {
+    if (!TeamService.canAccessBuiltinRoster(auth, accessCode)) {
+      res.status(403).json({ error: 'Access code required' });
+      return;
+    }
+  }
+
   try {
     const members = await TeamService.getTeamRosterNames(req.params.teamId);
     res.json({ members });
@@ -227,7 +242,12 @@ app.delete('/api/rooms/:roomId', async (req, res) => {
   }
 });
 
-app.get('/api/auth/fixed-users', (req, res) => {
+app.post('/api/auth/fixed-users', (req, res) => {
+  const { accessCode } = req.body as { accessCode?: string };
+  if (!TeamService.verifyBuiltinAccessCode(accessCode)) {
+    res.status(403).json({ error: 'Invalid access code' });
+    return;
+  }
   res.json({ users: AccountService.getFixedUsers() });
 });
 

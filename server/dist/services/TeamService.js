@@ -27,6 +27,12 @@ const slugifyTeamId = (name) => {
     return latin || `team-${Date.now()}`;
 };
 class TeamService {
+    static verifyBuiltinAccessCode(code) {
+        return (code === null || code === void 0 ? void 0 : code.trim()) === BUILTIN_TEAM_PASSWORD;
+    }
+    static canAccessBuiltinRoster(auth, accessCode) {
+        return (auth === null || auth === void 0 ? void 0 : auth.type) === 'fixed' || this.verifyBuiltinAccessCode(accessCode);
+    }
     static ensureBuiltinTeam() {
         return __awaiter(this, void 0, void 0, function* () {
             const existing = yield Team_1.TeamModel.findOne({ id: exports.BUILTIN_TEAM_ID });
@@ -79,7 +85,9 @@ class TeamService {
         return __awaiter(this, void 0, void 0, function* () {
             yield this.ensureBuiltinTeam();
             const teams = yield Team_1.TeamModel.find();
-            return teams.map((team) => ({
+            return teams
+                .filter((team) => team.id !== exports.BUILTIN_TEAM_ID)
+                .map((team) => ({
                 id: team.id,
                 name: team.name,
                 owner: team.owner,

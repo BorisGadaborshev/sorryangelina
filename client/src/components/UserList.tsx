@@ -66,7 +66,17 @@ const UserList: React.FC<UserListProps> = observer(({
     const fetchRosterUsers = async () => {
       try {
         const apiBase = process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3001';
-        const response = await fetch(`${apiBase}/api/teams/${encodeURIComponent(teamId)}/members`);
+        const headers: Record<string, string> = {};
+        const accessCode = localStorage.getItem('suboAccessCode');
+        if (accessCode) {
+          headers['X-Subo-Access'] = accessCode;
+        }
+        if (store.authProfile?.token) {
+          headers.Authorization = `Bearer ${store.authProfile.token}`;
+        }
+        const response = await fetch(`${apiBase}/api/teams/${encodeURIComponent(teamId)}/members`, {
+          headers,
+        });
         if (!response.ok) return;
         const data = (await response.json()) as { members: string[] };
         setRosterUsers(data.members || []);
@@ -76,7 +86,7 @@ const UserList: React.FC<UserListProps> = observer(({
     };
 
     fetchRosterUsers();
-  }, [teamId]);
+  }, [teamId, store.authProfile?.token]);
 
   const offlineRosterUsers = useMemo(() => {
     const onlineNames = new Set(users.map((user) => user.name));
@@ -177,12 +187,58 @@ const UserList: React.FC<UserListProps> = observer(({
           return (
           <ListItem
             key={user.id}
-            onClick={() => handleVoteSprintVip(user.name)}
+            secondaryAction={
+              <Box
+                sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <Tooltip
+                  title={
+                    user.id === currentUserId
+                      ? (user.isReady ? `Вы ${getPhaseActionText(currentPhase)}` : 'Вы еще не готовы')
+                      : (user.isReady ? `${user.name} ${getPhaseActionText(currentPhase)}` : `${user.name} еще не готов(а)`)
+                  }
+                >
+                  <Box sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    color: user.isReady ? 'success.main' : 'text.disabled'
+                  }}>
+                    {user.isReady ? <CheckCircleIcon fontSize="small" /> : <RadioButtonUncheckedIcon fontSize="small" />}
+                  </Box>
+                </Tooltip>
+                {isAdmin && user.id !== currentUserId && user.role !== 'admin' && (
+                  <Tooltip title="Назначить администратором">
+                    <IconButton
+                      size="small"
+                      color="primary"
+                      onClick={(event) => handleTransferAdmin(event, user.id)}
+                    >
+                      <AdminPanelSettingsIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                )}
+                {isAdmin && user.id !== currentUserId && (
+                  <Tooltip title="Исключить пользователя">
+                    <IconButton
+                      size="small"
+                      color="error"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        handleKickUser(user.id);
+                      }}
+                    >
+                      <PersonRemoveIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                )}
+              </Box>
+            }
             sx={{
               borderRadius: 1,
               mb: 0.5,
-              overflow: 'visible',
-              cursor: canVoteForUser ? 'pointer' : 'default',
+              pr: isAdmin ? 14 : 8,
+              alignItems: 'center',
               border: isMyVipVote ? '2px solid' : '2px solid transparent',
               borderColor: isMyVipVote ? vipVoteHighlight.border : 'transparent',
               bgcolor: user.id === currentUserId && user.isReady
@@ -190,111 +246,88 @@ const UserList: React.FC<UserListProps> = observer(({
                 : isMyVipVote
                   ? vipVoteHighlight.bg
                   : 'transparent',
-              '&:hover': {
-                bgcolor: canVoteForUser
-                  ? (isMyVipVote ? vipVoteHighlight.bg : 'action.hover')
-                  : (user.id === currentUserId && user.isReady ? 'success.light' : 'transparent'),
-              },
             }}
           >
-            <Box sx={{ position: 'relative', mr: 2 }}>
-              {isSprintVip && (
-                <Typography
-                  component="span"
-                  sx={{
-                    position: 'absolute',
-                    top: -18,
-                    left: '50%',
-                    transform: 'translateX(-50%)',
-                    fontSize: 20,
-                    lineHeight: 1,
-                    zIndex: 1
-                  }}
-                >
-                  👑
-                </Typography>
-              )}
-              <Avatar
-                sx={{
-                  bgcolor: moodMeta?.color ?? (onlineUsers.includes(user.id) ? 'success.main' : 'grey.400'),
-                }}
-              >
-                {moodMeta?.emoji ?? (user.role === 'admin' ? <AdminPanelSettingsIcon /> : <PersonIcon />)}
-              </Avatar>
-            </Box>
-            <Tooltip
-              title={
-                !canVoteForUser
-                  ? 'Нельзя голосовать за себя'
-                  : isMyVipVote
-                    ? 'Нажмите еще раз, чтобы снять голос'
-                    : 'Проголосовать за VIP спринта'
-              }
+            <Box
+              onClick={() => canVoteForUser && handleVoteSprintVip(user.name)}
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                flex: 1,
+                minWidth: 0,
+                mr: 1,
+                cursor: canVoteForUser ? 'pointer' : 'default',
+                borderRadius: 1,
+                '&:hover': canVoteForUser ? {
+                  bgcolor: isMyVipVote ? vipVoteHighlight.bg : 'action.hover',
+                } : undefined,
+              }}
             >
-              <ListItemText
-                primary={user.name}
-                secondary={
-                  isSprintVip
-                    ? 'VIP спринта'
-                    : isMyVipVote
-                      ? 'Ваш выбор'
-                      : (user.role === 'admin' ? 'Администратор' : 'Участник')
-                }
-                sx={{
-                  '& .MuiListItemText-primary': {
-                    fontWeight: onlineUsers.includes(user.id) ? 'bold' : 'normal',
-                  },
-                  '& .MuiListItemText-secondary': {
-                    color: isSprintVip
-                      ? 'warning.main'
-                      : isMyVipVote
-                        ? vipVoteHighlight.text
-                        : (user.role === 'admin' ? 'primary.main' : 'text.secondary'),
-                  },
-                }}
-              />
-            </Tooltip>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Tooltip
-                title={
-                  user.id === currentUserId
-                    ? (user.isReady ? `Вы ${getPhaseActionText(currentPhase)}` : 'Вы еще не готовы')
-                    : (user.isReady ? `${user.name} ${getPhaseActionText(currentPhase)}` : `${user.name} еще не готов(а)`)
-                }
-              >
-                <Box sx={{ 
-                  display: 'flex', 
-                  alignItems: 'center',
-                  color: user.isReady ? 'success.main' : 'text.disabled'
-                }}>
-                  {user.isReady ? <CheckCircleIcon /> : <RadioButtonUncheckedIcon />}
-                </Box>
-              </Tooltip>
-              {isAdmin && user.id !== currentUserId && user.role !== 'admin' && (
-                <Tooltip title="Назначить администратором">
-                  <IconButton
-                    size="small"
-                    color="primary"
-                    onClick={(event) => handleTransferAdmin(event, user.id)}
-                  >
-                    <AdminPanelSettingsIcon fontSize="small" />
-                  </IconButton>
-                </Tooltip>
-              )}
-              {isAdmin && user.id !== currentUserId && (
-                <Tooltip title="Исключить пользователя">
-                  <IconButton
-                    size="small"
-                    color="error"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      handleKickUser(user.id);
+              <Box sx={{ position: 'relative', mr: 1.5, flexShrink: 0 }}>
+                {isSprintVip && (
+                  <Typography
+                    component="span"
+                    sx={{
+                      position: 'absolute',
+                      top: -18,
+                      left: '50%',
+                      transform: 'translateX(-50%)',
+                      fontSize: 20,
+                      lineHeight: 1,
+                      zIndex: 1
                     }}
                   >
-                    <PersonRemoveIcon />
-                  </IconButton>
-                </Tooltip>
-              )}
+                    👑
+                  </Typography>
+                )}
+                <Avatar
+                  sx={{
+                    bgcolor: moodMeta?.color ?? (onlineUsers.includes(user.id) ? 'success.main' : 'grey.400'),
+                  }}
+                >
+                  {moodMeta?.emoji ?? (user.role === 'admin' ? <AdminPanelSettingsIcon /> : <PersonIcon />)}
+                </Avatar>
+              </Box>
+              <Tooltip
+                title={
+                  !canVoteForUser
+                    ? 'Нельзя голосовать за себя'
+                    : isMyVipVote
+                      ? 'Нажмите еще раз, чтобы снять голос'
+                      : 'Проголосовать за VIP спринта'
+                }
+              >
+                <ListItemText
+                  primary={user.name}
+                  secondary={
+                    isSprintVip
+                      ? 'VIP спринта'
+                      : isMyVipVote
+                        ? 'Ваш выбор'
+                        : (user.role === 'admin' ? 'Администратор' : 'Участник')
+                  }
+                  sx={{
+                    m: 0,
+                    minWidth: 0,
+                    '& .MuiListItemText-primary': {
+                      fontWeight: onlineUsers.includes(user.id) ? 'bold' : 'normal',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    },
+                    '& .MuiListItemText-secondary': {
+                      color: isSprintVip
+                        ? 'warning.main'
+                        : isMyVipVote
+                          ? vipVoteHighlight.text
+                          : (user.role === 'admin' ? 'primary.main' : 'text.secondary'),
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    },
+                  }}
+                />
+              </Tooltip>
             </Box>
           </ListItem>
         )})}
