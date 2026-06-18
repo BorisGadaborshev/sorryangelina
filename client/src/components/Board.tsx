@@ -56,6 +56,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   const [selectedMood, setSelectedMood] = useState<Mood | null>(null);
   const timerAudioRef = useRef<HTMLAudioElement | null>(null);
   const previousTimerRef = useRef({ running: false, remainingSeconds: 0 });
+  const appliedSavedMoodRef = useRef<string | null>(null);
   const [timerMusicVolume, setTimerMusicVolume] = useState(() => {
     const saved = localStorage.getItem('timerMusicVolume');
     const parsed = saved ? Number(saved) : 0.35;
@@ -84,14 +85,29 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
 
   useEffect(() => {
     if (!currentRoomId || !currentUserName) return;
+
     if (currentUserMood) {
       setSelectedMood(currentUserMood);
       setIsMoodDialogOpen(false);
+      store.saveUserMood(currentUserName, currentUserMood);
       return;
     }
+
+    const savedMood = store.getSavedUserMood(currentUserName);
+    if (savedMood) {
+      setSelectedMood(savedMood);
+      setIsMoodDialogOpen(false);
+      const applyKey = `${currentRoomId}:${currentUserName}`;
+      if (appliedSavedMoodRef.current !== applyKey) {
+        appliedSavedMoodRef.current = applyKey;
+        store.socketService?.setUserMood(savedMood);
+      }
+      return;
+    }
+
     setSelectedMood(null);
     setIsMoodDialogOpen(true);
-  }, [currentRoomId, currentUserName, currentUserMood]);
+  }, [currentRoomId, currentUserName, currentUserMood, store]);
 
   const getPhaseTranslation = (phase: Phase): string => {
     const translations = {
@@ -204,7 +220,8 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   };
 
   const handleSaveMood = () => {
-    if (!selectedMood) return;
+    if (!selectedMood || !currentUserName) return;
+    store.saveUserMood(currentUserName, selectedMood);
     store.socketService?.setUserMood(selectedMood);
     setIsMoodDialogOpen(false);
   };

@@ -6,6 +6,7 @@ export class SocketService {
   private socket: Socket;
   private store: RetroStore;
   private isRestoringSession = false;
+  private sessionSyncRequired = false;
 
   constructor(store: RetroStore) {
     console.log('Initializing socket connection...');
@@ -39,6 +40,12 @@ export class SocketService {
       void this.attemptSessionRestore();
     });
 
+    this.socket.io.on('reconnect', () => {
+      console.log('Socket reconnected');
+      this.sessionSyncRequired = true;
+      void this.attemptSessionRestore();
+    });
+
     this.socket.on('connect_error', (error) => {
       console.error('Socket connection error:', error);
       this.store.setError('Failed to connect to server. Please try again.');
@@ -60,6 +67,7 @@ export class SocketService {
       }
 
       this.store.persistBoardState();
+      this.sessionSyncRequired = true;
       if (!this.store.canRenderBoard) {
         this.store.setReconnecting(true);
       }
@@ -81,6 +89,7 @@ export class SocketService {
     });
 
     this.socket.on('kicked', () => {
+      this.sessionSyncRequired = false;
       this.store.setError('Вас исключили из комнаты');
       this.store.setRoom(null);
       this.store.clearSession();
@@ -141,6 +150,7 @@ export class SocketService {
       this.store.updateState(state);
       this.store.setError(null);
       this.store.setReconnecting(false);
+      this.sessionSyncRequired = false;
     });
 
     this.socket.on('state-updated', (state: RoomState) => {
@@ -298,7 +308,7 @@ export class SocketService {
       return;
     }
 
-    if (this.socket.connected && this.store.room && !this.store.isReconnecting) {
+    if (!this.sessionSyncRequired && this.socket.connected && this.store.room) {
       return;
     }
 
@@ -646,6 +656,7 @@ export class SocketService {
           this.socket.off('error', handleError);
           this.store.setRoom(null);
           this.store.setReconnecting(false);
+          this.sessionSyncRequired = false;
           reject(new Error('Session expired'));
         };
 
@@ -680,6 +691,7 @@ export class SocketService {
           this.store.setRoom(room);
           this.store.updateState(state);
           this.store.setReconnecting(false);
+          this.sessionSyncRequired = false;
           resolve();
         };
 
@@ -717,6 +729,7 @@ export class SocketService {
 
   leaveRoom() {
     if (!this.socket) return;
+    this.sessionSyncRequired = false;
     this.socket.emit('leave-room');
     this.store.clearSession();
     this.store.setCurrentUser(null);

@@ -1,9 +1,11 @@
 import { makeAutoObservable, runInAction } from 'mobx';
-import { AuthProfile, Card, CardComment, CardReaction, ChatMessage, DEFAULT_COLUMN_TITLES, DEFAULT_ROOM_FEATURES, DiscussionNavigationState, FacilitatorAnnouncement, Phase, PhaseTimerState, RetroRatingState, Room, RoomFeatures, RoomState, SprintVipState, Team, User, WhiteboardStroke } from '../types';
+import { AuthProfile, Card, CardComment, CardReaction, ChatMessage, DEFAULT_COLUMN_TITLES, DEFAULT_ROOM_FEATURES, DiscussionNavigationState, FacilitatorAnnouncement, Mood, Phase, PhaseTimerState, RetroRatingState, Room, RoomFeatures, RoomState, SprintVipState, Team, User, WhiteboardStroke } from '../types';
 import { Socket } from 'socket.io-client';
 import { SocketService } from '../services/socket';
 
 const BOARD_STATE_KEY = 'retroBoardState';
+const USER_MOOD_KEY_PREFIX = 'retroUserMood:';
+const VALID_MOODS: Mood[] = ['great', 'good', 'neutral', 'bad', 'awful'];
 
 interface PersistedBoardState {
   roomId: string;
@@ -157,6 +159,15 @@ export class RetroStore {
     localStorage.removeItem('roomId');
     localStorage.removeItem('username');
     this.clearBoardState();
+  }
+
+  getSavedUserMood(username: string): Mood | null {
+    const raw = localStorage.getItem(`${USER_MOOD_KEY_PREFIX}${username}`);
+    return VALID_MOODS.includes(raw as Mood) ? (raw as Mood) : null;
+  }
+
+  saveUserMood(username: string, mood: Mood) {
+    localStorage.setItem(`${USER_MOOD_KEY_PREFIX}${username}`, mood);
   }
 
   private saveAuth(profile: AuthProfile) {
