@@ -10,6 +10,8 @@ import PauseIcon from '@mui/icons-material/Pause';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
 import BrushIcon from '@mui/icons-material/Brush';
 import CleaningServicesIcon from '@mui/icons-material/CleaningServices';
 import RetroColumn from './RetroColumn';
@@ -38,6 +40,13 @@ const MOOD_OPTIONS: Array<{ value: Mood; emoji: string; label: string; color: st
 const WHITEBOARD_COLORS = ['#111111', '#006dff', '#00a878', '#ff6b00', '#e11d48', '#7c3aed'];
 const TIMER_MUSIC_SRC = '/audio/timer-music.mp3';
 
+const getNextPhase = (phase: Phase, retroRatingEnabled: boolean): Phase | null => {
+  if (phase === 'creation') return 'voting';
+  if (phase === 'voting') return 'discussion';
+  if (phase === 'discussion') return retroRatingEnabled ? 'rating' : null;
+  return null;
+};
+
 const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) => {
   const [isReady, setIsReady] = useState(() => Boolean(store.room));
   const [isUserListVisible, setIsUserListVisible] = useState(true);
@@ -54,6 +63,8 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   const [timerAnchorEl, setTimerAnchorEl] = useState<null | HTMLElement>(null);
   const [isMoodDialogOpen, setIsMoodDialogOpen] = useState(false);
   const [selectedMood, setSelectedMood] = useState<Mood | null>(null);
+  const [isAllReadyModalOpen, setIsAllReadyModalOpen] = useState(false);
+  const allReadyDismissedRef = useRef(false);
   const timerAudioRef = useRef<HTMLAudioElement | null>(null);
   const previousTimerRef = useRef({ running: false, remainingSeconds: 0 });
   const appliedSavedMoodRef = useRef<string | null>(null);
@@ -120,7 +131,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   };
 
   const handleReadyStateChange = (isReady: boolean) => {
-    store.socketService?.updateReadyState(isReady);
+    store.updateUserReadyState(isReady);
   };
 
   const playTimerEndSignal = useCallback(() => {
@@ -158,6 +169,35 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
     && (store.phase === 'creation' || store.phase === 'voting');
   const canUseChat = features.chatEnabled;
   const canPlayTimerMusic = features.musicEnabled;
+  const readyCount = store.getUserReadyCount();
+  const totalCount = store.getTotalUserCount();
+  const allUsersReady = totalCount > 0 && readyCount === totalCount;
+  const nextPhase = getNextPhase(store.phase, features.retroRatingEnabled);
+  const canAdvancePhase = store.isAdmin && nextPhase !== null;
+
+  useEffect(() => {
+    if (!allUsersReady) {
+      allReadyDismissedRef.current = false;
+      setIsAllReadyModalOpen(false);
+      return;
+    }
+    if (!allReadyDismissedRef.current) {
+      setIsAllReadyModalOpen(true);
+    }
+  }, [allUsersReady, store.phase, readyCount, totalCount]);
+
+  const handleCloseAllReadyModal = () => {
+    allReadyDismissedRef.current = true;
+    setIsAllReadyModalOpen(false);
+  };
+
+  const handleAdvancePhaseFromModal = () => {
+    if (nextPhase && store.isAdmin) {
+      store.socketService?.changePhase(nextPhase);
+    }
+    allReadyDismissedRef.current = true;
+    setIsAllReadyModalOpen(false);
+  };
 
   useEffect(() => {
     const audio = timerAudioRef.current;
@@ -549,6 +589,19 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                   </IconButton>
                 </Tooltip>
               </Box>
+              {store.currentUser && (
+                <Button
+                  variant="contained"
+                  color={store.currentUser.isReady ? 'success' : 'primary'}
+                  fullWidth
+                  size="small"
+                  onClick={() => handleReadyStateChange(!store.currentUser!.isReady)}
+                  startIcon={store.currentUser.isReady ? <CheckCircleIcon /> : <RadioButtonUncheckedIcon />}
+                  sx={{ mb: 0.5 }}
+                >
+                  {store.currentUser.isReady ? 'Я готов(а)' : 'Отметить готовность'}
+                </Button>
+              )}
               <Tabs value={mobileTab} onChange={(_, v) => setMobileTab(v)} textColor="inherit" indicatorColor="secondary" sx={{ width: '100%' }}>
                 <Tab label="Доска" />
                 <Tab label={`Участники (${store.users.length})`} />
@@ -687,6 +740,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                   currentPhase={store.phase}
                   onReadyStateChange={handleReadyStateChange}
                   store={store}
+                  showReadyControl={false}
                 />
               </Box>
             ) : (
@@ -949,6 +1003,25 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
         <DialogActions>
           <Button variant="contained" onClick={handleSaveMood} disabled={!selectedMood}>
             Сохранить
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={isAllReadyModalOpen} onClose={handleCloseAllReadyModal} maxWidth="xs" fullWidth>
+        <DialogTitle>Все готовы</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Все участники ({totalCount}) отметили готовность на этапе «{getPhaseTranslation(store.phase)}».
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          {canAdvancePhase && nextPhase && (
+            <Button variant="contained" color="secondary" onClick={handleAdvancePhaseFromModal} sx={{ color: 'white' }}>
+              {getPhaseTranslation(nextPhase)}
+            </Button>
+          )}
+          <Button variant="outlined" onClick={handleCloseAllReadyModal}>
+            ОК
           </Button>
         </DialogActions>
       </Dialog>

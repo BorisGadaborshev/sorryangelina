@@ -612,7 +612,8 @@ export class RetroStore {
   }
 
   canChangePhase(): boolean {
-    return this.currentUser?.role === 'admin' || this.room?.owner === this.currentUser?.name;
+    if (!this.currentUser?.name) return false;
+    return this.currentUser.role === 'admin' || this.room?.owner === this.currentUser.name;
   }
 
   canControlDiscussionNavigation(): boolean {
@@ -672,9 +673,22 @@ export class RetroStore {
   }
 
   updateUserReadyState(isReady: boolean) {
+    runInAction(() => {
+      if (this.currentUser) {
+        this.currentUser = { ...this.currentUser, isReady };
+      }
+      const currentName = this.currentUser?.name;
+      if (currentName) {
+        this.users = this.users.map((user) =>
+          user.name === currentName ? { ...user, isReady } : user
+        );
+      }
+    });
+    this.persistBoardState();
+
     if (this.socketService) {
       console.log('Updating user ready state:', isReady);
-      this.socketService.updateReadyState(isReady);
+      void this.socketService.updateReadyState(isReady);
     }
   }
 

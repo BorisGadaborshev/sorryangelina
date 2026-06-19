@@ -26,6 +26,7 @@ interface UserListProps {
   currentPhase: Phase;
   onReadyStateChange: (isReady: boolean) => void;
   store: RetroStore;
+  showReadyControl?: boolean;
 }
 
 const UserList: React.FC<UserListProps> = observer(({ 
@@ -34,7 +35,8 @@ const UserList: React.FC<UserListProps> = observer(({
   currentUserId,
   currentPhase,
   onReadyStateChange,
-  store
+  store,
+  showReadyControl = true,
 }) => {
   const [rosterUsers, setRosterUsers] = useState<string[]>([]);
   const [isOfflineExpanded, setIsOfflineExpanded] = useState(true);
@@ -145,7 +147,7 @@ const UserList: React.FC<UserListProps> = observer(({
         <Typography variant="h6" gutterBottom>
           Участники ({users.length})
         </Typography>
-        {currentUser && (
+        {showReadyControl && currentUser && (
           <>
             <Typography variant="body2" color="text.secondary" gutterBottom>
               {currentUser.isReady ? 'Вы отметили свою готовность' : 'Отметьте свою готовность'}

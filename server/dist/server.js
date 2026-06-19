@@ -684,6 +684,24 @@ const handleUserLeavingRoom = (socket, user) => __awaiter(void 0, void 0, void 0
     }
     return updatedRoom;
 });
+const resolveSocketActor = (socket, currentUser) => __awaiter(void 0, void 0, void 0, function* () {
+    if ((currentUser === null || currentUser === void 0 ? void 0 : currentUser.roomId) && currentUser.name) {
+        return currentUser;
+    }
+    const roomId = typeof socket.data.roomId === 'string'
+        ? socket.data.roomId
+        : [...socket.rooms].find((roomName) => roomName !== socket.id);
+    const userName = typeof socket.data.userName === 'string' ? socket.data.userName : undefined;
+    const userId = typeof socket.data.userId === 'string' ? socket.data.userId : socket.id;
+    if (!roomId || !userName) {
+        return (currentUser === null || currentUser === void 0 ? void 0 : currentUser.roomId) ? currentUser : null;
+    }
+    const room = yield RoomService_1.RoomService.getRoom(roomId);
+    const user = room === null || room === void 0 ? void 0 : room.users.find((roomUser) => roomUser.name === userName || roomUser.id === userId);
+    if (!user)
+        return null;
+    return Object.assign(Object.assign({}, user), { roomId });
+});
 io.on('connection', (socket) => {
     connectionCount++;
     console.log(`Client connected (${connectionCount} total):`, socket.id);
@@ -1136,17 +1154,24 @@ io.on('connection', (socket) => {
         }
     }));
     socket.on('update-ready-state', ({ isReady }) => __awaiter(void 0, void 0, void 0, function* () {
-        if (!(currentUser === null || currentUser === void 0 ? void 0 : currentUser.roomId))
-            return;
-        console.log('Received ready state update:', {
-            userId: currentUser.id,
-            userName: currentUser.name,
-            isReady
-        });
         try {
-            const room = yield RoomService_1.RoomService.updateUserReadyState(currentUser.roomId, currentUser.id, isReady);
+            const actor = yield resolveSocketActor(socket, currentUser);
+            if (!(actor === null || actor === void 0 ? void 0 : actor.roomId) || !actor.name) {
+                console.log('Ready state update ignored: session not resolved');
+                return;
+            }
+            currentUser = actor;
+            socket.data.userId = actor.id;
+            socket.data.userName = actor.name;
+            socket.data.roomId = actor.roomId;
+            console.log('Received ready state update:', {
+                userId: actor.id,
+                userName: actor.name,
+                isReady
+            });
+            const room = yield RoomService_1.RoomService.updateUserReadyState(actor.roomId, actor.id, isReady, actor.name);
             if (room) {
-                io.to(currentUser.roomId).emit('state-updated', {
+                io.to(actor.roomId).emit('state-updated', {
                     cards: room.cards,
                     phase: room.phase,
                     users: room.users

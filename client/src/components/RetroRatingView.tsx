@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { observer } from 'mobx-react-lite';
-import { Box, Button, LinearProgress, Paper, Radio, Step, StepLabel, Stepper, Typography, useTheme } from '@mui/material';
+import { Box, Button, LinearProgress, Paper, Radio, Step, StepLabel, Stepper, Typography, useMediaQuery, useTheme } from '@mui/material';
+import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import { RetroStore } from '../store/RetroStore';
 
 interface Props {
@@ -33,6 +34,7 @@ const DARK_RATING_OPTIONS: RatingOption[] = [
 
 const RetroRatingView: React.FC<Props> = observer(({ store }) => {
   const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const ratingOptions = useMemo(
     () => (theme.palette.mode === 'dark' ? DARK_RATING_OPTIONS : LIGHT_RATING_OPTIONS),
     [theme.palette.mode]
@@ -137,9 +139,17 @@ const RetroRatingView: React.FC<Props> = observer(({ store }) => {
           )}
         </Box>
 
-        <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, flexWrap: 'wrap' }}>
+        <Box
+          sx={{
+            display: 'flex',
+            flexDirection: isMobile ? 'column' : 'row',
+            justifyContent: 'center',
+            alignItems: isMobile ? 'stretch' : 'center',
+            gap: 2,
+          }}
+        >
           {!rating.resultsVisible && (
-            <>
+            <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, flexWrap: 'wrap' }}>
               <Button variant="contained" onClick={handleSubmit} disabled={!selectedRating || rating.hasVoted}>
                 {rating.hasVoted ? 'Оценка принята' : 'Отправить оценку'}
               </Button>
@@ -148,8 +158,16 @@ const RetroRatingView: React.FC<Props> = observer(({ store }) => {
                   Показать результаты
                 </Button>
               )}
-            </>
+            </Box>
           )}
+          <Button
+            variant="outlined"
+            startIcon={<ExitToAppIcon />}
+            onClick={() => store.socketService?.leaveRoom()}
+            sx={{ alignSelf: isMobile ? 'center' : 'auto' }}
+          >
+            Выйти из комнаты
+          </Button>
         </Box>
 
         <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', mt: 3 }}>

@@ -820,6 +820,28 @@ const handleUserLeavingRoom = async (socket: Socket, user: User): Promise<Room |
   return updatedRoom;
 };
 
+const resolveSocketActor = async (socket: Socket, currentUser: User | null): Promise<User | null> => {
+  if (currentUser?.roomId && currentUser.name) {
+    return currentUser;
+  }
+
+  const roomId = typeof socket.data.roomId === 'string'
+    ? socket.data.roomId
+    : [...socket.rooms].find((roomName) => roomName !== socket.id);
+  const userName = typeof socket.data.userName === 'string' ? socket.data.userName : undefined;
+  const userId = typeof socket.data.userId === 'string' ? socket.data.userId : socket.id;
+
+  if (!roomId || !userName) {
+    return currentUser?.roomId ? currentUser : null;
+  }
+
+  const room = await RoomService.getRoom(roomId);
+  const user = room?.users.find((roomUser) => roomUser.name === userName || roomUser.id === userId);
+  if (!user) return null;
+
+  return { ...user, roomId };
+};
+
 io.on('connection', (socket) => {
   connectionCount++;
   console.log(`Client connected (${connectionCount} total):`, socket.id);
@@ -1303,18 +1325,27 @@ io.on('connection', (socket) => {
   });
 
   socket.on('update-ready-state', async ({ isReady }) => {
-    if (!currentUser?.roomId) return;
-
-    console.log('Received ready state update:', {
-      userId: currentUser.id,
-      userName: currentUser.name,
-      isReady
-    });
-
     try {
-      const room = await RoomService.updateUserReadyState(currentUser.roomId, currentUser.id, isReady);
+      const actor = await resolveSocketActor(socket, currentUser);
+      if (!actor?.roomId || !actor.name) {
+        console.log('Ready state update ignored: session not resolved');
+        return;
+      }
+
+      currentUser = actor;
+      socket.data.userId = actor.id;
+      socket.data.userName = actor.name;
+      socket.data.roomId = actor.roomId;
+
+      console.log('Received ready state update:', {
+        userId: actor.id,
+        userName: actor.name,
+        isReady
+      });
+
+      const room = await RoomService.updateUserReadyState(actor.roomId, actor.id, isReady, actor.name);
       if (room) {
-        io.to(currentUser.roomId).emit('state-updated', {
+        io.to(actor.roomId).emit('state-updated', {
           cards: room.cards,
           phase: room.phase,
           users: room.users

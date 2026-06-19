@@ -591,21 +591,42 @@ export class RoomService {
     console.log('Database cleared successfully');
   }
 
-  static async updateUserReadyState(roomId: string, userId: string, isReady: boolean): Promise<Room | null> {
-    console.log('Updating user ready state:', { roomId, userId, isReady });
-    
-    const room = await RoomModel.findOneAndUpdate(
-      { 
+  static async updateUserReadyState(
+    roomId: string,
+    userId: string,
+    isReady: boolean,
+    userName?: string
+  ): Promise<Room | null> {
+    console.log('Updating user ready state:', { roomId, userId, userName, isReady });
+
+    let room = await RoomModel.findOneAndUpdate(
+      {
         id: roomId,
-        'users.id': userId 
+        'users.id': userId
       },
-      { 
-        $set: { 
-          'users.$.isReady': isReady 
+      {
+        $set: {
+          'users.$.isReady': isReady
         }
       },
       { new: true }
     );
+
+    if (!room && userName) {
+      room = await RoomModel.findOneAndUpdate(
+        {
+          id: roomId,
+          'users.name': userName
+        },
+        {
+          $set: {
+            'users.$.isReady': isReady,
+            'users.$.id': userId
+          }
+        },
+        { new: true }
+      );
+    }
 
     if (!room) {
       console.log('Room or user not found while updating ready state');

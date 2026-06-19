@@ -488,10 +488,10 @@ class RoomService {
             console.log('Database cleared successfully');
         });
     }
-    static updateUserReadyState(roomId, userId, isReady) {
+    static updateUserReadyState(roomId, userId, isReady, userName) {
         return __awaiter(this, void 0, void 0, function* () {
-            console.log('Updating user ready state:', { roomId, userId, isReady });
-            const room = yield Room_1.RoomModel.findOneAndUpdate({
+            console.log('Updating user ready state:', { roomId, userId, userName, isReady });
+            let room = yield Room_1.RoomModel.findOneAndUpdate({
                 id: roomId,
                 'users.id': userId
             }, {
@@ -499,6 +499,17 @@ class RoomService {
                     'users.$.isReady': isReady
                 }
             }, { new: true });
+            if (!room && userName) {
+                room = yield Room_1.RoomModel.findOneAndUpdate({
+                    id: roomId,
+                    'users.name': userName
+                }, {
+                    $set: {
+                        'users.$.isReady': isReady,
+                        'users.$.id': userId
+                    }
+                }, { new: true });
+            }
             if (!room) {
                 console.log('Room or user not found while updating ready state');
                 return null;

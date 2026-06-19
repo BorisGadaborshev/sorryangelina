@@ -604,6 +604,12 @@ export class SocketService {
 
   async updateReadyState(isReady: boolean): Promise<void> {
     console.log('Updating ready state:', isReady);
+    try {
+      await this.ensureConnection();
+    } catch (error) {
+      console.error('Failed to connect before ready state update:', error);
+      return;
+    }
     this.socket.emit('update-ready-state', { isReady });
   }
 
