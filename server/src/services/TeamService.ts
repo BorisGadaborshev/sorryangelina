@@ -27,8 +27,9 @@ export class TeamService {
   static async ensureBuiltinTeam(): Promise<Team> {
     const existing = await TeamModel.findOne({ id: BUILTIN_TEAM_ID });
     if (existing) {
+      await this.syncBuiltinTeamMembers();
       await this.assignLegacyRoomsToBuiltinTeam();
-      return this.convertToTeam(existing);
+      return this.convertToTeam((await TeamModel.findOne({ id: BUILTIN_TEAM_ID }))!);
     }
 
     const passwordHash = await bcrypt.hash(BUILTIN_TEAM_PASSWORD, 10);
@@ -182,5 +183,17 @@ export class TeamService {
 
   private static async assignLegacyRoomsToBuiltinTeam(): Promise<void> {
     await pool.query('update rooms set team_id=$1 where team_id is null', [BUILTIN_TEAM_ID]);
+  }
+
+  private static async syncBuiltinTeamMembers(): Promise<void> {
+    const team = await TeamModel.findOne({ id: BUILTIN_TEAM_ID });
+    if (!team) return;
+
+    const existingNames = new Set(team.members.map((member) => member.name));
+    for (const name of FIXED_AUTH_NAMES) {
+      if (!existingNames.has(name)) {
+        await TeamModel.addMember(BUILTIN_TEAM_ID, name, 'user');
+      }
+    }
   }
 }

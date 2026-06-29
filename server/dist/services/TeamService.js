@@ -37,8 +37,9 @@ class TeamService {
         return __awaiter(this, void 0, void 0, function* () {
             const existing = yield Team_1.TeamModel.findOne({ id: exports.BUILTIN_TEAM_ID });
             if (existing) {
+                yield this.syncBuiltinTeamMembers();
                 yield this.assignLegacyRoomsToBuiltinTeam();
-                return this.convertToTeam(existing);
+                return this.convertToTeam((yield Team_1.TeamModel.findOne({ id: exports.BUILTIN_TEAM_ID })));
             }
             const passwordHash = yield bcryptjs_1.default.hash(BUILTIN_TEAM_PASSWORD, 10);
             const members = this.buildMembers(exports.BUILTIN_TEAM_ID, BUILTIN_TEAM_OWNER, authNames_1.FIXED_AUTH_NAMES, BUILTIN_TEAM_OWNER);
@@ -187,6 +188,19 @@ class TeamService {
     static assignLegacyRoomsToBuiltinTeam() {
         return __awaiter(this, void 0, void 0, function* () {
             yield database_1.pool.query('update rooms set team_id=$1 where team_id is null', [exports.BUILTIN_TEAM_ID]);
+        });
+    }
+    static syncBuiltinTeamMembers() {
+        return __awaiter(this, void 0, void 0, function* () {
+            const team = yield Team_1.TeamModel.findOne({ id: exports.BUILTIN_TEAM_ID });
+            if (!team)
+                return;
+            const existingNames = new Set(team.members.map((member) => member.name));
+            for (const name of authNames_1.FIXED_AUTH_NAMES) {
+                if (!existingNames.has(name)) {
+                    yield Team_1.TeamModel.addMember(exports.BUILTIN_TEAM_ID, name, 'user');
+                }
+            }
         });
     }
 }
