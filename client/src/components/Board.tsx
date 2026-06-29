@@ -174,6 +174,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   const allUsersReady = totalCount > 0 && readyCount === totalCount;
   const nextPhase = getNextPhase(store.phase, features.retroRatingEnabled);
   const canAdvancePhase = store.isAdmin && nextPhase !== null;
+  const isColumnPhase = store.phase === 'creation' || store.phase === 'voting';
 
   useEffect(() => {
     if (!allUsersReady) {
@@ -311,7 +312,9 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
         gap: 2,
         width: '100%',
         minWidth: 0,
+        minHeight: isMobile ? 'auto' : 0,
         height: isMobile ? 'auto' : '100%',
+        flex: isMobile ? undefined : '1 1 auto',
         alignItems: 'stretch',
       }}>
         <RetroColumn
@@ -869,9 +872,12 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
             <Box sx={{ 
               flexGrow: 1,
               minWidth: 0,
-              overflowY: 'auto',
+              minHeight: 0,
+              overflow: isColumnPhase ? 'hidden' : 'auto',
               overflowX: 'hidden',
-              position: 'relative'
+              position: 'relative',
+              display: isColumnPhase ? 'flex' : 'block',
+              flexDirection: 'column',
             }}>
               {renderContent()}
               {canDrawOnBoard && (

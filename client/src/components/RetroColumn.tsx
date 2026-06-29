@@ -297,7 +297,9 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
         maxWidth: '100%',
         flex: isMobile ? '0 0 auto' : '1 1 0',
         minWidth: isMobile ? '100%' : 0,
-        minHeight: isMobile ? 'auto' : '70vh',
+        minHeight: isMobile ? 'auto' : 0,
+        height: isMobile ? 'auto' : '100%',
+        maxHeight: isMobile ? 'none' : '100%',
         p: 1.25,
         backgroundColor: columnColor,
         color: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.92)' : 'inherit',
@@ -627,7 +629,7 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
               {...provided.droppableProps}
               sx={{
                 flexGrow: 1,
-                minHeight: '100px',
+                minHeight: 0,
                 overflowY: 'auto',
                 display: 'flex',
                 flexDirection: 'column',
@@ -657,7 +659,7 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
           )}
         </Droppable>
       ) : (
-        <Box sx={{ flexGrow: 1, minHeight: '100px', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+        <Box sx={{ flexGrow: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
           {localCards.map((card, index) => (
             <RetroCard key={card.id} card={card} index={index} store={store} />
           ))}
