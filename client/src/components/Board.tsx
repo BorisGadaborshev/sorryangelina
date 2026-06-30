@@ -728,8 +728,8 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
         flexGrow: 1, 
         p: 1.25, 
         gap: 1.25,
-        height: 'calc(100vh - 64px)',
-        overflow: 'hidden',
+        // height: 'calc(100vh - 64px)',
+        // overflow: 'hidden',
         minWidth: 0,
       }}>
         {isMobile ? (
@@ -762,6 +762,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
             <Box sx={{ 
               width: isUserListVisible ? 300 : 0,
               flexShrink: 0,
+              height: 'calc(100vh - 80px)',
               overflow: 'hidden',
               bgcolor: 'background.paper',
               borderRadius: 1,
