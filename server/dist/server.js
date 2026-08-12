@@ -42,6 +42,8 @@ const roomStates = new Map();
 app.use((0, cors_1.default)({
     origin: process.env.NODE_ENV === 'production'
         ? [
+            'https://insretro.ru',
+            'https://www.insretro.ru',
             'https://sorryangelina.ru',
             'https://www.sorryangelina.ru',
             'https://sorryangelina.vercel.app',
@@ -303,7 +305,13 @@ app.post('/api/auth/guest', (req, res) => {
 const io = new socket_io_1.Server(httpServer, {
     cors: {
         origin: process.env.NODE_ENV === 'production'
-            ? "https://sorryangelina.vercel.app"
+            ? [
+                'https://insretro.ru',
+                'https://www.insretro.ru',
+                'https://sorryangelina.ru',
+                'https://www.sorryangelina.ru',
+                'https://sorryangelina.vercel.app'
+            ]
             : "http://localhost:3000",
         methods: ["GET", "POST"],
         credentials: true
