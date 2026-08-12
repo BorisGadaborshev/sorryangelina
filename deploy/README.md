@@ -29,7 +29,7 @@
    - Edit `/etc/systemd/system/sorryangelina.service` and update:
      - `DATABASE_URL` with your actual PostgreSQL connection string
      - Email in certbot command
-   - Edit `/etc/nginx/sites-available/sorryangelina.ru` if needed
+   - Edit `/etc/nginx/sites-available/insretro.ru` if needed
 
 4. **Restart services:**
    ```bash
@@ -102,8 +102,8 @@ cd ..
 
 ```bash
 # Copy nginx config
-sudo cp deploy/nginx.conf /etc/nginx/sites-available/sorryangelina.ru
-sudo ln -sf /etc/nginx/sites-available/sorryangelina.ru /etc/nginx/sites-enabled/
+sudo cp deploy/nginx.conf /etc/nginx/sites-available/insretro.ru
+sudo ln -sf /etc/nginx/sites-available/insretro.ru /etc/nginx/sites-enabled/
 sudo rm -f /etc/nginx/sites-enabled/default
 
 # Test configuration
@@ -113,7 +113,7 @@ sudo nginx -t
 ### 5. Setup SSL Certificate
 
 ```bash
-sudo certbot --nginx -d sorryangelina.ru -d www.sorryangelina.ru --non-interactive --agree-tos --email your-email@example.com
+sudo certbot --nginx -d insretro.ru -d www.insretro.ru --non-interactive --agree-tos --email your-email@example.com
 ```
 
 ### 6. Configure Systemd Service
@@ -157,7 +157,7 @@ Update `client/src/services/socket.ts` to use your domain:
 
 ```typescript
 const serverUrl = process.env.NODE_ENV === 'production'
-  ? 'https://sorryangelina.ru'
+  ? 'https://insretro.ru'
   : 'http://localhost:3001';
 ```
 

@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * Smoke test for https://sorryangelina.ru
+ * Smoke test for https://insretro.ru
  * Run: node smoke-test.mjs
  */
 import { chromium } from 'playwright';
 
-const BASE_URL = 'https://sorryangelina.ru';
+const BASE_URL = 'https://insretro.ru';
 const GUEST_NAME = 'Smoke Bot 2026';
 const ROOM_ID = 'SMOKE-2026';
 const ROOM_PASSWORD = '1234';

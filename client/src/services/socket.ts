@@ -16,7 +16,7 @@ export class SocketService {
     
     const isProd = process.env.NODE_ENV === 'production';
     const serverUrl = isProd
-      ? 'https://sorryangelina.ru'
+      ? window.location.origin
       : 'http://localhost:3001';
 
     // Initialize socket with updated configuration

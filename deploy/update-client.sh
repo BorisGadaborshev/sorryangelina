@@ -26,4 +26,4 @@ echo "🌐 Reloading nginx..."
 systemctl reload nginx
 
 echo "✅ Client update completed!"
-echo "🌐 New version is now live at https://sorryangelina.ru"
+echo "🌐 New version is now live at https://insretro.ru"

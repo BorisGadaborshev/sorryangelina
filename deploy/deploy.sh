@@ -14,7 +14,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Configuration
-DOMAIN="sorryangelina.ru"
+DOMAIN="insretro.ru"
 APP_DIR="/var/www/sorryangelina"
 DB_NAME="sorryangelina"
 DB_USER="sorryangelina"
