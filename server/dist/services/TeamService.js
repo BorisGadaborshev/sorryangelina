@@ -86,9 +86,7 @@ class TeamService {
         return __awaiter(this, void 0, void 0, function* () {
             yield this.ensureBuiltinTeam();
             const teams = yield Team_1.TeamModel.find();
-            return teams
-                .filter((team) => team.id !== exports.BUILTIN_TEAM_ID)
-                .map((team) => ({
+            return teams.map((team) => ({
                 id: team.id,
                 name: team.name,
                 owner: team.owner,

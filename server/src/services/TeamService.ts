@@ -79,15 +79,13 @@ export class TeamService {
   static async getAllTeams(): Promise<AvailableTeam[]> {
     await this.ensureBuiltinTeam();
     const teams = await TeamModel.find();
-    return teams
-      .filter((team) => team.id !== BUILTIN_TEAM_ID)
-      .map((team) => ({
-        id: team.id,
-        name: team.name,
-        owner: team.owner,
-        membersCount: team.members.length,
-        createdAt: team.createdAt
-      }));
+    return teams.map((team) => ({
+      id: team.id,
+      name: team.name,
+      owner: team.owner,
+      membersCount: team.members.length,
+      createdAt: team.createdAt
+    }));
   }
 
   static async getTeam(teamId: string): Promise<Team | null> {
