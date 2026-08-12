@@ -580,6 +580,12 @@ export class SocketService {
     this.socket.emit('delete-card', { cardId });
   }
 
+  mergeCards(targetCardId: string, sourceCardId: string): void {
+    if (!this.store.currentUser || this.store.currentUser.role !== 'admin') return;
+    if (targetCardId === sourceCardId) return;
+    this.socket.emit('merge-cards', { targetCardId, sourceCardId });
+  }
+
   moveCard(cardId: string, column: number): void {
     this.socket.emit('move-card', { cardId, column });
   }

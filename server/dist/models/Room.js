@@ -136,6 +136,35 @@ exports.RoomModel = {
             return this.findOne({ id: roomId });
         });
     },
+    mergeCards(roomId, targetCardId, sourceCardId) {
+        return __awaiter(this, void 0, void 0, function* () {
+            if (targetCardId === sourceCardId)
+                return null;
+            const client = yield database_1.pool.connect();
+            try {
+                yield client.query('BEGIN');
+                const { rows } = yield client.query('select id, text from cards where room_id=$1 and id = any($2::text[]) for update', [roomId, [targetCardId, sourceCardId]]);
+                const targetCard = rows.find((row) => row.id === targetCardId);
+                const sourceCard = rows.find((row) => row.id === sourceCardId);
+                if (!targetCard || !sourceCard) {
+                    yield client.query('ROLLBACK');
+                    return null;
+                }
+                const mergedText = `${targetCard.text.trim()} (${sourceCard.text.trim()})`;
+                yield client.query('update cards set text=$1 where room_id=$2 and id=$3', [mergedText, roomId, targetCardId]);
+                yield client.query('delete from cards where room_id=$1 and id=$2', [roomId, sourceCardId]);
+                yield client.query('COMMIT');
+            }
+            catch (error) {
+                yield client.query('ROLLBACK');
+                throw error;
+            }
+            finally {
+                client.release();
+            }
+            return this.findOne({ id: roomId });
+        });
+    },
     addCardComment(comment) {
         return __awaiter(this, void 0, void 0, function* () {
             yield database_1.pool.query('insert into card_comments (id, card_id, user_id, user_name, text) values ($1,$2,$3,$4,$5)', [comment.id, comment.cardId, comment.userId, comment.userName, comment.text]);

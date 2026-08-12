@@ -243,6 +243,12 @@ class RoomService {
             return room ? this.convertToRoom(room) : null;
         });
     }
+    static mergeCards(roomId, targetCardId, sourceCardId) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const room = yield Room_1.RoomModel.mergeCards(roomId, targetCardId, sourceCardId);
+            return room ? this.convertToRoom(room) : null;
+        });
+    }
     static addCardComment(roomId, cardId, userId, userName, text) {
         return __awaiter(this, void 0, void 0, function* () {
             const trimmed = text.trim();

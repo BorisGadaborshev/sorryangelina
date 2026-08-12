@@ -12,6 +12,7 @@ export interface RoomFeatures {
   commentsEnabled: boolean;
   moveCardsEnabled: boolean;
   anonymousEnabled: boolean;
+  hideCardTextDuringCreation: boolean;
   likesPerUser: VoteLimit;
   dislikesPerUser: VoteLimit;
   dislikesEnabled: boolean;

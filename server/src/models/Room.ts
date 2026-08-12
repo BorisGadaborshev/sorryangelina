@@ -148,6 +148,44 @@ export const RoomModel = {
     return this.findOne({ id: roomId });
   },
 
+  async mergeCards(roomId: string, targetCardId: string, sourceCardId: string): Promise<RoomDocument | null> {
+    if (targetCardId === sourceCardId) return null;
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const { rows } = await client.query(
+        'select id, text from cards where room_id=$1 and id = any($2::text[]) for update',
+        [roomId, [targetCardId, sourceCardId]]
+      );
+      const targetCard = rows.find((row: { id: string }) => row.id === targetCardId) as { id: string; text: string } | undefined;
+      const sourceCard = rows.find((row: { id: string }) => row.id === sourceCardId) as { id: string; text: string } | undefined;
+
+      if (!targetCard || !sourceCard) {
+        await client.query('ROLLBACK');
+        return null;
+      }
+
+      const mergedText = `${targetCard.text.trim()} (${sourceCard.text.trim()})`;
+      await client.query(
+        'update cards set text=$1 where room_id=$2 and id=$3',
+        [mergedText, roomId, targetCardId]
+      );
+      await client.query(
+        'delete from cards where room_id=$1 and id=$2',
+        [roomId, sourceCardId]
+      );
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    return this.findOne({ id: roomId });
+  },
+
   async addCardComment(comment: CardComment): Promise<CardComment> {
     await pool.query(
       'insert into card_comments (id, card_id, user_id, user_name, text) values ($1,$2,$3,$4,$5)',

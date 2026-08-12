@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { observer } from 'mobx-react-lite';
 import { Card as CardType, CARD_REACTION_EMOJIS } from '../types';
 import { Card, CardContent, Typography, IconButton, TextField, Box, Tooltip, Alert, Button, Menu, MenuItem, ListItemIcon, ListItemText, Popover, Divider } from '@mui/material';
-import { Delete, Edit, MoreVert, Check, ChatBubbleOutline, AddReaction } from '@mui/icons-material';
+import { Delete, Edit, MoreVert, Check, ChatBubbleOutline, AddReaction, VisibilityOff, AddCircleOutline } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import { RetroStore } from '../store/RetroStore';
 
@@ -113,6 +113,21 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
     store.socketService?.toggleCardReaction(card.id, emoji);
   };
 
+  const handleMergeClick = (event: React.MouseEvent<HTMLElement>) => {
+    event.stopPropagation();
+    const targetCardId = store.mergeTargetCardId;
+    if (!targetCardId) {
+      store.setMergeTargetCard(card.id);
+      return;
+    }
+    if (targetCardId === card.id) {
+      store.setMergeTargetCard(null);
+      return;
+    }
+    store.socketService?.mergeCards(targetCardId, card.id);
+    store.setMergeTargetCard(null);
+  };
+
   const cardColor = theme.palette.mode === 'dark'
     ? {
         liked: '#28372d',
@@ -128,6 +143,24 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
   const features = store.roomFeatures;
   const isEditingAllowed = (store.phase === 'creation' || (store.phase === 'discussion' && store.canEditCard(card)));
   const currentUserId = store.currentUser?.id || '';
+  const currentUserName = store.currentUser?.name || '';
+  const isCardOwner = Boolean(currentUserName) && currentUserName === card.createdBy;
+  const isAdmin = store.currentUser?.role === 'admin';
+  const isMergeTarget = store.mergeTargetCardId === card.id;
+  const canMerge =
+    isAdmin &&
+    features.cardEditingEnabled &&
+    store.phase === 'creation';
+  const mergeTooltip = isMergeTarget
+    ? 'Отменить объединение'
+    : store.mergeTargetCardId
+      ? 'Добавить эту карточку к выбранной'
+      : 'Выбрать основную карточку';
+  const isTextHidden =
+    features.hideCardTextDuringCreation &&
+    store.phase === 'creation' &&
+    !isCardOwner &&
+    !isAdmin;
   const hasLiked = card.likes?.includes(currentUserId) || false;
   const hasDisliked = card.dislikes?.includes(currentUserId) || false;
   const canEdit = store.canEditCard(card);
@@ -158,7 +191,9 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
         margin: 0.6,
         backgroundColor: cardColor,
         color: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.92)' : 'inherit',
-        position: 'relative'
+        position: 'relative',
+        outline: isMergeTarget ? `3px solid ${theme.palette.primary.main}` : '3px solid transparent',
+        outlineOffset: -2
       }}
     >
       <CardContent sx={{ pb: '4px !important', '&:last-child': { pb: '4px' } }}>
@@ -213,46 +248,78 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
           <>
             <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
               <Box sx={{ flex: 1 }}>
-                <Typography variant="body1" sx={{ wordBreak: 'break-word' }}>
-                  {card.text}
-                </Typography>
+                {isTextHidden ? (
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 0.75,
+                      opacity: 0.55,
+                      minHeight: 24
+                    }}
+                  >
+                    <VisibilityOff sx={{ fontSize: 18 }} />
+                    <Typography variant="body2" sx={{ fontStyle: 'italic' }}>
+                      Текст скрыт
+                    </Typography>
+                  </Box>
+                ) : (
+                  <Typography variant="body1" sx={{ wordBreak: 'break-word' }}>
+                    {card.text}
+                  </Typography>
+                )}
                 {showAuthor && (
                   <Typography variant="caption" sx={{ opacity: 0.7, display: 'block', mt: 0.5 }}>
                     {card.createdBy}
                   </Typography>
                 )}
               </Box>
-              {canEdit && isEditingAllowed && (
-                <>
-                  <IconButton
-                    size="small"
-                    onClick={handleMenuOpen}
-                    aria-label="Действия с карточкой"
-                    sx={{ mt: -0.5, mr: -0.5, flexShrink: 0 }}
-                  >
-                    <MoreVert fontSize="small" />
-                  </IconButton>
-                  <Menu
-                    anchorEl={menuAnchorEl}
-                    open={isMenuOpen}
-                    onClose={handleMenuClose}
-                    anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-                    transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-                  >
-                    <MenuItem onClick={handleEditFromMenu}>
-                      <ListItemIcon>
-                        <Edit fontSize="small" />
-                      </ListItemIcon>
-                      <ListItemText>Редактировать</ListItemText>
-                    </MenuItem>
-                    <MenuItem onClick={handleDeleteFromMenu}>
-                      <ListItemIcon>
-                        <Delete fontSize="small" />
-                      </ListItemIcon>
-                      <ListItemText>Удалить</ListItemText>
-                    </MenuItem>
-                  </Menu>
-                </>
+              {(canMerge || (canEdit && isEditingAllowed)) && (
+                <Box sx={{ display: 'flex', alignItems: 'center', mt: -0.5, mr: -0.5, flexShrink: 0 }}>
+                  {canMerge && (
+                    <Tooltip title={mergeTooltip}>
+                      <IconButton
+                        size="small"
+                        onClick={handleMergeClick}
+                        aria-label={mergeTooltip}
+                        color={isMergeTarget ? 'primary' : 'default'}
+                      >
+                        <AddCircleOutline fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  )}
+                  {canEdit && isEditingAllowed && (
+                    <>
+                      <IconButton
+                        size="small"
+                        onClick={handleMenuOpen}
+                        aria-label="Действия с карточкой"
+                      >
+                        <MoreVert fontSize="small" />
+                      </IconButton>
+                      <Menu
+                        anchorEl={menuAnchorEl}
+                        open={isMenuOpen}
+                        onClose={handleMenuClose}
+                        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                        transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+                      >
+                        <MenuItem onClick={handleEditFromMenu}>
+                          <ListItemIcon>
+                            <Edit fontSize="small" />
+                          </ListItemIcon>
+                          <ListItemText>Редактировать</ListItemText>
+                        </MenuItem>
+                        <MenuItem onClick={handleDeleteFromMenu}>
+                          <ListItemIcon>
+                            <Delete fontSize="small" />
+                          </ListItemIcon>
+                          <ListItemText>Удалить</ListItemText>
+                        </MenuItem>
+                      </Menu>
+                    </>
+                  )}
+                </Box>
               )}
             </Box>
 
@@ -263,7 +330,7 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
               }}
             />
 
-            {features.mediaEnabled && card.imageUrl && !imageLoadError && (
+            {features.mediaEnabled && !isTextHidden && card.imageUrl && !imageLoadError && (
               <Box
                 component="img"
                 src={card.imageUrl}
@@ -278,13 +345,13 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
                 }}
               />
             )}
-            {features.mediaEnabled && card.imageUrl && imageLoadError && (
+            {features.mediaEnabled && !isTextHidden && card.imageUrl && imageLoadError && (
               <Typography variant="caption" color="error" sx={{ mt: 1, display: 'block' }}>
                 Не удалось загрузить изображение по этой ссылке
               </Typography>
             )}
 
-            {showReactions && groupedReactions.length > 0 && (
+            {showReactions && !isTextHidden && groupedReactions.length > 0 && (
               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 1 }}>
                 {groupedReactions.map((group) => (
                   <Box
@@ -312,7 +379,7 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
               </Box>
             )}
 
-            {canUseSocial && comments.map((comment) => (
+            {canUseSocial && !isTextHidden && comments.map((comment) => (
               <Box key={comment.id} sx={{ mt: 1 }}>
                 <Typography variant="body2" sx={{ wordBreak: 'break-word' }}>
                   {comment.text}
@@ -323,7 +390,7 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
               </Box>
             ))}
 
-            {showComments && showCommentInput && (
+            {showComments && !isTextHidden && showCommentInput && (
               <Box
                 sx={{
                   display: 'flex',
@@ -412,7 +479,7 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
               </Alert>
             )}
 
-            {canUseSocial && (
+            {canUseSocial && !isTextHidden && (
               <Box
                 sx={{
                   display: 'flex',
@@ -470,7 +537,7 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
         )}
       </CardContent>
 
-      {showReactions && canUseSocial && !isEditing && (
+      {showReactions && canUseSocial && !isEditing && !isTextHidden && (
         <Popover
             open={isReactionPickerOpen}
             anchorEl={reactionAnchorEl}

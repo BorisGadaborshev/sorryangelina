@@ -1077,6 +1077,43 @@ io.on('connection', (socket) => {
             socket.emit('error', 'Failed to delete card');
         }
     }));
+    socket.on('merge-cards', ({ targetCardId, sourceCardId }) => __awaiter(void 0, void 0, void 0, function* () {
+        if (!currentUser || typeof targetCardId !== 'string' || typeof sourceCardId !== 'string')
+            return;
+        if (targetCardId === sourceCardId)
+            return;
+        try {
+            const room = yield RoomService_1.RoomService.getRoom(currentUser.roomId);
+            if (!room || room.phase !== 'creation')
+                return;
+            if (!getRoomFeatures(room).cardEditingEnabled)
+                return;
+            const isAdmin = room.users.some((user) => user.name === (currentUser === null || currentUser === void 0 ? void 0 : currentUser.name) && user.role === 'admin');
+            if (!isAdmin)
+                return;
+            const targetCard = room.cards.find((card) => card.id === targetCardId);
+            const sourceCard = room.cards.find((card) => card.id === sourceCardId);
+            if (!targetCard || !sourceCard)
+                return;
+            const updatedRoom = yield RoomService_1.RoomService.mergeCards(currentUser.roomId, targetCardId, sourceCardId);
+            if (updatedRoom) {
+                rooms.set(currentUser.roomId, updatedRoom);
+                const roomState = roomStates.get(currentUser.roomId);
+                if (roomState) {
+                    roomState.cards = updatedRoom.cards;
+                }
+                io.to(currentUser.roomId).emit('state-updated', {
+                    cards: updatedRoom.cards,
+                    phase: updatedRoom.phase,
+                    users: updatedRoom.users
+                });
+            }
+        }
+        catch (error) {
+            console.error('Error merging cards:', error);
+            socket.emit('error', 'Failed to merge cards');
+        }
+    }));
     socket.on('add-card-comment', ({ cardId, text }) => __awaiter(void 0, void 0, void 0, function* () {
         if (!currentUser)
             return;

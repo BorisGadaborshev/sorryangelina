@@ -20,6 +20,7 @@ export interface RoomFeatures {
   commentsEnabled: boolean;
   moveCardsEnabled: boolean;
   anonymousEnabled: boolean;
+  hideCardTextDuringCreation: boolean;
   likesPerUser: VoteLimit;
   dislikesPerUser: VoteLimit;
   dislikesEnabled: boolean;
@@ -38,6 +39,7 @@ export const DEFAULT_ROOM_FEATURES: RoomFeatures = {
   commentsEnabled: true,
   moveCardsEnabled: true,
   anonymousEnabled: true,
+  hideCardTextDuringCreation: true,
   likesPerUser: 3,
   dislikesPerUser: 3,
   dislikesEnabled: true,

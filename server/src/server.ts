@@ -1250,6 +1250,43 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('merge-cards', async ({ targetCardId, sourceCardId }) => {
+    if (!currentUser || typeof targetCardId !== 'string' || typeof sourceCardId !== 'string') return;
+    if (targetCardId === sourceCardId) return;
+
+    try {
+      const room = await RoomService.getRoom(currentUser.roomId);
+      if (!room || room.phase !== 'creation') return;
+      if (!getRoomFeatures(room).cardEditingEnabled) return;
+
+      const isAdmin = room.users.some(
+        (user) => user.name === currentUser?.name && user.role === 'admin'
+      );
+      if (!isAdmin) return;
+
+      const targetCard = room.cards.find((card) => card.id === targetCardId);
+      const sourceCard = room.cards.find((card) => card.id === sourceCardId);
+      if (!targetCard || !sourceCard) return;
+
+      const updatedRoom = await RoomService.mergeCards(currentUser.roomId, targetCardId, sourceCardId);
+      if (updatedRoom) {
+        rooms.set(currentUser.roomId, updatedRoom);
+        const roomState = roomStates.get(currentUser.roomId);
+        if (roomState) {
+          roomState.cards = updatedRoom.cards;
+        }
+        io.to(currentUser.roomId).emit('state-updated', {
+          cards: updatedRoom.cards,
+          phase: updatedRoom.phase,
+          users: updatedRoom.users
+        });
+      }
+    } catch (error) {
+      console.error('Error merging cards:', error);
+      socket.emit('error', 'Failed to merge cards');
+    }
+  });
+
   socket.on('add-card-comment', async ({ cardId, text }) => {
     if (!currentUser) return;
 

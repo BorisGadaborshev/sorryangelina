@@ -41,6 +41,7 @@ export class RetroStore {
   columnTitles: string[] = [...DEFAULT_COLUMN_TITLES];
   roomFeatures: RoomFeatures = { ...DEFAULT_ROOM_FEATURES };
   sprintVip: SprintVipState = { voteCount: 0 };
+  mergeTargetCardId: string | null = null;
   retroRating: RetroRatingState = {
     hasVoted: false,
     votesCount: 0,
@@ -458,6 +459,7 @@ export class RetroStore {
         this.columnTitles = [...DEFAULT_COLUMN_TITLES];
         this.roomFeatures = { ...DEFAULT_ROOM_FEATURES };
         this.sprintVip = { voteCount: 0 };
+        this.mergeTargetCardId = null;
         this.retroRating = { hasVoted: false, votesCount: 0, totalCount: 0, resultsVisible: false };
         this.isReconnecting = false;
         console.log('Cleared room and session');
@@ -469,6 +471,9 @@ export class RetroStore {
     console.log('Setting phase:', phase);
     runInAction(() => {
       this.phase = phase;
+      if (phase !== 'creation') {
+        this.mergeTargetCardId = null;
+      }
       if (phase !== 'discussion') {
         this.discussionNavigation = null;
         this.facilitatorAnnouncement = null;
@@ -481,6 +486,9 @@ export class RetroStore {
     console.log('Setting cards:', cards);
     runInAction(() => {
       this.cards = cards;
+      if (this.mergeTargetCardId && !cards.some((card) => card.id === this.mergeTargetCardId)) {
+        this.mergeTargetCardId = null;
+      }
     });
   }
 
@@ -501,6 +509,12 @@ export class RetroStore {
     runInAction(() => {
       this.cards = state.cards;
       this.phase = state.phase;
+      if (
+        state.phase !== 'creation' ||
+        (this.mergeTargetCardId && !state.cards.some((card) => card.id === this.mergeTargetCardId))
+      ) {
+        this.mergeTargetCardId = null;
+      }
       if (state.phase !== 'discussion') {
         this.discussionNavigation = null;
         this.facilitatorAnnouncement = null;
@@ -556,7 +570,14 @@ export class RetroStore {
     console.log('Deleting card:', cardId);
     runInAction(() => {
       this.cards = this.cards.filter(c => c.id !== cardId);
+      if (this.mergeTargetCardId === cardId) {
+        this.mergeTargetCardId = null;
+      }
     });
+  }
+
+  setMergeTargetCard(cardId: string | null) {
+    this.mergeTargetCardId = cardId;
   }
 
   moveCard(cardId: string, column: number) {

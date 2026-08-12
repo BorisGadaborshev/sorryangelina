@@ -268,6 +268,11 @@ export class RoomService {
     return room ? this.convertToRoom(room) : null;
   }
 
+  static async mergeCards(roomId: string, targetCardId: string, sourceCardId: string): Promise<Room | null> {
+    const room = await RoomModel.mergeCards(roomId, targetCardId, sourceCardId);
+    return room ? this.convertToRoom(room) : null;
+  }
+
   static async addCardComment(
     roomId: string,
     cardId: string,
