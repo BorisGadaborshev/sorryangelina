@@ -356,19 +356,22 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
               </Box>
             )}
 
-            {store.phase === 'voting' && (
+            {(store.phase === 'voting' || store.phase === 'discussion') && (
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center' }}>
                   <Tooltip title="Персик">
-                    <IconButton
-                      size="small"
-                      onClick={() => handleVote('like')}
-                      color={hasLiked ? 'primary' : 'default'}
-                    >
-                      <Typography component="span" sx={{ fontSize: '1.05rem', lineHeight: 1 }}>
-                        🍑
-                      </Typography>
-                    </IconButton>
+                    <span>
+                      <IconButton
+                        size="small"
+                        onClick={() => handleVote('like')}
+                        color={hasLiked ? 'primary' : 'default'}
+                        disabled={store.phase !== 'voting'}
+                      >
+                        <Typography component="span" sx={{ fontSize: '1.05rem', lineHeight: 1 }}>
+                          🍑
+                        </Typography>
+                      </IconButton>
+                    </span>
                   </Tooltip>
                   <Typography variant="body2" sx={{ ml: 0.5 }}>
                     {card.likes?.length || 0}
@@ -377,20 +380,28 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
                 {showDislikes && (
                 <Box sx={{ display: 'flex', alignItems: 'center' }}>
                   <Tooltip title="Тухлый помидор">
-                    <IconButton
-                      size="small"
-                      onClick={() => handleVote('dislike')}
-                      color={hasDisliked ? 'error' : 'default'}
-                    >
-                      <Typography component="span" sx={{ fontSize: '1.05rem', lineHeight: 1 }}>
-                        🍅
-                      </Typography>
-                    </IconButton>
+                    <span>
+                      <IconButton
+                        size="small"
+                        onClick={() => handleVote('dislike')}
+                        color={hasDisliked ? 'error' : 'default'}
+                        disabled={store.phase !== 'voting'}
+                      >
+                        <Typography component="span" sx={{ fontSize: '1.05rem', lineHeight: 1 }}>
+                          🍅
+                        </Typography>
+                      </IconButton>
+                    </span>
                   </Tooltip>
                   <Typography variant="body2" sx={{ ml: 0.5 }}>
                     {card.dislikes?.length || 0}
                   </Typography>
                 </Box>
+                )}
+                {store.phase === 'discussion' && (
+                  <Typography variant="body2" color="text.secondary" sx={{ ml: 'auto' }}>
+                    Рейтинг: {(card.likes?.length || 0) - (card.dislikes?.length || 0)}
+                  </Typography>
                 )}
               </Box>
             )}

@@ -100,11 +100,11 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
     if (currentUserMood) {
       setSelectedMood(currentUserMood);
       setIsMoodDialogOpen(false);
-      store.saveUserMood(currentUserName, currentUserMood);
+      store.saveUserMood(currentRoomId, currentUserName, currentUserMood);
       return;
     }
 
-    const savedMood = store.getSavedUserMood(currentUserName);
+    const savedMood = store.getSavedUserMood(currentRoomId, currentUserName);
     if (savedMood) {
       setSelectedMood(savedMood);
       setIsMoodDialogOpen(false);
@@ -169,9 +169,10 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
     && (store.phase === 'creation' || store.phase === 'voting');
   const canUseChat = features.chatEnabled;
   const canPlayTimerMusic = features.musicEnabled;
+  const readyEnabled = features.readyEnabled;
   const readyCount = store.getUserReadyCount();
   const totalCount = store.getTotalUserCount();
-  const allUsersReady = totalCount > 0 && readyCount === totalCount;
+  const allUsersReady = readyEnabled && totalCount > 0 && readyCount === totalCount;
   const nextPhase = getNextPhase(store.phase, features.retroRatingEnabled);
   const canAdvancePhase = store.isAdmin && nextPhase !== null;
   const isColumnPhase = store.phase === 'creation' || store.phase === 'voting';
@@ -261,8 +262,8 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   };
 
   const handleSaveMood = () => {
-    if (!selectedMood || !currentUserName) return;
-    store.saveUserMood(currentUserName, selectedMood);
+    if (!selectedMood || !currentUserName || !currentRoomId) return;
+    store.saveUserMood(currentRoomId, currentUserName, selectedMood);
     store.socketService?.setUserMood(selectedMood);
     setIsMoodDialogOpen(false);
   };
@@ -426,19 +427,21 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                 width: isMobile ? '100%' : 'auto',
                 gap: isMobile ? 0.5 : 0,
               }}>
-                <Tooltip title={`${readyCount} из ${totalCount} участников готовы`}>
-                  <Typography 
-                    variant="caption" 
-                    sx={{ 
-                      mr: isMobile ? 0 : 2, 
-                      color: readyCount === totalCount ? 'success.light' : 'warning.light',
-                      whiteSpace: 'nowrap',
-                      alignSelf: isMobile ? 'flex-start' : 'center',
-                    }}
-                  >
-                    {readyCount}/{totalCount} готовы
-                  </Typography>
-                </Tooltip>
+                {readyEnabled && (
+                  <Tooltip title={`${readyCount} из ${totalCount} участников готовы`}>
+                    <Typography 
+                      variant="caption" 
+                      sx={{ 
+                        mr: isMobile ? 0 : 2, 
+                        color: readyCount === totalCount ? 'success.light' : 'warning.light',
+                        whiteSpace: 'nowrap',
+                        alignSelf: isMobile ? 'flex-start' : 'center',
+                      }}
+                    >
+                      {readyCount}/{totalCount} готовы
+                    </Typography>
+                  </Tooltip>
+                )}
                 {isMobile ? (
                   <Box
                     sx={{
@@ -592,7 +595,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                   </IconButton>
                 </Tooltip>
               </Box>
-              {store.currentUser && (
+              {readyEnabled && store.currentUser && (
                 <Button
                   variant="contained"
                   color={store.currentUser.isReady ? 'success' : 'primary'}
@@ -780,6 +783,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                   currentPhase={store.phase}
                   onReadyStateChange={handleReadyStateChange}
                   store={store}
+                  showReadyControl={readyEnabled}
                 />
               </Box>
               <Box sx={{ p: 0.75, borderTop: '1px solid', borderColor: 'divider', display: 'flex', justifyContent: 'center' }}>
@@ -920,8 +924,8 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
       />
 
       <Dialog
-        open={Boolean(store.facilitatorAnnouncement)}
-        onClose={() => store.setFacilitatorAnnouncement(null)}
+        open={store.isFacilitatorDialogOpen}
+        onClose={() => store.dismissFacilitatorDialog()}
         maxWidth="xs"
         fullWidth
       >
@@ -932,7 +936,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
           </DialogContentText>
         </DialogContent>
         <DialogActions>
-          <Button variant="contained" onClick={() => store.setFacilitatorAnnouncement(null)}>
+          <Button variant="contained" onClick={() => store.dismissFacilitatorDialog()}>
             Понятно
           </Button>
         </DialogActions>

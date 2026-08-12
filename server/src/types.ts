@@ -21,6 +21,7 @@ export interface RoomFeatures {
   drawingEnabled: boolean;
   cardEditingEnabled: boolean;
   chatEnabled: boolean;
+  readyEnabled: boolean;
 }
 
 export interface User {

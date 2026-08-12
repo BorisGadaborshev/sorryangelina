@@ -24,6 +24,7 @@ import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
 import BrushIcon from '@mui/icons-material/Brush';
 import EditIcon from '@mui/icons-material/Edit';
 import ChatIcon from '@mui/icons-material/Chat';
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import CloseIcon from '@mui/icons-material/Close';
@@ -293,6 +294,12 @@ const RoomSettingsSidebar: React.FC<Props> = observer(({ store, open, onClose, t
                 label="Чат"
                 icon={<ChatIcon fontSize="inherit" />}
                 onClick={() => canManage && toggleFeature('chatEnabled')}
+              />
+              <FeatureToggle
+                active={features.readyEnabled}
+                label="Готовность"
+                icon={<CheckCircleOutlineIcon fontSize="inherit" />}
+                onClick={() => canManage && toggleFeature('readyEnabled')}
               />
             </Box>
 

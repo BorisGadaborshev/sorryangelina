@@ -1,20 +1,63 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { observer } from 'mobx-react-lite';
 import { Box, Paper, Typography, IconButton, Tooltip } from '@mui/material';
 import { NavigateBefore, NavigateNext } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import { RetroStore } from '../store/RetroStore';
 import { Card as CardType, DiscussionNavigationState } from '../types';
+import RetroCard from './RetroCard';
 
 interface Props {
   store: RetroStore;
 }
+
+const formatFacilitatorShortName = (fullName: string): string => {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) return fullName.trim();
+  const [surname, ...rest] = parts;
+  const initials = rest
+    .map((part) => part.charAt(0))
+    .filter(Boolean)
+    .map((letter) => `${letter.toUpperCase()}.`)
+    .join(' ');
+  return initials ? `${surname} ${initials}` : surname;
+};
 
 const DiscussionView: React.FC<Props> = observer(({ store }) => {
   const carouselSize = 3;
   const sortedCards = store.sortedCards;
   const theme = useTheme();
   const canControl = store.canControlDiscussionNavigation();
+  const features = store.roomFeatures;
+  const showDislikes = features.dislikesEnabled;
+  const showReactions = features.reactionsEnabled;
+  const showComments = features.commentsEnabled;
+  const facilitatorName = store.facilitatorAnnouncement?.userName?.trim() || '';
+  const facilitatorShortName = useMemo(
+    () => (facilitatorName ? formatFacilitatorShortName(facilitatorName) : ''),
+    [facilitatorName]
+  );
+  const facilitatorLabelRef = useRef<HTMLDivElement>(null);
+  const facilitatorMeasureRef = useRef<HTMLSpanElement>(null);
+  const [useShortFacilitatorName, setUseShortFacilitatorName] = useState(false);
+
+  useEffect(() => {
+    const container = facilitatorLabelRef.current;
+    const measure = facilitatorMeasureRef.current;
+    if (!container || !measure || !facilitatorName) {
+      setUseShortFacilitatorName(false);
+      return;
+    }
+
+    const update = () => {
+      setUseShortFacilitatorName(measure.scrollWidth > container.clientWidth);
+    };
+
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [facilitatorName]);
 
   const navigation = useMemo<DiscussionNavigationState>(() => {
     const availableIds = sortedCards.map((card) => card.id);
@@ -99,6 +142,16 @@ const DiscussionView: React.FC<Props> = observer(({ store }) => {
     }[card.type];
   };
 
+  const getReactionSummary = (card: CardType): string => {
+    const counts = new Map<string, number>();
+    (card.reactions || []).forEach((reaction) => {
+      counts.set(reaction.emoji, (counts.get(reaction.emoji) || 0) + 1);
+    });
+    return Array.from(counts.entries())
+      .map(([emoji, count]) => `${emoji}${count > 1 ? count : ''}`)
+      .join(' ');
+  };
+
   if (!currentCard) {
     return (
       <Box sx={{
@@ -131,135 +184,128 @@ const DiscussionView: React.FC<Props> = observer(({ store }) => {
         alignItems: 'center',
         gap: 4
       }}>
-        <Box sx={{ width: '100%', maxWidth: '600px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Tooltip title={canControl ? 'Вернуть предыдущую карточку' : 'Переключением управляет фасилитатор'}>
-            <span>
-              <IconButton onClick={handlePreviousCard} disabled={!canControl || navigation.viewedCardIds.length === 0}>
-                <NavigateBefore />
-              </IconButton>
-            </span>
-          </Tooltip>
-          <Typography variant="h6">
-            Осталось {unviewedCards.length} из {sortedCards.length}
-          </Typography>
-          <Tooltip title={canControl ? 'Следующая карточка' : 'Переключением управляет фасилитатор'}>
-            <span>
-              <IconButton onClick={handleNextCard} disabled={!canControl || !currentCard}>
-                <NavigateNext />
-              </IconButton>
-            </span>
-          </Tooltip>
-        </Box>
-
-        {!canControl && store.facilitatorAnnouncement && (
-          <Typography variant="body2" color="text.secondary">
-            Карточки переключает {store.facilitatorAnnouncement.userName}
-          </Typography>
-        )}
-
-        <Paper
-          elevation={3}
-          sx={{
-            width: '100%',
-            maxWidth: '600px',
-            p: 4,
-            backgroundColor: getCardColor(currentCard),
-            color: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.92)' : 'inherit',
-            minHeight: '250px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 3
-          }}
-        >
-          <Typography
-            variant="body1"
-            sx={{
-              flexGrow: 1,
-              fontSize: '1.1rem',
-              lineHeight: 1.6
-            }}
-          >
-            {currentCard.text}
-          </Typography>
-          {currentCard.imageUrl && (
+        <Box sx={{ width: '100%', maxWidth: '600px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
+          {facilitatorName && (
             <Box
-              component="img"
-              src={currentCard.imageUrl}
-              alt="card"
+              ref={facilitatorLabelRef}
               sx={{
                 width: '100%',
-                maxHeight: 320,
-                objectFit: 'contain',
-                borderRadius: 1,
-                border: '1px solid rgba(0,0,0,0.08)'
+                px: 1,
+                textAlign: 'center',
+                position: 'relative',
+                overflow: 'hidden'
               }}
-            />
-          )}
-
-          <Box sx={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            borderTop: '1px solid rgba(0,0,0,0.1)',
-            pt: 2
-          }}>
-            <Box sx={{ display: 'flex', gap: 3 }}>
-              <Typography variant="body2" color="primary" sx={{ fontSize: '1rem' }}>
-                🍑 {currentCard.likes?.length || 0}
+            >
+              <Typography
+                component="span"
+                ref={facilitatorMeasureRef}
+                variant="subtitle1"
+                sx={{
+                  position: 'absolute',
+                  visibility: 'hidden',
+                  whiteSpace: 'nowrap',
+                  pointerEvents: 'none'
+                }}
+              >
+                Ведущий: {facilitatorName}
               </Typography>
-              <Typography variant="body2" color="error" sx={{ fontSize: '1rem' }}>
-                🍅 {currentCard.dislikes?.length || 0}
+              <Typography
+                variant="subtitle1"
+                title={facilitatorName}
+                sx={{
+                  fontWeight: 600,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis'
+                }}
+              >
+                Ведущий: {useShortFacilitatorName ? facilitatorShortName : facilitatorName}
               </Typography>
             </Box>
-            <Typography variant="body2" color="text.secondary" sx={{ fontSize: '1rem' }}>
-              Рейтинг: {(currentCard.likes?.length || 0) - (currentCard.dislikes?.length || 0)}
+          )}
+          <Box sx={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Tooltip title={canControl ? 'Вернуть предыдущую карточку' : 'Переключением управляет ведущий'}>
+              <span>
+                <IconButton onClick={handlePreviousCard} disabled={!canControl || navigation.viewedCardIds.length === 0}>
+                  <NavigateBefore />
+                </IconButton>
+              </span>
+            </Tooltip>
+            <Typography variant="h6">
+              Осталось {unviewedCards.length} из {sortedCards.length}
             </Typography>
+            <Tooltip title={canControl ? 'Следующая карточка' : 'Переключением управляет ведущий'}>
+              <span>
+                <IconButton onClick={handleNextCard} disabled={!canControl || !currentCard}>
+                  <NavigateNext />
+                </IconButton>
+              </span>
+            </Tooltip>
           </Box>
-        </Paper>
+        </Box>
+
+        <Box sx={{ width: '100%', maxWidth: '600px' }}>
+          <RetroCard card={currentCard} index={0} store={store} />
+        </Box>
 
         <Box sx={{ width: '100%', maxWidth: '900px' }}>
           <Typography variant="subtitle2" sx={{ mb: 1.5 }}>
             Остальные карточки
           </Typography>
           <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 1, width: '100%' }}>
-            {visibleCarouselCards.map((card) => (
-              <Paper
-                key={card.id}
-                elevation={2}
-                onClick={() => handleCardSelect(card)}
-                sx={{
-                  p: 1.5,
-                  cursor: canControl ? 'pointer' : 'default',
-                  minHeight: 120,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  justifyContent: 'space-between',
-                  backgroundColor: getCardColor(card),
-                  color: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.92)' : 'inherit',
-                  opacity: canControl ? 1 : 0.92
-                }}
-              >
-                <Typography variant="body2" sx={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {card.text}
-                </Typography>
-                {card.imageUrl && (
-                  <Box
-                    component="img"
-                    src={card.imageUrl}
-                    alt="thumb"
-                    sx={{
-                      width: '100%',
-                      height: 60,
-                      objectFit: 'cover',
-                      borderRadius: 1
-                    }}
-                  />
-                )}
-                <Typography variant="caption" color="text.secondary">
-                  🍑 {card.likes?.length || 0} | 🍅 {card.dislikes?.length || 0}
-                </Typography>
-              </Paper>
-            ))}
+            {visibleCarouselCards.map((card) => {
+              const reactionSummary = showReactions ? getReactionSummary(card) : '';
+              const commentCount = showComments ? (card.comments?.length || 0) : 0;
+
+              return (
+                <Paper
+                  key={card.id}
+                  elevation={2}
+                  onClick={() => handleCardSelect(card)}
+                  sx={{
+                    p: 1.5,
+                    cursor: canControl ? 'pointer' : 'default',
+                    minHeight: 120,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    backgroundColor: getCardColor(card),
+                    color: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.92)' : 'inherit',
+                    opacity: canControl ? 1 : 0.92
+                  }}
+                >
+                  <Typography variant="body2" sx={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {card.text}
+                  </Typography>
+                  {card.imageUrl && (
+                    <Box
+                      component="img"
+                      src={card.imageUrl}
+                      alt="thumb"
+                      sx={{
+                        width: '100%',
+                        height: 60,
+                        objectFit: 'cover',
+                        borderRadius: 1
+                      }}
+                    />
+                  )}
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.25 }}>
+                    <Typography variant="caption" color="text.secondary">
+                      🍑 {card.likes?.length || 0}
+                      {showDislikes ? ` | 🍅 ${card.dislikes?.length || 0}` : ''}
+                    </Typography>
+                    {(reactionSummary || commentCount > 0) && (
+                      <Typography variant="caption" color="text.secondary">
+                        {[reactionSummary, commentCount > 0 ? `💬 ${commentCount}` : '']
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </Typography>
+                    )}
+                  </Box>
+                </Paper>
+              );
+            })}
 
             {Array.from({ length: Math.max(0, carouselSize - visibleCarouselCards.length) }).map((_, idx) => (
               <Box key={`empty-${idx}`} />

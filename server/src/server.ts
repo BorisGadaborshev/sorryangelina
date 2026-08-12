@@ -390,16 +390,45 @@ const emitDiscussionNavigationToSocket = (socket: Socket, roomId: string, room?:
   }
 };
 
+const refreshFacilitatorSocketId = (
+  roomId: string,
+  userName: string,
+  socketId: string
+): FacilitatorAnnouncement | null => {
+  const facilitator = roomFacilitators.get(roomId);
+  if (!facilitator || facilitator.userName !== userName) return facilitator ?? null;
+  if (facilitator.userId === socketId) return facilitator;
+
+  const updated: FacilitatorAnnouncement = {
+    ...facilitator,
+    userId: socketId
+  };
+  roomFacilitators.set(roomId, updated);
+  return updated;
+};
+
+const emitFacilitatorToSocket = (socket: Socket, roomId: string, room?: Room): void => {
+  if (room && room.phase !== 'discussion') return;
+  const userName = typeof socket.data.userName === 'string' ? socket.data.userName : undefined;
+  const facilitator = userName
+    ? refreshFacilitatorSocketId(roomId, userName, socket.id)
+    : roomFacilitators.get(roomId);
+  if (facilitator) {
+    socket.emit('facilitator-selected', facilitator);
+  }
+};
+
 const canControlDiscussionNavigation = (
   room: Room,
   userName: string,
-  userRole: User['role']
+  userRole: User['role'],
+  roomId = room.id
 ): boolean => {
-  if (userRole === 'admin' || room.owner === userName) {
+  const facilitator = roomFacilitators.get(roomId);
+  if (facilitator?.userName === userName) {
     return true;
   }
-  const facilitator = roomFacilitators.get(room.id);
-  return facilitator?.userName === userName;
+  return userRole === 'admin' || room.owner === userName;
 };
 
 const normalizeDiscussionNavigation = (
@@ -828,6 +857,16 @@ const handleUserLeavingRoom = async (socket: Socket, user: User): Promise<Room |
   return updatedRoom;
 };
 
+const handleUserDisconnect = (socket: Socket, user: User): void => {
+  const roomId = user.roomId || (typeof socket.data.roomId === 'string' ? socket.data.roomId : '');
+  if (!roomId) return;
+
+  removeRoomPresence(roomId, user.name, socket.id);
+  // A transport disconnect is temporary: browsers can suspend background tabs.
+  // Keep the persisted room membership and role so restore-session can reconnect
+  // the same logical user without transferring administrator rights.
+};
+
 const resolveSocketActor = async (socket: Socket, currentUser: User | null): Promise<User | null> => {
   if (currentUser?.roomId && currentUser.name) {
     return currentUser;
@@ -915,6 +954,7 @@ io.on('connection', (socket) => {
       emitRetroRatingStateToSocket(socket, room);
       emitSprintVipStateToSocket(socket, room);
       emitDiscussionNavigationToSocket(socket, roomId, room);
+      emitFacilitatorToSocket(socket, roomId, room);
     } catch (error) {
       console.error('Error restoring session:', error);
       socket.emit('session-expired');
@@ -1072,6 +1112,7 @@ io.on('connection', (socket) => {
       emitRetroRatingStateToSocket(socket, room);
       emitSprintVipStateToSocket(socket, room);
       emitDiscussionNavigationToSocket(socket, roomId, room);
+      emitFacilitatorToSocket(socket, roomId, room);
       if (!existingUser) {
         socket.to(roomId).emit('user-joined', user);
       } else {
@@ -1345,6 +1386,12 @@ io.on('connection', (socket) => {
       socket.data.userName = actor.name;
       socket.data.roomId = actor.roomId;
 
+      const roomForFeatures = await RoomService.getRoom(actor.roomId);
+      if (roomForFeatures && !getRoomFeatures(roomForFeatures).readyEnabled) {
+        socket.emit('error', 'Отметка готовности отключена в настройках комнаты');
+        return;
+      }
+
       console.log('Received ready state update:', {
         userId: actor.id,
         userName: actor.name,
@@ -1467,7 +1514,6 @@ io.on('connection', (socket) => {
     });
 
     try {
-      const previousRoom = await RoomService.getRoom(actor.roomId);
       const updatedRoom = await RoomService.updatePhase(actor.roomId, phase, actor.id, actor.name);
       if (!updatedRoom) {
         socket.emit('error', 'Failed to change phase');
@@ -1484,10 +1530,6 @@ io.on('connection', (socket) => {
       const roomState = roomWithResetStates || updatedRoom;
 
       clearRoomTimer(actor.roomId, true);
-      if (roomState.phase === 'creation') {
-        roomFacilitators.delete(actor.roomId);
-        roomDiscussionNavigation.delete(actor.roomId);
-      }
       if (roomState.phase === 'rating') {
         roomRetroRatings.set(actor.roomId, { votes: new Map(), resultsVisible: false });
       }
@@ -1497,6 +1539,7 @@ io.on('connection', (socket) => {
         io.to(actor.roomId).emit('discussion-navigation', navigationState);
       } else {
         roomDiscussionNavigation.delete(actor.roomId);
+        roomFacilitators.delete(actor.roomId);
       }
 
       io.to(actor.roomId).emit('phase-changed', {
@@ -1509,13 +1552,14 @@ io.on('connection', (socket) => {
         users: roomState.users
       });
 
-      if (previousRoom?.phase === 'creation' && roomState.phase !== 'creation') {
+      if (roomState.phase === 'discussion') {
         const facilitator = selectRandomFacilitator(roomState);
         if (facilitator) {
           roomFacilitators.set(actor.roomId, facilitator);
           io.to(actor.roomId).emit('facilitator-selected', facilitator);
         }
       }
+
       await emitRetroRatingStateToRoom(actor.roomId);
     } catch (error) {
       console.error('Error changing phase:', error);
@@ -1544,7 +1588,7 @@ io.on('connection', (socket) => {
     try {
       const room = await RoomService.getRoom(actor.roomId);
       if (!room) return;
-      if (!canControlDiscussionNavigation(room, actor.name, actor.role)) return;
+      if (!canControlDiscussionNavigation(room, actor.name, actor.role, actor.roomId)) return;
       if (!Array.isArray(titles)) return;
 
       const updatedRoom = await RoomService.updateColumnTitles(actor.roomId, titles);
@@ -1577,7 +1621,13 @@ io.on('connection', (socket) => {
     try {
       const room = await RoomService.getRoom(actor.roomId);
       if (!room || room.phase !== 'discussion') return;
-      if (!canControlDiscussionNavigation(room, actor.name, actor.role)) return;
+      if (!canControlDiscussionNavigation(room, actor.name, actor.role, actor.roomId)) {
+        const current = roomDiscussionNavigation.get(actor.roomId);
+        if (current) {
+          socket.emit('discussion-navigation', current);
+        }
+        return;
+      }
 
       const normalized = normalizeDiscussionNavigation(room, {
         unviewedCardIds: Array.isArray(unviewedCardIds)
@@ -1782,7 +1832,7 @@ io.on('connection', (socket) => {
     try {
       const room = await RoomService.getRoom(actor.roomId);
       if (!room) return;
-      if (!canControlDiscussionNavigation(room, actor.name, actor.role)) return;
+      if (!canControlDiscussionNavigation(room, actor.name, actor.role, actor.roomId)) return;
 
       const updatedRoom = await RoomService.updateRoomFeatures(actor.roomId, features as Partial<RoomFeatures>);
       if (!updatedRoom?.features) return;
@@ -1910,7 +1960,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('disconnect', async (reason) => {
+  socket.on('disconnect', (reason) => {
     connectionCount--;
     console.log(`Client disconnected (${connectionCount} total):`, socket.id);
     console.log('Disconnect reason:', reason);
@@ -1918,9 +1968,9 @@ io.on('connection', (socket) => {
     if (!currentUser) return;
 
     try {
-      const leavingUser = currentUser;
+      const disconnectedUser = currentUser;
       currentUser = null;
-      await handleUserLeavingRoom(socket, leavingUser);
+      handleUserDisconnect(socket, disconnectedUser);
     } catch (error) {
       console.error('Error handling disconnect:', error);
     }

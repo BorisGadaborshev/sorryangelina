@@ -15,7 +15,8 @@ exports.DEFAULT_ROOM_FEATURES = {
     sprintVipEnabled: true,
     drawingEnabled: true,
     cardEditingEnabled: true,
-    chatEnabled: true
+    chatEnabled: true,
+    readyEnabled: true
 };
 const isVoteLimit = (value) => value === 1 || value === 3 || value === 5;
 const resolveVoteLimit = (value, legacyVotesPerUser, fallback) => {
@@ -35,7 +36,7 @@ const resolveAnonymousEnabled = (raw) => {
     return exports.DEFAULT_ROOM_FEATURES.anonymousEnabled;
 };
 const normalizeRoomFeatures = (raw) => {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
     const legacyVotesPerUser = raw === null || raw === void 0 ? void 0 : raw.votesPerUser;
     return {
         mediaEnabled: (_a = raw === null || raw === void 0 ? void 0 : raw.mediaEnabled) !== null && _a !== void 0 ? _a : exports.DEFAULT_ROOM_FEATURES.mediaEnabled,
@@ -51,7 +52,8 @@ const normalizeRoomFeatures = (raw) => {
         sprintVipEnabled: (_h = raw === null || raw === void 0 ? void 0 : raw.sprintVipEnabled) !== null && _h !== void 0 ? _h : exports.DEFAULT_ROOM_FEATURES.sprintVipEnabled,
         drawingEnabled: (_j = raw === null || raw === void 0 ? void 0 : raw.drawingEnabled) !== null && _j !== void 0 ? _j : exports.DEFAULT_ROOM_FEATURES.drawingEnabled,
         cardEditingEnabled: (_k = raw === null || raw === void 0 ? void 0 : raw.cardEditingEnabled) !== null && _k !== void 0 ? _k : exports.DEFAULT_ROOM_FEATURES.cardEditingEnabled,
-        chatEnabled: (_l = raw === null || raw === void 0 ? void 0 : raw.chatEnabled) !== null && _l !== void 0 ? _l : exports.DEFAULT_ROOM_FEATURES.chatEnabled
+        chatEnabled: (_l = raw === null || raw === void 0 ? void 0 : raw.chatEnabled) !== null && _l !== void 0 ? _l : exports.DEFAULT_ROOM_FEATURES.chatEnabled,
+        readyEnabled: (_m = raw === null || raw === void 0 ? void 0 : raw.readyEnabled) !== null && _m !== void 0 ? _m : exports.DEFAULT_ROOM_FEATURES.readyEnabled
     };
 };
 exports.normalizeRoomFeatures = normalizeRoomFeatures;

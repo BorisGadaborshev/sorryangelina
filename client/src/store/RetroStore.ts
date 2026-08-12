@@ -5,6 +5,7 @@ import { SocketService } from '../services/socket';
 
 const BOARD_STATE_KEY = 'retroBoardState';
 const USER_MOOD_KEY_PREFIX = 'retroUserMood:';
+const FACILITATOR_SEEN_KEY_PREFIX = 'facilitatorSeen:';
 const VALID_MOODS: Mood[] = ['great', 'good', 'neutral', 'bad', 'awful'];
 
 interface PersistedBoardState {
@@ -35,6 +36,7 @@ export class RetroStore {
   chatMessages: ChatMessage[] = [];
   whiteboardStrokes: WhiteboardStroke[] = [];
   facilitatorAnnouncement: FacilitatorAnnouncement | null = null;
+  isFacilitatorDialogOpen = false;
   discussionNavigation: DiscussionNavigationState | null = null;
   columnTitles: string[] = [...DEFAULT_COLUMN_TITLES];
   roomFeatures: RoomFeatures = { ...DEFAULT_ROOM_FEATURES };
@@ -133,7 +135,7 @@ export class RetroStore {
           ? [...parsed.columnTitles]
           : [...DEFAULT_COLUMN_TITLES];
         this.roomFeatures = parsed.roomFeatures
-          ? { ...parsed.roomFeatures }
+          ? { ...DEFAULT_ROOM_FEATURES, ...parsed.roomFeatures }
           : { ...DEFAULT_ROOM_FEATURES };
         this.currentUser = parsed.currentUser;
       });
@@ -161,13 +163,32 @@ export class RetroStore {
     this.clearBoardState();
   }
 
-  getSavedUserMood(username: string): Mood | null {
-    const raw = localStorage.getItem(`${USER_MOOD_KEY_PREFIX}${username}`);
+  private userMoodStorageKey(roomId: string, username: string): string {
+    return `${USER_MOOD_KEY_PREFIX}${roomId}:${username}`;
+  }
+
+  private facilitatorSeenStorageKey(roomId: string): string {
+    return `${FACILITATOR_SEEN_KEY_PREFIX}${roomId}`;
+  }
+
+  private getSeenFacilitatorSelectedAt(roomId: string): number | null {
+    const raw = localStorage.getItem(this.facilitatorSeenStorageKey(roomId));
+    if (!raw) return null;
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : null;
+  }
+
+  private markFacilitatorSeen(roomId: string, selectedAt: number) {
+    localStorage.setItem(this.facilitatorSeenStorageKey(roomId), String(selectedAt));
+  }
+
+  getSavedUserMood(roomId: string, username: string): Mood | null {
+    const raw = localStorage.getItem(this.userMoodStorageKey(roomId, username));
     return VALID_MOODS.includes(raw as Mood) ? (raw as Mood) : null;
   }
 
-  saveUserMood(username: string, mood: Mood) {
-    localStorage.setItem(`${USER_MOOD_KEY_PREFIX}${username}`, mood);
+  saveUserMood(roomId: string, username: string, mood: Mood) {
+    localStorage.setItem(this.userMoodStorageKey(roomId, username), mood);
   }
 
   private saveAuth(profile: AuthProfile) {
@@ -310,6 +331,27 @@ export class RetroStore {
   setFacilitatorAnnouncement(announcement: FacilitatorAnnouncement | null) {
     runInAction(() => {
       this.facilitatorAnnouncement = announcement;
+      if (!announcement) {
+        this.isFacilitatorDialogOpen = false;
+        return;
+      }
+
+      const roomId = this.room?.id ?? localStorage.getItem('roomId');
+      const alreadySeen = roomId
+        ? this.getSeenFacilitatorSelectedAt(roomId) === announcement.selectedAt
+        : false;
+      this.isFacilitatorDialogOpen = !alreadySeen;
+    });
+  }
+
+  dismissFacilitatorDialog() {
+    const announcement = this.facilitatorAnnouncement;
+    const roomId = this.room?.id ?? localStorage.getItem('roomId');
+    if (announcement && roomId) {
+      this.markFacilitatorSeen(roomId, announcement.selectedAt);
+    }
+    runInAction(() => {
+      this.isFacilitatorDialogOpen = false;
     });
   }
 
@@ -374,7 +416,9 @@ export class RetroStore {
         } else {
           this.columnTitles = [...DEFAULT_COLUMN_TITLES];
         }
-        this.roomFeatures = room.features ? { ...room.features } : { ...DEFAULT_ROOM_FEATURES };
+        this.roomFeatures = room.features
+          ? { ...DEFAULT_ROOM_FEATURES, ...room.features }
+          : { ...DEFAULT_ROOM_FEATURES };
         const savedUsername = localStorage.getItem('username');
         console.log('Current users in room:', room.users.map(u => ({ name: u.name, role: u.role })));
         
@@ -409,6 +453,7 @@ export class RetroStore {
         this.chatMessages = [];
         this.whiteboardStrokes = [];
         this.facilitatorAnnouncement = null;
+        this.isFacilitatorDialogOpen = false;
         this.discussionNavigation = null;
         this.columnTitles = [...DEFAULT_COLUMN_TITLES];
         this.roomFeatures = { ...DEFAULT_ROOM_FEATURES };
@@ -424,12 +469,10 @@ export class RetroStore {
     console.log('Setting phase:', phase);
     runInAction(() => {
       this.phase = phase;
-      if (phase === 'creation') {
-        this.facilitatorAnnouncement = null;
-        this.discussionNavigation = null;
-      }
       if (phase !== 'discussion') {
         this.discussionNavigation = null;
+        this.facilitatorAnnouncement = null;
+        this.isFacilitatorDialogOpen = false;
       }
     });
   }
@@ -458,12 +501,10 @@ export class RetroStore {
     runInAction(() => {
       this.cards = state.cards;
       this.phase = state.phase;
-      if (state.phase === 'creation') {
-        this.facilitatorAnnouncement = null;
-        this.discussionNavigation = null;
-      }
       if (state.phase !== 'discussion') {
         this.discussionNavigation = null;
+        this.facilitatorAnnouncement = null;
+        this.isFacilitatorDialogOpen = false;
       }
       this.users = this.normalizeUsers(state.users);
       if (this.currentUser) {
@@ -567,33 +608,11 @@ export class RetroStore {
   }
 
   get sortedCards() {
-    console.log('Calculating sorted cards. Current phase:', this.phase);
-    console.log('Total cards:', this.cards.length);
-    
-    const cards = this.cards.map(c => ({
-      ...c,
-      score: (c.likes?.length || 0) - (c.dislikes?.length || 0)
-    }));
-
-    console.log('Cards before sorting:', cards.map(c => ({
-      id: c.id,
-      text: c.text.substring(0, 20) + '...',
-      likes: c.likes?.length || 0,
-      dislikes: c.dislikes?.length || 0,
-      score: c.score
-    })));
-    
-    const sortedCards = [...cards].sort((a, b) => b.score - a.score);
-
-    console.log('Cards after sorting:', sortedCards.map(c => ({
-      id: c.id,
-      text: c.text.substring(0, 20) + '...',
-      likes: c.likes?.length || 0,
-      dislikes: c.dislikes?.length || 0,
-      score: c.score
-    })));
-    
-    return sortedCards;
+    return [...this.cards].sort((a, b) => {
+      const scoreA = (a.likes?.length || 0) - (a.dislikes?.length || 0);
+      const scoreB = (b.likes?.length || 0) - (b.dislikes?.length || 0);
+      return scoreB - scoreA;
+    });
   }
 
   get isAdmin(): boolean {
@@ -616,12 +635,15 @@ export class RetroStore {
     return this.currentUser.role === 'admin' || this.room?.owner === this.currentUser.name;
   }
 
+  get isDiscussionFacilitator(): boolean {
+    if (!this.currentUser || !this.facilitatorAnnouncement) return false;
+    return this.facilitatorAnnouncement.userName === this.currentUser.name;
+  }
+
   canControlDiscussionNavigation(): boolean {
     if (!this.currentUser) return false;
-    if (this.currentUser.role === 'admin' || this.room?.owner === this.currentUser.name) {
-      return true;
-    }
-    return this.facilitatorAnnouncement?.userName === this.currentUser.name;
+    if (this.isDiscussionFacilitator) return true;
+    return this.currentUser.role === 'admin' || this.room?.owner === this.currentUser.name;
   }
 
   canEditColumnTitles(): boolean {
@@ -648,9 +670,9 @@ export class RetroStore {
 
   setRoomFeatures(features: RoomFeatures) {
     runInAction(() => {
-      this.roomFeatures = { ...features };
+      this.roomFeatures = { ...DEFAULT_ROOM_FEATURES, ...features };
       if (this.room) {
-        this.room = { ...this.room, features: { ...features } };
+        this.room = { ...this.room, features: { ...DEFAULT_ROOM_FEATURES, ...features } };
       }
     });
   }

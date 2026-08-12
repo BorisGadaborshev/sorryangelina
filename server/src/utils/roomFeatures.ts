@@ -14,7 +14,8 @@ export const DEFAULT_ROOM_FEATURES: RoomFeatures = {
   sprintVipEnabled: true,
   drawingEnabled: true,
   cardEditingEnabled: true,
-  chatEnabled: true
+  chatEnabled: true,
+  readyEnabled: true
 };
 
 const isVoteLimit = (value: unknown): value is VoteLimit =>
@@ -59,6 +60,7 @@ export const normalizeRoomFeatures = (raw?: Partial<RoomFeatures> & { votesPerUs
     sprintVipEnabled: raw?.sprintVipEnabled ?? DEFAULT_ROOM_FEATURES.sprintVipEnabled,
     drawingEnabled: raw?.drawingEnabled ?? DEFAULT_ROOM_FEATURES.drawingEnabled,
     cardEditingEnabled: raw?.cardEditingEnabled ?? DEFAULT_ROOM_FEATURES.cardEditingEnabled,
-    chatEnabled: raw?.chatEnabled ?? DEFAULT_ROOM_FEATURES.chatEnabled
+    chatEnabled: raw?.chatEnabled ?? DEFAULT_ROOM_FEATURES.chatEnabled,
+    readyEnabled: raw?.readyEnabled ?? DEFAULT_ROOM_FEATURES.readyEnabled
   };
 };

@@ -29,6 +29,7 @@ export interface RoomFeatures {
   drawingEnabled: boolean;
   cardEditingEnabled: boolean;
   chatEnabled: boolean;
+  readyEnabled: boolean;
 }
 
 export const DEFAULT_ROOM_FEATURES: RoomFeatures = {
@@ -45,7 +46,8 @@ export const DEFAULT_ROOM_FEATURES: RoomFeatures = {
   sprintVipEnabled: true,
   drawingEnabled: true,
   cardEditingEnabled: true,
-  chatEnabled: true
+  chatEnabled: true,
+  readyEnabled: true
 };
 
 export interface Room {

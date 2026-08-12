@@ -46,6 +46,7 @@ const UserList: React.FC<UserListProps> = observer(({
   const isBuiltinTeam = teamId === BUILTIN_TEAM_ID;
   const currentUser = users.find(u => u.id === currentUserId);
   const isAdmin = currentUser?.role === 'admin';
+  const readyEnabled = store.roomFeatures.readyEnabled;
   const myVipVote = store.sprintVip.myVote;
   const vipVoteHighlight = {
     bg: 'rgba(255, 249, 196, 0.55)',
@@ -147,7 +148,7 @@ const UserList: React.FC<UserListProps> = observer(({
         <Typography variant="h6" gutterBottom>
           Участники ({users.length})
         </Typography>
-        {showReadyControl && currentUser && (
+        {showReadyControl && readyEnabled && currentUser && (
           <>
             <Typography variant="body2" color="text.secondary" gutterBottom>
               {currentUser.isReady ? 'Вы отметили свою готовность' : 'Отметьте свою готовность'}
@@ -194,21 +195,23 @@ const UserList: React.FC<UserListProps> = observer(({
                 sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}
                 onClick={(event) => event.stopPropagation()}
               >
-                <Tooltip
-                  title={
-                    user.id === currentUserId
-                      ? (user.isReady ? `Вы ${getPhaseActionText(currentPhase)}` : 'Вы еще не готовы')
-                      : (user.isReady ? `${user.name} ${getPhaseActionText(currentPhase)}` : `${user.name} еще не готов(а)`)
-                  }
-                >
-                  <Box sx={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    color: user.isReady ? 'success.main' : 'text.disabled'
-                  }}>
-                    {user.isReady ? <CheckCircleIcon fontSize="small" /> : <RadioButtonUncheckedIcon fontSize="small" />}
-                  </Box>
-                </Tooltip>
+                {readyEnabled && (
+                  <Tooltip
+                    title={
+                      user.id === currentUserId
+                        ? (user.isReady ? `Вы ${getPhaseActionText(currentPhase)}` : 'Вы еще не готовы')
+                        : (user.isReady ? `${user.name} ${getPhaseActionText(currentPhase)}` : `${user.name} еще не готов(а)`)
+                    }
+                  >
+                    <Box sx={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      color: user.isReady ? 'success.main' : 'text.disabled'
+                    }}>
+                      {user.isReady ? <CheckCircleIcon fontSize="small" /> : <RadioButtonUncheckedIcon fontSize="small" />}
+                    </Box>
+                  </Tooltip>
+                )}
                 {isAdmin && user.id !== currentUserId && user.role !== 'admin' && (
                   <Tooltip title="Назначить администратором">
                     <IconButton
@@ -243,7 +246,7 @@ const UserList: React.FC<UserListProps> = observer(({
               alignItems: 'center',
               border: isMyVipVote ? '2px solid' : '2px solid transparent',
               borderColor: isMyVipVote ? vipVoteHighlight.border : 'transparent',
-              bgcolor: user.id === currentUserId && user.isReady
+              bgcolor: readyEnabled && user.id === currentUserId && user.isReady
                 ? 'success.light'
                 : isMyVipVote
                   ? vipVoteHighlight.bg

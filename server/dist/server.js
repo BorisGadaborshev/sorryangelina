@@ -354,12 +354,33 @@ const emitDiscussionNavigationToSocket = (socket, roomId, room) => {
         socket.emit('discussion-navigation', state);
     }
 };
-const canControlDiscussionNavigation = (room, userName, userRole) => {
-    if (userRole === 'admin' || room.owner === userName) {
+const refreshFacilitatorSocketId = (roomId, userName, socketId) => {
+    const facilitator = roomFacilitators.get(roomId);
+    if (!facilitator || facilitator.userName !== userName)
+        return facilitator !== null && facilitator !== void 0 ? facilitator : null;
+    if (facilitator.userId === socketId)
+        return facilitator;
+    const updated = Object.assign(Object.assign({}, facilitator), { userId: socketId });
+    roomFacilitators.set(roomId, updated);
+    return updated;
+};
+const emitFacilitatorToSocket = (socket, roomId, room) => {
+    if (room && room.phase !== 'discussion')
+        return;
+    const userName = typeof socket.data.userName === 'string' ? socket.data.userName : undefined;
+    const facilitator = userName
+        ? refreshFacilitatorSocketId(roomId, userName, socket.id)
+        : roomFacilitators.get(roomId);
+    if (facilitator) {
+        socket.emit('facilitator-selected', facilitator);
+    }
+};
+const canControlDiscussionNavigation = (room, userName, userRole, roomId = room.id) => {
+    const facilitator = roomFacilitators.get(roomId);
+    if ((facilitator === null || facilitator === void 0 ? void 0 : facilitator.userName) === userName) {
         return true;
     }
-    const facilitator = roomFacilitators.get(room.id);
-    return (facilitator === null || facilitator === void 0 ? void 0 : facilitator.userName) === userName;
+    return userRole === 'admin' || room.owner === userName;
 };
 const normalizeDiscussionNavigation = (room, state) => {
     const availableIds = new Set(room.cards.map((card) => card.id));
@@ -692,6 +713,15 @@ const handleUserLeavingRoom = (socket, user) => __awaiter(void 0, void 0, void 0
     }
     return updatedRoom;
 });
+const handleUserDisconnect = (socket, user) => {
+    const roomId = user.roomId || (typeof socket.data.roomId === 'string' ? socket.data.roomId : '');
+    if (!roomId)
+        return;
+    removeRoomPresence(roomId, user.name, socket.id);
+    // A transport disconnect is temporary: browsers can suspend background tabs.
+    // Keep the persisted room membership and role so restore-session can reconnect
+    // the same logical user without transferring administrator rights.
+};
 const resolveSocketActor = (socket, currentUser) => __awaiter(void 0, void 0, void 0, function* () {
     if ((currentUser === null || currentUser === void 0 ? void 0 : currentUser.roomId) && currentUser.name) {
         return currentUser;
@@ -764,6 +794,7 @@ io.on('connection', (socket) => {
             emitRetroRatingStateToSocket(socket, room);
             emitSprintVipStateToSocket(socket, room);
             emitDiscussionNavigationToSocket(socket, roomId, room);
+            emitFacilitatorToSocket(socket, roomId, room);
         }
         catch (error) {
             console.error('Error restoring session:', error);
@@ -907,6 +938,7 @@ io.on('connection', (socket) => {
             emitRetroRatingStateToSocket(socket, room);
             emitSprintVipStateToSocket(socket, room);
             emitDiscussionNavigationToSocket(socket, roomId, room);
+            emitFacilitatorToSocket(socket, roomId, room);
             if (!existingUser) {
                 socket.to(roomId).emit('user-joined', user);
             }
@@ -1172,6 +1204,11 @@ io.on('connection', (socket) => {
             socket.data.userId = actor.id;
             socket.data.userName = actor.name;
             socket.data.roomId = actor.roomId;
+            const roomForFeatures = yield RoomService_1.RoomService.getRoom(actor.roomId);
+            if (roomForFeatures && !getRoomFeatures(roomForFeatures).readyEnabled) {
+                socket.emit('error', 'Отметка готовности отключена в настройках комнаты');
+                return;
+            }
             console.log('Received ready state update:', {
                 userId: actor.id,
                 userName: actor.name,
@@ -1284,7 +1321,6 @@ io.on('connection', (socket) => {
             phase
         });
         try {
-            const previousRoom = yield RoomService_1.RoomService.getRoom(actor.roomId);
             const updatedRoom = yield RoomService_1.RoomService.updatePhase(actor.roomId, phase, actor.id, actor.name);
             if (!updatedRoom) {
                 socket.emit('error', 'Failed to change phase');
@@ -1298,10 +1334,6 @@ io.on('connection', (socket) => {
             const roomWithResetStates = yield RoomService_1.RoomService.resetUsersReadyState(actor.roomId);
             const roomState = roomWithResetStates || updatedRoom;
             clearRoomTimer(actor.roomId, true);
-            if (roomState.phase === 'creation') {
-                roomFacilitators.delete(actor.roomId);
-                roomDiscussionNavigation.delete(actor.roomId);
-            }
             if (roomState.phase === 'rating') {
                 roomRetroRatings.set(actor.roomId, { votes: new Map(), resultsVisible: false });
             }
@@ -1312,6 +1344,7 @@ io.on('connection', (socket) => {
             }
             else {
                 roomDiscussionNavigation.delete(actor.roomId);
+                roomFacilitators.delete(actor.roomId);
             }
             io.to(actor.roomId).emit('phase-changed', {
                 phase: roomState.phase,
@@ -1322,7 +1355,7 @@ io.on('connection', (socket) => {
                 phase: roomState.phase,
                 users: roomState.users
             });
-            if ((previousRoom === null || previousRoom === void 0 ? void 0 : previousRoom.phase) === 'creation' && roomState.phase !== 'creation') {
+            if (roomState.phase === 'discussion') {
                 const facilitator = selectRandomFacilitator(roomState);
                 if (facilitator) {
                     roomFacilitators.set(actor.roomId, facilitator);
@@ -1357,7 +1390,7 @@ io.on('connection', (socket) => {
             const room = yield RoomService_1.RoomService.getRoom(actor.roomId);
             if (!room)
                 return;
-            if (!canControlDiscussionNavigation(room, actor.name, actor.role))
+            if (!canControlDiscussionNavigation(room, actor.name, actor.role, actor.roomId))
                 return;
             if (!Array.isArray(titles))
                 return;
@@ -1391,8 +1424,13 @@ io.on('connection', (socket) => {
             const room = yield RoomService_1.RoomService.getRoom(actor.roomId);
             if (!room || room.phase !== 'discussion')
                 return;
-            if (!canControlDiscussionNavigation(room, actor.name, actor.role))
+            if (!canControlDiscussionNavigation(room, actor.name, actor.role, actor.roomId)) {
+                const current = roomDiscussionNavigation.get(actor.roomId);
+                if (current) {
+                    socket.emit('discussion-navigation', current);
+                }
                 return;
+            }
             const normalized = normalizeDiscussionNavigation(room, {
                 unviewedCardIds: Array.isArray(unviewedCardIds)
                     ? unviewedCardIds.filter((id) => typeof id === 'string')
@@ -1588,7 +1626,7 @@ io.on('connection', (socket) => {
             const room = yield RoomService_1.RoomService.getRoom(actor.roomId);
             if (!room)
                 return;
-            if (!canControlDiscussionNavigation(room, actor.name, actor.role))
+            if (!canControlDiscussionNavigation(room, actor.name, actor.role, actor.roomId))
                 return;
             const updatedRoom = yield RoomService_1.RoomService.updateRoomFeatures(actor.roomId, features);
             if (!(updatedRoom === null || updatedRoom === void 0 ? void 0 : updatedRoom.features))
@@ -1704,21 +1742,21 @@ io.on('connection', (socket) => {
             socket.emit('error', 'Failed to delete room');
         }
     }));
-    socket.on('disconnect', (reason) => __awaiter(void 0, void 0, void 0, function* () {
+    socket.on('disconnect', (reason) => {
         connectionCount--;
         console.log(`Client disconnected (${connectionCount} total):`, socket.id);
         console.log('Disconnect reason:', reason);
         if (!currentUser)
             return;
         try {
-            const leavingUser = currentUser;
+            const disconnectedUser = currentUser;
             currentUser = null;
-            yield handleUserLeavingRoom(socket, leavingUser);
+            handleUserDisconnect(socket, disconnectedUser);
         }
         catch (error) {
             console.error('Error handling disconnect:', error);
         }
-    }));
+    });
     socket.on('error', (error) => {
         console.error('Socket error for client:', socket.id, error);
     });
