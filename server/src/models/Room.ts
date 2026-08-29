@@ -1,6 +1,6 @@
 // Postgres access helpers
 import { pool } from '../config/database';
-import { Room, RoomDocument, User, Card, CardComment, CardReaction, RoomFeatures, COLUMN_COUNT } from '../types';
+import { Room, RoomDocument, User, Card, CardComment, CardReaction, RoomFeatures, COLUMN_COUNT, ColumnColorId, mergeCardTexts, normalizeColumnColors } from '../types';
 import { normalizeRoomFeatures } from '../utils/roomFeatures';
 
 const attachSocialDataToCards = async (cards: Card[]): Promise<Card[]> => {
@@ -77,7 +77,7 @@ export const RoomModel = {
 
   async findOne(where: { id: string }): Promise<RoomDocument | null> {
     const { rows } = await pool.query(
-      'select id, password, team_id, owner, phase, created_at, column_titles, features from rooms where id=$1',
+      'select id, password, team_id, owner, phase, created_at, column_titles, column_colors, features from rooms where id=$1',
       [where.id]
     );
     if (rows.length === 0) return null;
@@ -89,6 +89,7 @@ export const RoomModel = {
       phase: Room['phase'];
       created_at: string;
       column_titles: string[] | null;
+      column_colors: string[] | null;
       features: RoomFeatures | null;
     };
     const usersRes = await pool.query(
@@ -125,6 +126,7 @@ export const RoomModel = {
       columnTitles: Array.isArray(roomRow.column_titles) && roomRow.column_titles.length === COLUMN_COUNT
         ? roomRow.column_titles
         : undefined,
+      columnColors: normalizeColumnColors(roomRow.column_colors),
       features: normalizeRoomFeatures(roomRow.features),
       createdAt: roomRow.created_at,
       users,
@@ -135,6 +137,14 @@ export const RoomModel = {
   async updateColumnTitles(roomId: string, titles: string[]): Promise<RoomDocument | null> {
     await pool.query('update rooms set column_titles=$1::jsonb, updated_at=now() where id=$2', [
       JSON.stringify(titles),
+      roomId
+    ]);
+    return this.findOne({ id: roomId });
+  },
+
+  async updateColumnColors(roomId: string, colors: ColumnColorId[]): Promise<RoomDocument | null> {
+    await pool.query('update rooms set column_colors=$1::jsonb, updated_at=now() where id=$2', [
+      JSON.stringify(colors),
       roomId
     ]);
     return this.findOne({ id: roomId });
@@ -155,21 +165,34 @@ export const RoomModel = {
     try {
       await client.query('BEGIN');
       const { rows } = await client.query(
-        'select id, text from cards where room_id=$1 and id = any($2::text[]) for update',
+        'select id, text, image_url from cards where room_id=$1 and id = any($2::text[]) for update',
         [roomId, [targetCardId, sourceCardId]]
       );
-      const targetCard = rows.find((row: { id: string }) => row.id === targetCardId) as { id: string; text: string } | undefined;
-      const sourceCard = rows.find((row: { id: string }) => row.id === sourceCardId) as { id: string; text: string } | undefined;
+      const targetCard = rows.find((row: { id: string }) => row.id === targetCardId) as { id: string; text: string; image_url: string | null } | undefined;
+      const sourceCard = rows.find((row: { id: string }) => row.id === sourceCardId) as { id: string; text: string; image_url: string | null } | undefined;
 
       if (!targetCard || !sourceCard) {
         await client.query('ROLLBACK');
         return null;
       }
 
-      const mergedText = `${targetCard.text.trim()} (${sourceCard.text.trim()})`;
+      const mergedText = mergeCardTexts(targetCard.text, sourceCard.text);
+      const mergedImageUrl = targetCard.image_url || sourceCard.image_url || null;
       await client.query(
-        'update cards set text=$1 where room_id=$2 and id=$3',
-        [mergedText, roomId, targetCardId]
+        'update cards set text=$1, image_url=$2 where room_id=$3 and id=$4',
+        [mergedText, mergedImageUrl, roomId, targetCardId]
+      );
+      await client.query(
+        'update card_comments set card_id=$1 where card_id=$2',
+        [targetCardId, sourceCardId]
+      );
+      await client.query(
+        `insert into card_reactions (card_id, user_id, user_name, emoji)
+         select $1, user_id, user_name, emoji
+         from card_reactions
+         where card_id=$2
+         on conflict (card_id, user_id, emoji) do nothing`,
+        [targetCardId, sourceCardId]
       );
       await client.query(
         'delete from cards where room_id=$1 and id=$2',
@@ -364,6 +387,10 @@ export const RoomModel = {
 
   async deleteOne(where: { id: string }): Promise<void> {
     await pool.query('delete from rooms where id=$1', [where.id]);
+  },
+
+  async deleteAllCards(roomId: string): Promise<void> {
+    await pool.query('delete from cards where room_id=$1', [roomId]);
   },
 
   async getNextRoomAdminUserId(roomId: string, leavingUserId: string): Promise<string | null> {

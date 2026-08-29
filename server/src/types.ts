@@ -3,18 +3,64 @@ export type Phase = 'creation' | 'voting' | 'discussion' | 'rating';
 
 export const DEFAULT_COLUMN_TITLES = ['Было хорошо', 'Было не очень', 'А давайте!:'] as const;
 export const COLUMN_COUNT = DEFAULT_COLUMN_TITLES.length;
+export const LETS_DO_COLUMN_INDEX = 2;
 
-export type VoteLimit = 1 | 3 | 5;
+export const COLUMN_COLOR_IDS = [
+  'none',
+  'teal',
+  'pink',
+  'purple',
+  'blue',
+  'indigo',
+  'cyan',
+  'green',
+  'amber',
+  'orange',
+  'slate'
+] as const;
+
+export type ColumnColorId = typeof COLUMN_COLOR_IDS[number];
+
+export const DEFAULT_COLUMN_COLORS: ColumnColorId[] = ['none', 'none', 'none'];
+
+export const isColumnColorId = (value: unknown): value is ColumnColorId =>
+  typeof value === 'string' && (COLUMN_COLOR_IDS as readonly string[]).includes(value);
+
+export const normalizeColumnColors = (colors?: string[] | null): ColumnColorId[] => {
+  if (!Array.isArray(colors) || colors.length !== COLUMN_COUNT || !colors.every(isColumnColorId)) {
+    return [...DEFAULT_COLUMN_COLORS];
+  }
+  return [...colors];
+};
+
+export const MIN_VOTE_LIMIT = 1;
+export const MAX_VOTE_LIMIT = 20;
+export type VoteLimit = number;
+
+export const LIKE_ICON_IDS = ['peach', 'banana', 'hotPepper', 'avocado', 'pineapple', 'thumbsUp'] as const;
+export type LikeIconId = typeof LIKE_ICON_IDS[number];
+
+export const DISLIKE_ICON_IDS = ['eggplant', 'rottenTomato', 'grapefruit', 'egg', 'thumbsDown'] as const;
+export type DislikeIconId = typeof DISLIKE_ICON_IDS[number];
+
+export const isLikeIconId = (value: unknown): value is LikeIconId =>
+  typeof value === 'string' && (LIKE_ICON_IDS as readonly string[]).includes(value);
+
+export const isDislikeIconId = (value: unknown): value is DislikeIconId =>
+  typeof value === 'string' && (DISLIKE_ICON_IDS as readonly string[]).includes(value);
 
 export interface RoomFeatures {
   mediaEnabled: boolean;
   reactionsEnabled: boolean;
   commentsEnabled: boolean;
   moveCardsEnabled: boolean;
+  membersCanAddCards: boolean;
   anonymousEnabled: boolean;
   hideCardTextDuringCreation: boolean;
   likesPerUser: VoteLimit;
   dislikesPerUser: VoteLimit;
+  likeIcon: LikeIconId;
+  dislikeIcon: DislikeIconId;
   dislikesEnabled: boolean;
   musicEnabled: boolean;
   retroRatingEnabled: boolean;
@@ -23,6 +69,7 @@ export interface RoomFeatures {
   cardEditingEnabled: boolean;
   chatEnabled: boolean;
   readyEnabled: boolean;
+  facilitatorEnabled: boolean;
 }
 
 export interface User {
@@ -52,6 +99,22 @@ export interface CardReaction {
 export const CARD_REACTION_EMOJIS = ['👍', '👎', '👏', '❤️', '🔥', '🎉', '🥰', '😨', '😂'] as const;
 export type CardReactionEmoji = typeof CARD_REACTION_EMOJIS[number];
 
+export const CARD_TEXT_SEGMENT_SEPARATOR = '\u001e';
+
+export const getCardTextSegments = (text: string): string[] => {
+  const segments = text
+    .split(CARD_TEXT_SEGMENT_SEPARATOR)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return segments.length > 0 ? segments : (text.trim() ? [text.trim()] : []);
+};
+
+export const joinCardTextSegments = (segments: string[]): string =>
+  segments.map((part) => part.trim()).filter(Boolean).join(CARD_TEXT_SEGMENT_SEPARATOR);
+
+export const mergeCardTexts = (targetText: string, sourceText: string): string =>
+  joinCardTextSegments([...getCardTextSegments(targetText), ...getCardTextSegments(sourceText)]);
+
 export interface Card {
   id: string;
   text: string;
@@ -73,6 +136,7 @@ export interface RoomDocument {
   owner: string;
   phase: Phase;
   columnTitles?: string[];
+  columnColors?: ColumnColorId[];
   features?: RoomFeatures;
   createdAt?: string;
   users: User[];
@@ -86,6 +150,7 @@ export interface Room {
   owner: string;
   phase: Phase;
   columnTitles?: string[];
+  columnColors?: ColumnColorId[];
   features?: RoomFeatures;
   createdAt?: string;
   users: User[];
@@ -123,6 +188,7 @@ export interface Team {
 
 export interface TeamDocument extends Team {
   passwordHash: string;
+  passwordVersion: number;
 }
 
 export interface AvailableTeam {

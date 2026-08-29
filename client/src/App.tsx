@@ -36,6 +36,9 @@ const App = observer(() => {
           secondary: {
             main: '#9c27b0'
           }
+        },
+        typography: {
+          fontFamily: '"Nunito", -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", sans-serif'
         }
       }),
     [themeMode]

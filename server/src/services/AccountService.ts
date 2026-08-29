@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { pool } from '../config/database';
 import { FIXED_AUTH_NAMES, isFixedAuthName, normalizeAuthName } from '../config/authNames';
@@ -113,6 +114,31 @@ export class AccountService {
     };
   }
 
+  static async resetPassword(name: string): Promise<string> {
+    const normalizedName = normalizeAuthName(name);
+    if (!normalizedName) {
+      throw new Error('Name is required');
+    }
+
+    const password = this.generateTemporaryPassword();
+    const passwordHash = await bcrypt.hash(password, 10);
+    const existing = await this.getAccountByName(normalizedName);
+    if (existing) {
+      await pool.query(
+        `update accounts set password_hash = $1, updated_at = now() where lower(name) = lower($2)`,
+        [passwordHash, normalizedName]
+      );
+    } else {
+      const type: Exclude<AuthProfileType, 'guest'> = isFixedAuthName(normalizedName) ? 'fixed' : 'registered';
+      await pool.query(
+        `insert into accounts (name, password_hash, type) values ($1, $2, $3)`,
+        [normalizedName, passwordHash, type]
+      );
+    }
+
+    return password;
+  }
+
   static guestLogin(name: string): AuthProfile {
     const normalizedName = normalizeAuthName(name);
     if (!normalizedName) {
@@ -123,6 +149,12 @@ export class AccountService {
       name: normalizedName,
       type: 'guest'
     };
+  }
+
+  private static generateTemporaryPassword(): string {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+    const bytes = crypto.randomBytes(10);
+    return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join('');
   }
 
   private static async getAccountByName(name: string): Promise<AccountRow | null> {

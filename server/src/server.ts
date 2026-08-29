@@ -2,7 +2,7 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server, Socket } from 'socket.io';
 import cors from 'cors';
-import { Room, User, Card, RoomState, Mood, Phase, RoomFeatures } from './types';
+import { Room, User, Card, RoomState, Mood, Phase, RoomFeatures, LETS_DO_COLUMN_INDEX } from './types';
 import { normalizeRoomFeatures } from './utils/roomFeatures';
 import bcrypt from 'bcryptjs';
 import { RoomService } from './services/RoomService';
@@ -147,19 +147,129 @@ app.post('/api/teams/:teamId/join', async (req, res) => {
   const { password } = req.body as { password?: string };
   const isFixedBuiltinJoin = req.params.teamId === BUILTIN_TEAM_ID && auth.type === 'fixed';
 
-  if (!isFixedBuiltinJoin && !password?.trim()) {
+  try {
+    const team = isFixedBuiltinJoin
+      ? await TeamService.joinBuiltinTeamForFixedUser(auth.name)
+      : await TeamService.joinTeam(req.params.teamId, password, auth.name);
+    res.json(team);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to join team';
+    if (message !== 'Team password is required') {
+      console.error('Error joining team:', error);
+    }
+    res.status(400).json({ error: message });
+  }
+});
+
+app.get('/api/teams/:teamId', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
+  const auth = verifyAuthToken(token);
+
+  if (!auth) {
+    res.status(401).json({ error: 'Unauthorized: token is invalid or expired' });
+    return;
+  }
+
+  try {
+    const team = await TeamService.getTeam(req.params.teamId);
+    if (!team) {
+      res.status(404).json({ error: 'Team not found' });
+      return;
+    }
+    if (!TeamService.isTeamMember(team, auth.name)) {
+      res.status(403).json({ error: 'Only team members can view this team' });
+      return;
+    }
+    if (!(await TeamService.hasUnlockedTeamPassword(team, auth.name))) {
+      res.status(403).json({ error: 'Team password is required' });
+      return;
+    }
+    res.json(team);
+  } catch (error) {
+    console.error('Error getting team:', error);
+    res.status(500).json({ error: 'Failed to get team' });
+  }
+});
+
+app.delete('/api/teams/:teamId/members', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
+  const auth = verifyAuthToken(token);
+
+  if (!auth) {
+    res.status(401).json({ error: 'Unauthorized: token is invalid or expired' });
+    return;
+  }
+
+  const { name } = req.body as { name?: string };
+  if (!name?.trim()) {
+    res.status(400).json({ error: 'Member name is required' });
+    return;
+  }
+
+  try {
+    const team = await TeamService.removeMember(req.params.teamId, auth.name, name);
+    res.json(team);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to remove member';
+    const status = message === 'Team not found' ? 404 : message.includes('Только админ команды') ? 403 : 400;
+    console.error('Error removing team member:', error);
+    res.status(status).json({ error: message });
+  }
+});
+
+app.post('/api/teams/:teamId/members/reset-password', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
+  const auth = verifyAuthToken(token);
+
+  if (!auth) {
+    res.status(401).json({ error: 'Unauthorized: token is invalid or expired' });
+    return;
+  }
+
+  const { name } = req.body as { name?: string };
+  if (!name?.trim()) {
+    res.status(400).json({ error: 'Member name is required' });
+    return;
+  }
+
+  try {
+    const result = await TeamService.resetMemberPassword(req.params.teamId, auth.name, name);
+    res.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to reset password';
+    const status = message === 'Team not found' ? 404 : message.includes('Только админ команды') ? 403 : 400;
+    console.error('Error resetting member password:', error);
+    res.status(status).json({ error: message });
+  }
+});
+
+app.post('/api/teams/:teamId/password', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
+  const auth = verifyAuthToken(token);
+
+  if (!auth) {
+    res.status(401).json({ error: 'Unauthorized: token is invalid or expired' });
+    return;
+  }
+
+  const { password } = req.body as { password?: string };
+  if (!password?.trim()) {
     res.status(400).json({ error: 'Team password is required' });
     return;
   }
 
   try {
-    const team = isFixedBuiltinJoin
-      ? await TeamService.joinBuiltinTeamForFixedUser(auth.name)
-      : await TeamService.joinTeam(req.params.teamId, password!, auth.name);
+    const team = await TeamService.changeTeamPassword(req.params.teamId, auth.name, password);
     res.json(team);
   } catch (error) {
-    console.error('Error joining team:', error);
-    res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to join team' });
+    const message = error instanceof Error ? error.message : 'Failed to update team password';
+    const status = message === 'Team not found' ? 404 : message.includes('Только админ команды') ? 403 : 400;
+    console.error('Error updating team password:', error);
+    res.status(status).json({ error: message });
   }
 });
 
@@ -408,7 +518,7 @@ const refreshFacilitatorSocketId = (
 };
 
 const emitFacilitatorToSocket = (socket: Socket, roomId: string, room?: Room): void => {
-  if (room && room.phase !== 'discussion') return;
+  if (room && (room.phase !== 'discussion' || !getRoomFeatures(room).facilitatorEnabled)) return;
   const userName = typeof socket.data.userName === 'string' ? socket.data.userName : undefined;
   const facilitator = userName
     ? refreshFacilitatorSocketId(roomId, userName, socket.id)
@@ -1132,20 +1242,28 @@ io.on('connection', (socket) => {
 
   socket.on('add-card', async ({ text, type, column, imageUrl }) => {
     if (!currentUser) return;
+    const actorName = currentUser.name;
+    const actorRoomId = currentUser.roomId;
+    const actorId = currentUser.id;
 
     try {
-      console.log('Received add-card event:', { text, type, column, imageUrl, userId: currentUser.id });
-      const room = await RoomService.getRoom(currentUser.roomId);
+      console.log('Received add-card event:', { text, type, column, imageUrl, userId: actorId });
+      const room = await RoomService.getRoom(actorRoomId);
       if (!room || room.phase !== 'creation') return;
 
       const features = getRoomFeatures(room);
+      const targetColumn = Number(column);
+      if (!features.membersCanAddCards && targetColumn === LETS_DO_COLUMN_INDEX) {
+        const isAdmin = room.users.some((user) => user.name === actorName && user.role === 'admin');
+        if (!isAdmin) return;
+      }
       const safeImageUrl = features.mediaEnabled ? normalizeImageUrl(imageUrl) : undefined;
 
       const card: Card = {
         id: Date.now().toString(),
         text,
         type,
-        createdBy: currentUser.name,
+        createdBy: actorName,
         likes: [],
         dislikes: [],
         column,
@@ -1154,19 +1272,19 @@ io.on('connection', (socket) => {
         reactions: []
       };
 
-      const updatedRoom = await RoomService.addCard(currentUser.roomId, card);
+      const updatedRoom = await RoomService.addCard(actorRoomId, card);
       if (updatedRoom) {
         // Обновляем состояние в памяти
-        const roomState = roomStates.get(currentUser.roomId);
+        const roomState = roomStates.get(actorRoomId);
         if (roomState) {
           roomState.cards.push(card);
         }
-        rooms.set(currentUser.roomId, updatedRoom);
+        rooms.set(actorRoomId, updatedRoom);
         
         // Отправляем обновление всем клиентам в комнате
-        console.log('Broadcasting card-added to room:', currentUser.roomId);
-        io.to(currentUser.roomId).emit('card-added', card);
-        io.to(currentUser.roomId).emit('state-updated', {
+        console.log('Broadcasting card-added to room:', actorRoomId);
+        io.to(actorRoomId).emit('card-added', card);
+        io.to(actorRoomId).emit('state-updated', {
           cards: updatedRoom.cards,
           phase: updatedRoom.phase,
           users: updatedRoom.users
@@ -1247,6 +1365,34 @@ io.on('connection', (socket) => {
     } catch (error) {
       console.error('Error deleting card:', error);
       socket.emit('error', 'Failed to delete card');
+    }
+  });
+
+  socket.on('delete-all-cards', async () => {
+    if (!currentUser?.roomId) return;
+
+    try {
+      const room = await RoomService.getRoom(currentUser.roomId);
+      if (!room) return;
+
+      const actor = room.users.find((user) => user.id === currentUser?.id || user.name === currentUser?.name);
+      if (!actor || actor.role !== 'admin') {
+        socket.emit('error', 'Только администратор может удалить все карточки');
+        return;
+      }
+
+      const updatedRoom = await RoomService.deleteAllCards(currentUser.roomId);
+      if (updatedRoom) {
+        io.to(currentUser.roomId).emit('cards-cleared');
+        io.to(currentUser.roomId).emit('state-updated', {
+          cards: updatedRoom.cards,
+          phase: updatedRoom.phase,
+          users: updatedRoom.users
+        });
+      }
+    } catch (error) {
+      console.error('Error deleting all cards:', error);
+      socket.emit('error', 'Failed to delete all cards');
     }
   });
 
@@ -1345,14 +1491,20 @@ io.on('connection', (socket) => {
 
   socket.on('move-card', async ({ cardId, column }) => {
     if (!currentUser) return;
+    const currentUserName = currentUser.name;
 
     try {
       const room = await RoomService.getRoom(currentUser.roomId);
       if (!room || room.phase !== 'creation') return;
-      if (!getRoomFeatures(room).moveCardsEnabled) return;
 
       const card = room.cards.find((currentCard) => currentCard.id === cardId);
       if (!card) return;
+
+      const isAdmin = room.users.some((user) => user.name === currentUserName && user.role === 'admin');
+      if (!isAdmin) {
+        if (!getRoomFeatures(room).moveCardsEnabled) return;
+        if (card.createdBy !== currentUserName) return;
+      }
 
       const nextType = getCardTypeByColumn(column);
       const updatedRoom = await RoomService.updateCard(currentUser.roomId, cardId, { column, type: nextType });
@@ -1589,7 +1741,7 @@ io.on('connection', (socket) => {
         users: roomState.users
       });
 
-      if (roomState.phase === 'discussion') {
+      if (roomState.phase === 'discussion' && getRoomFeatures(roomState).facilitatorEnabled) {
         const facilitator = selectRandomFacilitator(roomState);
         if (facilitator) {
           roomFacilitators.set(actor.roomId, facilitator);
@@ -1634,6 +1786,39 @@ io.on('connection', (socket) => {
       io.to(actor.roomId).emit('column-titles-updated', { titles: updatedRoom.columnTitles });
     } catch (error) {
       console.error('Error updating column titles:', error);
+    }
+  });
+
+  socket.on('set-column-colors', async ({ colors }) => {
+    let actor = currentUser;
+    if (!actor?.roomId) {
+      const roomId = [...socket.rooms].find((roomName) => roomName !== socket.id);
+      const userName = typeof socket.data.userName === 'string' ? socket.data.userName : undefined;
+      const userId = typeof socket.data.userId === 'string' ? socket.data.userId : socket.id;
+      if (roomId && userName) {
+        const room = await RoomService.getRoom(roomId);
+        const user = room?.users.find((roomUser) => roomUser.name === userName || roomUser.id === userId);
+        if (user) {
+          actor = { ...user, roomId };
+          currentUser = actor;
+        }
+      }
+    }
+
+    if (!actor?.roomId) return;
+
+    try {
+      const room = await RoomService.getRoom(actor.roomId);
+      if (!room) return;
+      if (!canControlDiscussionNavigation(room, actor.name, actor.role, actor.roomId)) return;
+      if (!Array.isArray(colors)) return;
+
+      const updatedRoom = await RoomService.updateColumnColors(actor.roomId, colors);
+      if (!updatedRoom?.columnColors) return;
+
+      io.to(actor.roomId).emit('column-colors-updated', { colors: updatedRoom.columnColors });
+    } catch (error) {
+      console.error('Error updating column colors:', error);
     }
   });
 
@@ -1849,32 +2034,35 @@ io.on('connection', (socket) => {
   });
 
   socket.on('set-room-features', async ({ features }) => {
-    let actor = currentUser;
-    if (!actor?.roomId) {
-      const roomId = [...socket.rooms].find((roomName) => roomName !== socket.id);
-      const userName = typeof socket.data.userName === 'string' ? socket.data.userName : undefined;
-      const userId = typeof socket.data.userId === 'string' ? socket.data.userId : socket.id;
-      if (roomId && userName) {
-        const room = await RoomService.getRoom(roomId);
-        const user = room?.users.find((roomUser) => roomUser.name === userName || roomUser.id === userId);
-        if (user) {
-          actor = { ...user, roomId };
-          currentUser = actor;
-        }
-      }
-    }
-
+    const actor = await resolveSocketActor(socket, currentUser);
     if (!actor?.roomId || !features || typeof features !== 'object') return;
+    currentUser = actor;
+    const actorRoomId = actor.roomId;
+    const actorName = actor.name;
 
     try {
-      const room = await RoomService.getRoom(actor.roomId);
+      const room = await RoomService.getRoom(actorRoomId);
       if (!room) return;
-      if (!canControlDiscussionNavigation(room, actor.name, actor.role, actor.roomId)) return;
+      const isAdmin = room.users.some((user) => user.name === actorName && user.role === 'admin');
+      if (!isAdmin) return;
 
-      const updatedRoom = await RoomService.updateRoomFeatures(actor.roomId, features as Partial<RoomFeatures>);
+      const updatedRoom = await RoomService.updateRoomFeatures(actorRoomId, features as Partial<RoomFeatures>);
       if (!updatedRoom?.features) return;
 
-      io.to(actor.roomId).emit('room-features-updated', { features: updatedRoom.features });
+      io.to(actorRoomId).emit('room-features-updated', { features: updatedRoom.features });
+
+      if (updatedRoom.phase === 'discussion') {
+        if (updatedRoom.features.facilitatorEnabled && !roomFacilitators.get(actorRoomId)) {
+          const facilitator = selectRandomFacilitator(updatedRoom);
+          if (facilitator) {
+            roomFacilitators.set(actorRoomId, facilitator);
+            io.to(actorRoomId).emit('facilitator-selected', facilitator);
+          }
+        } else if (!updatedRoom.features.facilitatorEnabled) {
+          roomFacilitators.delete(actorRoomId);
+          io.to(actorRoomId).emit('facilitator-selected', null);
+        }
+      }
     } catch (error) {
       console.error('Error updating room features:', error);
     }

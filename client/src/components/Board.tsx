@@ -3,6 +3,7 @@ import { observer } from 'mobx-react-lite';
 import { Box, AppBar, Toolbar, Typography, Button, ButtonGroup, CircularProgress, IconButton, Tooltip, Tabs, Tab, useMediaQuery, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, FormControl, Select, MenuItem, Menu, Slider, Divider } from '@mui/material';
 import { DragDropContext, DropResult } from '@hello-pangea/dnd';
 import SettingsIcon from '@mui/icons-material/Settings';
+import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import MusicNoteIcon from '@mui/icons-material/MusicNote';
@@ -11,6 +12,7 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import PersonIcon from '@mui/icons-material/Person';
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
 import BrushIcon from '@mui/icons-material/Brush';
 import CleaningServicesIcon from '@mui/icons-material/CleaningServices';
@@ -40,12 +42,37 @@ const MOOD_OPTIONS: Array<{ value: Mood; emoji: string; label: string; color: st
 const WHITEBOARD_COLORS = ['#111111', '#006dff', '#00a878', '#ff6b00', '#e11d48', '#7c3aed'];
 const TIMER_MUSIC_SRC = '/audio/timer-music.mp3';
 
+const PHASE_ACTIVE_GREEN = '#34c759';
+
 const getNextPhase = (phase: Phase, retroRatingEnabled: boolean): Phase | null => {
   if (phase === 'creation') return 'voting';
   if (phase === 'voting') return 'discussion';
   if (phase === 'discussion') return retroRatingEnabled ? 'rating' : null;
   return null;
 };
+
+const getPhaseButtonSx = (isActive: boolean, extra?: object) => ({
+  color: '#fff',
+  ...(isActive && {
+    color: PHASE_ACTIVE_GREEN,
+    bgcolor: 'transparent',
+    backgroundImage: 'none',
+    boxShadow: 'none',
+    outline: `2px solid ${PHASE_ACTIVE_GREEN}`,
+    outlineOffset: '1px',
+    zIndex: 1,
+    '&.MuiButton-containedSecondary': {
+      color: PHASE_ACTIVE_GREEN,
+      bgcolor: 'transparent',
+    },
+    '&.Mui-disabled': {
+      color: PHASE_ACTIVE_GREEN,
+      bgcolor: 'transparent',
+      opacity: 1,
+    },
+  }),
+  ...extra,
+});
 
 const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) => {
   const [isReady, setIsReady] = useState(() => Boolean(store.room));
@@ -249,10 +276,18 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   }, [canDrawOnBoard, isDrawEnabled]);
 
   const handleDragEnd = (result: DropResult) => {
-    const { destination, source, draggableId } = result;
-    if (!destination) return;
+    const { destination, source, draggableId, combine } = result;
     if (store.phase !== 'creation') return;
-    if (!features.moveCardsEnabled) return;
+    const draggedCard = store.cards.find((card) => card.id === draggableId);
+    if (!draggedCard || !store.canMoveCard(draggedCard)) return;
+
+    if (combine) {
+      if (!store.canMergeCards || combine.draggableId === draggableId) return;
+      store.socketService?.mergeCards(combine.draggableId, draggableId);
+      return;
+    }
+
+    if (!destination) return;
     if (destination.droppableId === source.droppableId) return;
 
     const destinationColumn = Number(destination.droppableId.replace('column-', ''));
@@ -322,27 +357,27 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
           type="liked"
           columnIndex={0}
           store={store}
-          enableDragDrop={store.phase === 'creation' && features.moveCardsEnabled}
+          enableDragDrop={store.canUseCardDragDrop}
           onAddCardStart={() => setIsDrawEnabled(false)}
         />
         <RetroColumn
           type="disliked"
           columnIndex={1}
           store={store}
-          enableDragDrop={store.phase === 'creation' && features.moveCardsEnabled}
+          enableDragDrop={store.canUseCardDragDrop}
           onAddCardStart={() => setIsDrawEnabled(false)}
         />
         <RetroColumn
           type="suggestion"
           columnIndex={2}
           store={store}
-          enableDragDrop={store.phase === 'creation' && features.moveCardsEnabled}
+          enableDragDrop={store.canUseCardDragDrop}
           onAddCardStart={() => setIsDrawEnabled(false)}
         />
       </Box>
     );
 
-    if (store.phase !== 'creation' || !features.moveCardsEnabled) {
+    if (!store.canUseCardDragDrop) {
       return columns;
     }
 
@@ -361,6 +396,19 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
         return renderColumns();
     }
   };
+
+  const leaveRoomButton = (
+    <Tooltip title="Выход из комнаты">
+      <IconButton
+        color="inherit"
+        onClick={() => store.socketService?.leaveRoom()}
+        size="small"
+        aria-label="Выход из комнаты"
+      >
+        <ExitToAppIcon />
+      </IconButton>
+    </Tooltip>
+  );
 
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -383,7 +431,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
             component="div"
             sx={{ flexGrow: 1, whiteSpace: 'nowrap', lineHeight: 1.2, fontSize: { xs: '1.1rem', md: '1.35rem' } }}
           >
-            {isCompactDesktop && !isMobile ? store.room?.id : `Ретроспектива - Комната: ${store.room?.id}`}
+            {isCompactDesktop && !isMobile ? store.room?.id : `Комната: ${store.room?.id}`}
           </Typography>
           {isCompactDesktop && !isMobile && (
             <Box sx={{ display: 'flex', alignItems: 'center', mr: 1 }}>
@@ -397,13 +445,8 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
               </Tooltip>
             </Box>
           )}
-          <Typography variant="subtitle1" sx={{ mr: isMobile ? 0 : 2, whiteSpace: 'nowrap' }}>
-            Этап: {getPhaseTranslation(store.phase)}
-          </Typography>
           {(() => {
             const canChange = store.canChangePhase();
-            const readyCount = store.getUserReadyCount();
-            const totalCount = store.getTotalUserCount();
             const isAdmin = store.canChangePhase();
 
             const timerControls = (
@@ -427,21 +470,6 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                 width: isMobile ? '100%' : 'auto',
                 gap: isMobile ? 0.5 : 0,
               }}>
-                {readyEnabled && (
-                  <Tooltip title={`${readyCount} из ${totalCount} участников готовы`}>
-                    <Typography 
-                      variant="caption" 
-                      sx={{ 
-                        mr: isMobile ? 0 : 2, 
-                        color: readyCount === totalCount ? 'success.light' : 'warning.light',
-                        whiteSpace: 'nowrap',
-                        alignSelf: isMobile ? 'flex-start' : 'center',
-                      }}
-                    >
-                      {readyCount}/{totalCount} готовы
-                    </Typography>
-                  </Tooltip>
-                )}
                 {isMobile ? (
                   <Box
                     sx={{
@@ -457,7 +485,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                       size="small"
                       onClick={() => store.socketService?.changePhase('creation')}
                       disabled={store.phase === 'creation' || !canChange}
-                      sx={{ color: 'white', minWidth: 0, px: 1 }}
+                      sx={getPhaseButtonSx(store.phase === 'creation', { minWidth: 0, px: 1 })}
                     >
                       Создание
                     </Button>
@@ -467,7 +495,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                       size="small"
                       onClick={() => store.socketService?.changePhase('voting')}
                       disabled={store.phase === 'voting' || !canChange}
-                      sx={{ color: 'white', minWidth: 0, px: 1 }}
+                      sx={getPhaseButtonSx(store.phase === 'voting', { minWidth: 0, px: 1 })}
                     >
                       Голосование
                     </Button>
@@ -477,7 +505,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                       size="small"
                       onClick={() => store.socketService?.changePhase('discussion')}
                       disabled={store.phase === 'discussion' || !canChange}
-                      sx={{ color: 'white', minWidth: 0, px: 1 }}
+                      sx={getPhaseButtonSx(store.phase === 'discussion', { minWidth: 0, px: 1 })}
                     >
                       Обсуждение
                     </Button>
@@ -487,38 +515,38 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                       size="small"
                       onClick={() => store.socketService?.changePhase('rating')}
                       disabled={store.phase === 'rating' || !canChange || !features.retroRatingEnabled}
-                      sx={{ color: 'white', minWidth: 0, px: 1 }}
+                      sx={getPhaseButtonSx(store.phase === 'rating', { minWidth: 0, px: 1 })}
                     >
                       Оценка
                     </Button>
                   </Box>
                 ) : (
-                  <ButtonGroup variant="contained" color="secondary" size="small" sx={{ mr: 2 }}>
+                  <ButtonGroup variant="contained" color="secondary" size="small" sx={{ mr: 2, overflow: 'visible' }}>
                     <Button
                       onClick={() => store.socketService?.changePhase('creation')}
                       disabled={store.phase === 'creation' || !canChange}
-                      sx={{ color: 'white' }}
+                      sx={getPhaseButtonSx(store.phase === 'creation')}
                     >
                       Создание
                     </Button>
                     <Button
                       onClick={() => store.socketService?.changePhase('voting')}
                       disabled={store.phase === 'voting' || !canChange}
-                      sx={{ color: 'white' }}
+                      sx={getPhaseButtonSx(store.phase === 'voting')}
                     >
                       Голосование
                     </Button>
                     <Button
                       onClick={() => store.socketService?.changePhase('discussion')}
                       disabled={store.phase === 'discussion' || !canChange}
-                      sx={{ color: 'white' }}
+                      sx={getPhaseButtonSx(store.phase === 'discussion')}
                     >
                       Обсуждение
                     </Button>
                     <Button
                       onClick={() => store.socketService?.changePhase('rating')}
                       disabled={store.phase === 'rating' || !canChange || !features.retroRatingEnabled}
-                      sx={{ color: 'white' }}
+                      sx={getPhaseButtonSx(store.phase === 'rating')}
                     >
                       Оценка
                     </Button>
@@ -532,15 +560,18 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
             
           })()}
           {!isCompactDesktop && !isMobile && (
-            <Tooltip title="Настройки">
-              <IconButton
-                color="inherit"
-                onClick={() => setIsSettingsOpen(true)}
-                size="small"
-              >
-                <SettingsIcon />
-              </IconButton>
-            </Tooltip>
+            <>
+              <Tooltip title="Настройки">
+                <IconButton
+                  color="inherit"
+                  onClick={() => setIsSettingsOpen(true)}
+                  size="small"
+                >
+                  <SettingsIcon />
+                </IconButton>
+              </Tooltip>
+              {leaveRoomButton}
+            </>
           )}
           {!isMobile && isCompactDesktop && (
             <>
@@ -560,6 +591,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                   Настройки
                 </MenuItem>
               </Menu>
+              {leaveRoomButton}
             </>
           )}
           {isMobile ? (
@@ -594,10 +626,11 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                     <SettingsIcon />
                   </IconButton>
                 </Tooltip>
+                {leaveRoomButton}
               </Box>
               {readyEnabled && store.currentUser && (
                 <Button
-                  variant="contained"
+                  variant="outlined"
                   color={store.currentUser.isReady ? 'success' : 'primary'}
                   fullWidth
                   size="small"
@@ -610,7 +643,19 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
               )}
               <Tabs value={mobileTab} onChange={(_, v) => setMobileTab(v)} textColor="inherit" indicatorColor="secondary" sx={{ width: '100%' }}>
                 <Tab label="Доска" />
-                <Tab label={`Участники (${store.users.length})`} />
+                <Tab
+                  label={
+                    readyEnabled ? (
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                        Участники (
+                        ✅ {store.getUserReadyCount()}
+                        {' / '}
+                        <PersonIcon sx={{ fontSize: 16 }} />
+                        {store.users.length})
+                      </Box>
+                    ) : `Участники (${store.users.length})`
+                  }
+                />
               </Tabs>
             </Box>
           ) : (

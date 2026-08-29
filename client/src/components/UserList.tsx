@@ -145,8 +145,21 @@ const UserList: React.FC<UserListProps> = observer(({
       flexDirection: 'column'
     }}>
       <Box sx={{ p: 1 }}>
-        <Typography variant="h6" gutterBottom>
-          Участники ({users.length})
+        <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 0.5 }}>
+          Участники (
+          {readyEnabled ? (
+            <>
+              <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.25 }}>
+                ✅ {users.filter((user) => user.isReady).length}
+              </Box>
+              /
+              <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.25 }}>
+                <PersonIcon fontSize="small" sx={{ verticalAlign: 'middle' }} />
+                {users.length}
+              </Box>
+            </>
+          ) : users.length}
+          )
         </Typography>
         {showReadyControl && readyEnabled && currentUser && (
           <>
@@ -154,7 +167,7 @@ const UserList: React.FC<UserListProps> = observer(({
               {currentUser.isReady ? 'Вы отметили свою готовность' : 'Отметьте свою готовность'}
             </Typography>
             <Button
-              variant="contained"
+              variant="outlined"
               color={currentUser.isReady ? "success" : "primary"}
               fullWidth
               onClick={() => onReadyStateChange(!currentUser.isReady)}

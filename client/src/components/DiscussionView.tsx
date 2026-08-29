@@ -4,8 +4,9 @@ import { Box, Paper, Typography, IconButton, Tooltip } from '@mui/material';
 import { NavigateBefore, NavigateNext } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import { RetroStore } from '../store/RetroStore';
-import { Card as CardType, DiscussionNavigationState } from '../types';
+import { Card as CardType, DiscussionNavigationState, getCardTextSegments, getColumnColorStyles } from '../types';
 import RetroCard from './RetroCard';
+import { VoteIcon } from './VoteIcon';
 
 interface Props {
   store: RetroStore;
@@ -127,20 +128,8 @@ const DiscussionView: React.FC<Props> = observer(({ store }) => {
     });
   };
 
-  const getCardColor = (card: CardType) => {
-    if (theme.palette.mode === 'dark') {
-      return {
-        liked: '#28372d',
-        disliked: '#3a2b30',
-        suggestion: '#253344'
-      }[card.type];
-    }
-    return {
-      liked: '#b2dfdb',
-      disliked: '#f8bbd0',
-      suggestion: '#e1bee7'
-    }[card.type];
-  };
+  const getCardColor = (card: CardType) =>
+    getColumnColorStyles(store.getColumnColor(card.column), theme.palette.mode).fill;
 
   const getReactionSummary = (card: CardType): string => {
     const counts = new Map<string, number>();
@@ -274,9 +263,33 @@ const DiscussionView: React.FC<Props> = observer(({ store }) => {
                     opacity: canControl ? 1 : 0.92
                   }}
                 >
-                  <Typography variant="body2" sx={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {card.text}
-                  </Typography>
+                  <Box sx={{ overflow: 'hidden' }}>
+                    {getCardTextSegments(card.text).map((segment, index) => (
+                      <React.Fragment key={`${card.id}-${index}`}>
+                        {index > 0 && (
+                          <Box
+                            sx={{
+                              my: 0.75,
+                              borderBottom: '1px solid',
+                              borderColor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.12)'
+                            }}
+                          />
+                        )}
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            display: '-webkit-box',
+                            WebkitLineClamp: 3,
+                            WebkitBoxOrient: 'vertical'
+                          }}
+                        >
+                          {segment}
+                        </Typography>
+                      </React.Fragment>
+                    ))}
+                  </Box>
                   {card.imageUrl && (
                     <Box
                       component="img"
@@ -291,10 +304,22 @@ const DiscussionView: React.FC<Props> = observer(({ store }) => {
                     />
                   )}
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.25 }}>
-                    <Typography variant="caption" color="text.secondary">
-                      🍑 {card.likes?.length || 0}
-                      {showDislikes ? ` | 🍅 ${card.dislikes?.length || 0}` : ''}
-                    </Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                        <VoteIcon type="like" id={features.likeIcon} size={14} />
+                        <Typography variant="caption" color="text.secondary">
+                          {card.likes?.length || 0}
+                        </Typography>
+                      </Box>
+                      {showDislikes && (
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                          <VoteIcon type="dislike" id={features.dislikeIcon} size={14} />
+                          <Typography variant="caption" color="text.secondary">
+                            {card.dislikes?.length || 0}
+                          </Typography>
+                        </Box>
+                      )}
+                    </Box>
                     {(reactionSummary || commentCount > 0) && (
                       <Typography variant="caption" color="text.secondary">
                         {[reactionSummary, commentCount > 0 ? `💬 ${commentCount}` : '']

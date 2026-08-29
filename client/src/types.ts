@@ -11,18 +11,91 @@ export type Phase = 'creation' | 'voting' | 'discussion' | 'rating';
 
 export const DEFAULT_COLUMN_TITLES = ['Было хорошо', 'Было не очень', 'А давайте!:'] as const;
 export const COLUMN_COUNT = DEFAULT_COLUMN_TITLES.length;
+export const LETS_DO_COLUMN_INDEX = 2;
 
-export type VoteLimit = 1 | 3 | 5;
+export const COLUMN_COLOR_IDS = [
+  'none',
+  'teal',
+  'pink',
+  'purple',
+  'blue',
+  'indigo',
+  'cyan',
+  'green',
+  'amber',
+  'orange',
+  'slate'
+] as const;
+
+export type ColumnColorId = typeof COLUMN_COLOR_IDS[number];
+
+export const DEFAULT_COLUMN_COLORS: ColumnColorId[] = ['none', 'none', 'none'];
+
+export const COLUMN_COLOR_PRESETS: Record<ColumnColorId, {
+  label: string;
+  light: { bg: string; accent: string };
+  dark: { bg: string; accent: string };
+}> = {
+  none: { label: 'Без цвета', light: { bg: 'transparent', accent: '#90a4ae' }, dark: { bg: 'transparent', accent: '#78909c' } },
+  teal: { label: 'Бирюзовый', light: { bg: '#e0f2ef', accent: '#00897b' }, dark: { bg: '#1c2b28', accent: '#4db6ac' } },
+  pink: { label: 'Розовый', light: { bg: '#fce4ec', accent: '#d81b60' }, dark: { bg: '#2c1f24', accent: '#f06292' } },
+  purple: { label: 'Фиолетовый', light: { bg: '#f3e5f5', accent: '#8e24aa' }, dark: { bg: '#261d2c', accent: '#ba68c8' } },
+  blue: { label: 'Синий', light: { bg: '#e3f2fd', accent: '#1565c0' }, dark: { bg: '#1c2633', accent: '#64b5f6' } },
+  indigo: { label: 'Индиго', light: { bg: '#e8eaf6', accent: '#3949ab' }, dark: { bg: '#20233a', accent: '#7986cb' } },
+  cyan: { label: 'Голубой', light: { bg: '#e0f7fa', accent: '#00838f' }, dark: { bg: '#1a2b2e', accent: '#4dd0e1' } },
+  green: { label: 'Зелёный', light: { bg: '#e8f5e9', accent: '#2e7d32' }, dark: { bg: '#1d2a1f', accent: '#81c784' } },
+  amber: { label: 'Янтарный', light: { bg: '#fff8e1', accent: '#f9a825' }, dark: { bg: '#2c2718', accent: '#ffd54f' } },
+  orange: { label: 'Оранжевый', light: { bg: '#fff3e0', accent: '#ef6c00' }, dark: { bg: '#2c2318', accent: '#ffb74d' } },
+  slate: { label: 'Серый', light: { bg: '#eceff1', accent: '#546e7a' }, dark: { bg: '#23282c', accent: '#90a4ae' } }
+};
+
+export const isColumnColorId = (value: unknown): value is ColumnColorId =>
+  typeof value === 'string' && (COLUMN_COLOR_IDS as readonly string[]).includes(value);
+
+export const normalizeColumnColors = (colors?: string[] | null): ColumnColorId[] => {
+  if (!Array.isArray(colors) || colors.length !== COLUMN_COUNT || !colors.every(isColumnColorId)) {
+    return [...DEFAULT_COLUMN_COLORS];
+  }
+  return [...colors];
+};
+
+export const getColumnColorStyles = (colorId: ColumnColorId, mode: 'light' | 'dark') => {
+  const preset = COLUMN_COLOR_PRESETS[colorId] ?? COLUMN_COLOR_PRESETS.none;
+  const colors = mode === 'dark' ? preset.dark : preset.light;
+  return {
+    fill: colorId === 'none' ? undefined : colors.bg,
+    accent: colors.accent
+  };
+};
+
+export const MIN_VOTE_LIMIT = 1;
+export const MAX_VOTE_LIMIT = 20;
+export type VoteLimit = number;
+
+export const LIKE_ICON_IDS = ['peach', 'banana', 'hotPepper', 'avocado', 'pineapple', 'thumbsUp'] as const;
+export type LikeIconId = typeof LIKE_ICON_IDS[number];
+
+export const DISLIKE_ICON_IDS = ['eggplant', 'rottenTomato', 'grapefruit', 'egg', 'thumbsDown'] as const;
+export type DislikeIconId = typeof DISLIKE_ICON_IDS[number];
+
+export const isLikeIconId = (value: unknown): value is LikeIconId =>
+  typeof value === 'string' && (LIKE_ICON_IDS as readonly string[]).includes(value);
+
+export const isDislikeIconId = (value: unknown): value is DislikeIconId =>
+  typeof value === 'string' && (DISLIKE_ICON_IDS as readonly string[]).includes(value);
 
 export interface RoomFeatures {
   mediaEnabled: boolean;
   reactionsEnabled: boolean;
   commentsEnabled: boolean;
   moveCardsEnabled: boolean;
+  membersCanAddCards: boolean;
   anonymousEnabled: boolean;
   hideCardTextDuringCreation: boolean;
   likesPerUser: VoteLimit;
   dislikesPerUser: VoteLimit;
+  likeIcon: LikeIconId;
+  dislikeIcon: DislikeIconId;
   dislikesEnabled: boolean;
   musicEnabled: boolean;
   retroRatingEnabled: boolean;
@@ -31,17 +104,21 @@ export interface RoomFeatures {
   cardEditingEnabled: boolean;
   chatEnabled: boolean;
   readyEnabled: boolean;
+  facilitatorEnabled: boolean;
 }
 
 export const DEFAULT_ROOM_FEATURES: RoomFeatures = {
   mediaEnabled: true,
   reactionsEnabled: true,
   commentsEnabled: true,
-  moveCardsEnabled: true,
+  moveCardsEnabled: false,
+  membersCanAddCards: true,
   anonymousEnabled: true,
   hideCardTextDuringCreation: true,
   likesPerUser: 3,
   dislikesPerUser: 3,
+  likeIcon: 'peach',
+  dislikeIcon: 'eggplant',
   dislikesEnabled: true,
   musicEnabled: true,
   retroRatingEnabled: true,
@@ -49,7 +126,8 @@ export const DEFAULT_ROOM_FEATURES: RoomFeatures = {
   drawingEnabled: true,
   cardEditingEnabled: true,
   chatEnabled: true,
-  readyEnabled: true
+  readyEnabled: true,
+  facilitatorEnabled: false
 };
 
 export interface Room {
@@ -58,6 +136,7 @@ export interface Room {
   owner: string;
   phase: Phase;
   columnTitles?: string[];
+  columnColors?: ColumnColorId[];
   features?: RoomFeatures;
   users: User[];
   cards: Card[];
@@ -81,6 +160,26 @@ export interface CardReaction {
 export const CARD_REACTION_EMOJIS = ['👍', '👎', '👏', '❤️', '🔥', '🎉', '🥰', '😨', '😂'] as const;
 export type CardReactionEmoji = typeof CARD_REACTION_EMOJIS[number];
 
+export const CARD_TEXT_SEGMENT_SEPARATOR = '\u001e';
+const CARD_TEXT_EDIT_SEPARATOR = /\n-{3,}\n/;
+
+export const getCardTextSegments = (text: string): string[] => {
+  const segments = text
+    .split(CARD_TEXT_SEGMENT_SEPARATOR)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return segments.length > 0 ? segments : (text.trim() ? [text.trim()] : []);
+};
+
+export const joinCardTextSegments = (segments: string[]): string =>
+  segments.map((part) => part.trim()).filter(Boolean).join(CARD_TEXT_SEGMENT_SEPARATOR);
+
+export const cardTextToEditorValue = (text: string): string =>
+  getCardTextSegments(text).join('\n---\n');
+
+export const editorValueToCardText = (value: string): string =>
+  joinCardTextSegments(value.split(CARD_TEXT_EDIT_SEPARATOR));
+
 export interface Card {
   id: string;
   text: string;
@@ -93,6 +192,32 @@ export interface Card {
   comments?: CardComment[];
   reactions?: CardReaction[];
 }
+
+const flattenMarkdownLine = (text: string): string => text.replace(/\s+/g, ' ').trim();
+
+const withMarkdownAuthor = (text: string, author?: string): string => {
+  const name = author?.trim();
+  return name ? `${text} // ${name}` : text;
+};
+
+export const buildColumnMarkdown = (cards: Card[]): string =>
+  cards
+    .map((card) => {
+      const title =
+        flattenMarkdownLine(getCardTextSegments(card.text).join(' — '))
+        || (card.imageUrl ? '[изображение]' : '');
+      if (!title) return '';
+
+      const lines = [`- ${withMarkdownAuthor(title, card.createdBy)}`];
+      for (const comment of card.comments || []) {
+        const commentText = flattenMarkdownLine(comment.text || '');
+        if (!commentText) continue;
+        lines.push(`  - ${withMarkdownAuthor(commentText, comment.userName)}`);
+      }
+      return lines.join('\n');
+    })
+    .filter(Boolean)
+    .join('\n');
 
 export interface RoomState {
   cards: Card[];

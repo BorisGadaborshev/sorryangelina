@@ -1,18 +1,21 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { observer } from 'mobx-react-lite';
-import { Paper, Typography, Box, TextField, Button, IconButton, Popover, Tooltip, useMediaQuery } from '@mui/material';
+import { Paper, Typography, Box, TextField, Button, IconButton, Popover, Tooltip, Menu, MenuItem, ListItemIcon, ListItemText, useMediaQuery } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import { Droppable, Draggable } from '@hello-pangea/dnd';
 import { RetroStore } from '../store/RetroStore';
 import RetroCard from './RetroCard';
-import { Card, DEFAULT_COLUMN_TITLES } from '../types';
+import { Card, COLUMN_COLOR_IDS, COLUMN_COLOR_PRESETS, DEFAULT_COLUMN_TITLES, LETS_DO_COLUMN_INDEX, buildColumnMarkdown, getColumnColorStyles } from '../types';
 import EmojiEmotionsIcon from '@mui/icons-material/EmojiEmotions';
 import ImageIcon from '@mui/icons-material/Image';
 import MicIcon from '@mui/icons-material/Mic';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
+import FormatColorFillIcon from '@mui/icons-material/FormatColorFill';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
 import CheckIcon from '@mui/icons-material/Check';
 import CloseIcon from '@mui/icons-material/Close';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 
 const getSpeechRecognition = (): SpeechRecognitionConstructor | null =>
   window.SpeechRecognition || window.webkitSpeechRecognition || null;
@@ -58,7 +61,9 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState('');
   const [titleAtEditStart, setTitleAtEditStart] = useState('');
-  const [isHeaderHovered, setIsHeaderHovered] = useState(false);
+  const [headerMenuAnchorEl, setHeaderMenuAnchorEl] = useState<HTMLButtonElement | null>(null);
+  const [colorMenuAnchorEl, setColorMenuAnchorEl] = useState<HTMLElement | null>(null);
+  const [copySuccess, setCopySuccess] = useState(false);
   const textFieldRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const speechRecognitionRef = useRef<SpeechRecognition | null>(null);
@@ -77,6 +82,11 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
   const theme = useTheme();
   const displayTitle = store.getColumnTitle(columnIndex);
   const canEditTitle = store.canEditColumnTitles();
+  const columnColorId = store.getColumnColor(columnIndex);
+  const columnThemeColors = getColumnColorStyles(columnColorId, theme.palette.mode);
+  const showHeaderActions = canEditTitle;
+  const canAddCards = store.canAddCards(columnIndex);
+  const canCopyMarkdown = columnIndex === LETS_DO_COLUMN_INDEX;
 
   const startEditingTitle = () => {
     if (!canEditTitle) return;
@@ -98,6 +108,32 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
     const originalTitle = titleAtEditStart || DEFAULT_COLUMN_TITLES[columnIndex];
     setDraftTitle(originalTitle);
     setIsEditingTitle(false);
+  };
+
+  const applyColumnColor = (colorId: typeof COLUMN_COLOR_IDS[number]) => {
+    setColorMenuAnchorEl(null);
+    setHeaderMenuAnchorEl(null);
+    if (colorId === columnColorId) return;
+    const next = [...store.columnColors];
+    next[columnIndex] = colorId;
+    store.requestColumnColorsUpdate(next);
+  };
+
+  const closeHeaderMenus = () => {
+    setHeaderMenuAnchorEl(null);
+    setColorMenuAnchorEl(null);
+  };
+
+  const handleCopyColumnMarkdown = async () => {
+    const markdown = buildColumnMarkdown(localCards);
+    if (!markdown) return;
+    try {
+      await navigator.clipboard.writeText(markdown);
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2000);
+    } catch {
+      setCopySuccess(false);
+    }
   };
 
   useEffect(() => {
@@ -213,12 +249,18 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
     }
   }, [addCardAnchorEl]);
 
+  useEffect(() => {
+    if (!canAddCards) {
+      setAddCardAnchorEl(null);
+    }
+  }, [canAddCards]);
+
   useEffect(() => () => {
     speechRecognitionRef.current?.abort();
   }, []);
 
   const handleAddCard = () => {
-    if (newCardText.trim() && store.socket && store.phase === 'creation') {
+    if (newCardText.trim() && store.socket && store.phase === 'creation' && canAddCards) {
       const text = selectedEmoji ? `${selectedEmoji} ${newCardText.trim()}` : newCardText.trim();
       store.socketService?.addCard(text, type, columnIndex, newCardImageUrl.trim() || undefined);
       setNewCardText('');
@@ -265,33 +307,9 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
     event.target.value = '';
   };
 
-  const columnColor = theme.palette.mode === 'dark'
-    ? {
-        liked: '#1f2a23',
-        disliked: '#2a1f23',
-        suggestion: '#1d2530'
-      }[type]
-    : {
-        liked: '#e0f2ef',
-        disliked: '#fce4ec',
-        suggestion: '#f3e5f5'
-      }[type];
-
-  const columnAccent = theme.palette.mode === 'dark'
-    ? {
-        liked: '#26a69a',
-        disliked: '#ec407a',
-        suggestion: '#ab47bc'
-      }[type]
-    : {
-        liked: '#009688',
-        disliked: '#e91e63',
-        suggestion: '#9c27b0'
-      }[type];
-
   return (
     <Paper 
-      elevation={2}
+      elevation={0}
       sx={{
         width: '100%',
         maxWidth: '100%',
@@ -301,16 +319,15 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
         height: isMobile ? 'auto' : '100%',
         maxHeight: isMobile ? 'none' : '100%',
         p: 1.25,
-        backgroundColor: columnColor,
-        color: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.92)' : 'inherit',
+        bgcolor: 'transparent',
+        backgroundImage: 'none',
+        boxShadow: 'none',
         display: 'flex',
         flexDirection: 'column',
         gap: 0.75
       }}
     >
       <Box
-        onMouseEnter={() => setIsHeaderHovered(true)}
-        onMouseLeave={() => setIsHeaderHovered(false)}
         onDoubleClick={startEditingTitle}
         sx={{
           display: 'flex',
@@ -367,39 +384,166 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
             <Typography variant="h6" align="center" sx={{ flex: 1 }}>
               {displayTitle}
             </Typography>
-            {canEditTitle && isHeaderHovered && (
-              <Tooltip title="Изменить название">
+            {canCopyMarkdown && (
+              <Tooltip title={copySuccess ? 'Скопировано' : 'Копировать в Markdown'}>
+                <span>
+                  <IconButton
+                    size="small"
+                    aria-label="Копировать колонку в Markdown"
+                    disabled={localCards.length === 0}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      handleCopyColumnMarkdown();
+                    }}
+                    onDoubleClick={(event) => event.stopPropagation()}
+                    sx={{ opacity: 0.85 }}
+                  >
+                    <ContentCopyIcon fontSize="small" />
+                  </IconButton>
+                </span>
+              </Tooltip>
+            )}
+            {showHeaderActions && (
+              <>
                 <IconButton
                   size="small"
+                  aria-label="Действия с колонкой"
                   onClick={(event) => {
                     event.stopPropagation();
-                    startEditingTitle();
+                    setHeaderMenuAnchorEl(event.currentTarget);
                   }}
+                  onDoubleClick={(event) => event.stopPropagation()}
                   sx={{ opacity: 0.85 }}
                 >
-                  <EditIcon fontSize="small" />
+                  <MoreVertIcon fontSize="small" />
                 </IconButton>
-              </Tooltip>
+                <Menu
+                  anchorEl={headerMenuAnchorEl}
+                  open={Boolean(headerMenuAnchorEl)}
+                  onClose={() => setHeaderMenuAnchorEl(null)}
+                  anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                  transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+                >
+                  {canCopyMarkdown && (
+                    <MenuItem
+                      disabled={localCards.length === 0}
+                      onClick={() => {
+                        closeHeaderMenus();
+                        handleCopyColumnMarkdown();
+                      }}
+                    >
+                      <ListItemIcon>
+                        <ContentCopyIcon fontSize="small" />
+                      </ListItemIcon>
+                      <ListItemText>{copySuccess ? 'Скопировано' : 'Копировать в Markdown'}</ListItemText>
+                    </MenuItem>
+                  )}
+                  <MenuItem
+                    onClick={() => {
+                      closeHeaderMenus();
+                      startEditingTitle();
+                    }}
+                  >
+                    <ListItemIcon>
+                      <EditIcon fontSize="small" />
+                    </ListItemIcon>
+                    <ListItemText>Изменить название</ListItemText>
+                  </MenuItem>
+                  <MenuItem
+                    onClick={() => {
+                      setColorMenuAnchorEl(headerMenuAnchorEl);
+                      setHeaderMenuAnchorEl(null);
+                    }}
+                  >
+                    <ListItemIcon>
+                      <FormatColorFillIcon fontSize="small" sx={{ color: columnThemeColors.accent }} />
+                    </ListItemIcon>
+                    <ListItemText>Цвет колонки</ListItemText>
+                  </MenuItem>
+                </Menu>
+                <Menu
+                  anchorEl={colorMenuAnchorEl}
+                  open={Boolean(colorMenuAnchorEl)}
+                  onClose={() => setColorMenuAnchorEl(null)}
+                  anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                  transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+                >
+                  {COLUMN_COLOR_IDS.map((colorId) => {
+                    const preset = COLUMN_COLOR_PRESETS[colorId];
+                    const isSelected = colorId === columnColorId;
+                    return (
+                      <MenuItem
+                        key={colorId}
+                        selected={isSelected}
+                        onClick={() => applyColumnColor(colorId)}
+                        sx={{ gap: 1.25, minWidth: 196 }}
+                      >
+                        <Box
+                          sx={{
+                            width: 28,
+                            height: 28,
+                            borderRadius: 1,
+                            border: '1px solid',
+                            borderColor: isSelected ? 'primary.main' : 'divider',
+                            overflow: 'hidden',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            flexShrink: 0
+                          }}
+                        >
+                          <Box sx={{ flex: 1, display: 'flex' }}>
+                            <Box sx={{ flex: 1, bgcolor: colorId === 'none' ? 'background.paper' : preset.light.bg }} />
+                            <Box sx={{ flex: 1, bgcolor: colorId === 'none' ? '#1e1e1e' : preset.dark.bg }} />
+                          </Box>
+                          <Box sx={{ height: 4, display: 'flex' }}>
+                            <Box sx={{ flex: 1, bgcolor: preset.light.accent }} />
+                            <Box sx={{ flex: 1, bgcolor: preset.dark.accent }} />
+                          </Box>
+                        </Box>
+                        {preset.label}
+                      </MenuItem>
+                    );
+                  })}
+                </Menu>
+              </>
             )}
           </>
         )}
       </Box>
-      <Box sx={{ height: 4, borderRadius: 999, backgroundColor: columnAccent, mb: 0.5 }} />
+      <Box sx={{ height: 4, borderRadius: 999, backgroundColor: columnThemeColors.accent, mb: 0.5 }} />
 
       {store.phase === 'creation' && (
         <Box sx={{ mb: 0.5 }}>
           <Box sx={{ display: 'flex', justifyContent: 'center', mb: 0.5 }}>
-            <Tooltip title="Добавить карточку">
-              <IconButton
-                color="primary"
-                onClick={(event) => {
-                  onAddCardStart?.();
-                  setAddCardAnchorEl(event.currentTarget);
-                }}
-                sx={{ position: 'relative', zIndex: 4, border: '1px solid', borderColor: 'divider' }}
-              >
-                <AddIcon />
-              </IconButton>
+            <Tooltip
+              title={
+                canAddCards
+                  ? 'Добавить карточку'
+                  : 'Только администратор может добавлять карточки в эту колонку'
+              }
+            >
+              <span>
+                <IconButton
+                  color="primary"
+                  disabled={!canAddCards}
+                  onClick={(event) => {
+                    if (!canAddCards) return;
+                    onAddCardStart?.();
+                    setAddCardAnchorEl(event.currentTarget);
+                  }}
+                  sx={{
+                    position: 'relative',
+                    zIndex: 4,
+                    border: '1px solid',
+                    borderColor: canAddCards ? 'divider' : 'action.disabled',
+                    '&.Mui-disabled': {
+                      color: 'action.disabled'
+                    }
+                  }}
+                >
+                  <AddIcon />
+                </IconButton>
+              </span>
             </Tooltip>
           </Box>
           <Popover
@@ -622,7 +766,7 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
       )}
 
       {enableDragDrop ? (
-        <Droppable droppableId={`column-${columnIndex}`}>
+        <Droppable droppableId={`column-${columnIndex}`} isCombineEnabled={store.canMergeCards}>
           {(provided, snapshot) => (
             <Box
               ref={provided.innerRef}
@@ -639,7 +783,7 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
               }}
             >
               {localCards.map((card, index) => (
-                <Draggable key={card.id} draggableId={card.id} index={index}>
+                <Draggable key={card.id} draggableId={card.id} index={index} isDragDisabled={!store.canMoveCard(card)}>
                   {(dragProvided, dragSnapshot) => (
                     <Box
                       ref={dragProvided.innerRef}
@@ -649,7 +793,12 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
                         opacity: dragSnapshot.isDragging ? 0.85 : 1
                       }}
                     >
-                      <RetroCard card={card} index={index} store={store} />
+                      <RetroCard
+                        card={card}
+                        index={index}
+                        store={store}
+                        isMergeDropTarget={Boolean(dragSnapshot.combineTargetFor)}
+                      />
                     </Box>
                   )}
                 </Draggable>

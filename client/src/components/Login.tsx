@@ -22,6 +22,7 @@ import { AuthProfile, AvailableRoom, AvailableTeam, BUILTIN_TEAM_ID, Team } from
 import CreateTeamDialog from './CreateTeamDialog';
 import RoomTiles from './RoomTiles';
 import TeamLobby from './TeamLobby';
+import TeamMembersPanel from './TeamMembersPanel';
 
 interface Props {
   store: RetroStore;
@@ -79,6 +80,17 @@ const Login: React.FC<Props> = observer(({ store }) => {
   const [suboError, setSuboError] = useState<string | null>(null);
   const [isAutoJoiningBuiltinTeam, setIsAutoJoiningBuiltinTeam] = useState(false);
   const [isChoosingTeam, setIsChoosingTeam] = useState(false);
+  const [isTeamMembersLoading, setIsTeamMembersLoading] = useState(false);
+  const [busyMemberName, setBusyMemberName] = useState<string | null>(null);
+  const [isRemoveMemberDialogOpen, setIsRemoveMemberDialogOpen] = useState(false);
+  const [memberToRemove, setMemberToRemove] = useState('');
+  const [isResetPasswordDialogOpen, setIsResetPasswordDialogOpen] = useState(false);
+  const [resetPasswordMember, setResetPasswordMember] = useState('');
+  const [resetPasswordValue, setResetPasswordValue] = useState('');
+  const [resetPasswordCopySuccess, setResetPasswordCopySuccess] = useState(false);
+  const [isChangeTeamPasswordDialogOpen, setIsChangeTeamPasswordDialogOpen] = useState(false);
+  const [changeTeamPasswordValue, setChangeTeamPasswordValue] = useState('');
+  const [changeTeamPasswordError, setChangeTeamPasswordError] = useState<string | null>(null);
   const selectedTeam = store.selectedTeam;
   const isFixedAuth = store.authProfile?.type === 'fixed';
 
@@ -108,10 +120,11 @@ const Login: React.FC<Props> = observer(({ store }) => {
       setAvailableRooms([]);
       return;
     }
+    const teamId = selectedTeam.id;
 
     setIsRoomsLoading(true);
     try {
-      const response = await fetch(`${getApiBase()}/api/teams/${encodeURIComponent(selectedTeam.id)}/rooms`);
+      const response = await fetch(`${getApiBase()}/api/teams/${encodeURIComponent(teamId)}/rooms`);
       if (!response.ok) {
         throw new Error('Failed to fetch rooms');
       }
@@ -122,7 +135,39 @@ const Login: React.FC<Props> = observer(({ store }) => {
     } finally {
       setIsRoomsLoading(false);
     }
-  }, [selectedTeam, store]);
+  }, [selectedTeam?.id, store]);
+
+  const fetchSelectedTeam = useCallback(async () => {
+    if (!store.authProfile || !selectedTeam) return;
+    const teamId = selectedTeam.id;
+
+    setIsTeamMembersLoading(true);
+    try {
+      const response = await fetch(`${getApiBase()}/api/teams/${encodeURIComponent(teamId)}`, {
+        headers: {
+          Authorization: `Bearer ${store.authProfile.token}`
+        }
+      });
+      if (response.status === 403) {
+        const data = (await response.json()) as { error?: string };
+        if (data.error === 'Team password is required') {
+          store.setSelectedTeam(null);
+          setIsChoosingTeam(true);
+          return;
+        }
+        throw new Error('Failed to fetch team');
+      }
+      if (!response.ok) {
+        throw new Error('Failed to fetch team');
+      }
+      const team = (await response.json()) as Team;
+      store.setSelectedTeam(team);
+    } catch (error) {
+      store.setError('Не удалось загрузить участников команды');
+    } finally {
+      setIsTeamMembersLoading(false);
+    }
+  }, [selectedTeam?.id, store, store.authProfile?.token]);
 
   const fetchAvailableTeams = useCallback(async () => {
     setIsTeamsLoading(true);
@@ -160,8 +205,9 @@ const Login: React.FC<Props> = observer(({ store }) => {
   useEffect(() => {
     if (store.authProfile && selectedTeam) {
       fetchAvailableRooms();
+      void fetchSelectedTeam();
     }
-  }, [fetchAvailableRooms, store.authProfile, selectedTeam]);
+  }, [fetchAvailableRooms, fetchSelectedTeam, store.authProfile, selectedTeam?.id]);
 
   const autoJoinBuiltinTeam = useCallback(async () => {
     if (!store.authProfile || store.authProfile.type !== 'fixed' || store.selectedTeam) return;
@@ -326,11 +372,60 @@ const Login: React.FC<Props> = observer(({ store }) => {
     setIsInviteDialogOpen(true);
   };
 
+  const completeTeamJoin = (team: Team) => {
+    store.setSelectedTeam(team);
+    setIsChoosingTeam(false);
+    setIsJoinTeamDialogOpen(false);
+    setSelectedTeamForJoin(null);
+    setJoinTeamPassword('');
+    setJoinTeamError(null);
+  };
+
+  const requestJoinTeam = async (teamId: string, password?: string): Promise<Team> => {
+    if (!store.authProfile) {
+      throw new Error('Необходимо войти в аккаунт');
+    }
+    const response = await fetch(`${getApiBase()}/api/teams/${encodeURIComponent(teamId)}/join`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${store.authProfile.token}`
+      },
+      body: JSON.stringify(password ? { password } : {})
+    });
+    const data = (await response.json()) as Team | { error?: string };
+    if (!response.ok || 'error' in data) {
+      throw new Error('error' in data && data.error ? data.error : 'Не удалось войти в команду');
+    }
+    return data as Team;
+  };
+
   const handleOpenJoinTeamDialog = (team: AvailableTeam) => {
     setSelectedTeamForJoin(team);
     setJoinTeamPassword('');
     setJoinTeamError(null);
     setIsJoinTeamDialogOpen(true);
+  };
+
+  const handleSelectTeam = async (team: AvailableTeam) => {
+    if (!store.authProfile) return;
+
+    setIsLoading(true);
+    store.setError(null);
+    try {
+      const joinedTeam = await requestJoinTeam(team.id);
+      completeTeamJoin(joinedTeam);
+      await fetchAvailableTeams();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Не удалось войти в команду';
+      if (message === 'Team password is required' || message === 'Invalid team password') {
+        handleOpenJoinTeamDialog(team);
+      } else {
+        store.setError(message);
+      }
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleJoinTeam = async () => {
@@ -340,25 +435,12 @@ const Login: React.FC<Props> = observer(({ store }) => {
     setJoinTeamError(null);
     store.setError(null);
     try {
-      const response = await fetch(`${getApiBase()}/api/teams/${encodeURIComponent(selectedTeamForJoin.id)}/join`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${store.authProfile.token}`
-        },
-        body: JSON.stringify({ password: joinTeamPassword.trim() })
-      });
-      const data = (await response.json()) as Team | { error?: string };
-      if (!response.ok || 'error' in data) {
-        throw new Error('error' in data && data.error ? data.error : 'Не удалось войти в команду');
-      }
-      store.setSelectedTeam(data as Team);
-      setIsChoosingTeam(false);
-      setIsJoinTeamDialogOpen(false);
-      setSelectedTeamForJoin(null);
+      const team = await requestJoinTeam(selectedTeamForJoin.id, joinTeamPassword.trim());
+      completeTeamJoin(team);
       await fetchAvailableTeams();
     } catch (error) {
-      setJoinTeamError(error instanceof Error ? error.message : 'Не удалось войти в команду');
+      const message = error instanceof Error ? error.message : 'Не удалось войти в команду';
+      setJoinTeamError(message === 'Invalid team password' ? 'Неверный пароль команды' : message);
     } finally {
       setIsLoading(false);
     }
@@ -481,6 +563,119 @@ const Login: React.FC<Props> = observer(({ store }) => {
       store.setError(error instanceof Error ? error.message : 'Не удалось удалить комнату');
     } finally {
       setIsDeletingRoom(false);
+    }
+  };
+
+  const currentUserName = store.authProfile?.name || '';
+  const isTeamAdmin = Boolean(
+    selectedTeam &&
+    currentUserName &&
+    (selectedTeam.owner === currentUserName ||
+      selectedTeam.members.some((member) => member.name === currentUserName && member.role === 'admin'))
+  );
+
+  const handleOpenRemoveMemberDialog = (name: string) => {
+    setMemberToRemove(name);
+    setIsRemoveMemberDialogOpen(true);
+  };
+
+  const handleRemoveMember = async () => {
+    if (!store.authProfile || !selectedTeam || !memberToRemove) return;
+
+    setBusyMemberName(memberToRemove);
+    store.setError(null);
+    try {
+      const response = await fetch(`${getApiBase()}/api/teams/${encodeURIComponent(selectedTeam.id)}/members`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${store.authProfile.token}`
+        },
+        body: JSON.stringify({ name: memberToRemove })
+      });
+      const data = (await response.json()) as Team | { error?: string };
+      if (!response.ok || 'error' in data) {
+        throw new Error('error' in data && data.error ? data.error : 'Не удалось удалить участника');
+      }
+      store.setSelectedTeam(data as Team);
+      setIsRemoveMemberDialogOpen(false);
+      setMemberToRemove('');
+    } catch (error) {
+      store.setError(error instanceof Error ? error.message : 'Не удалось удалить участника');
+    } finally {
+      setBusyMemberName(null);
+    }
+  };
+
+  const handleResetMemberPassword = async (name: string) => {
+    if (!store.authProfile || !selectedTeam) return;
+
+    setBusyMemberName(name);
+    store.setError(null);
+    try {
+      const response = await fetch(`${getApiBase()}/api/teams/${encodeURIComponent(selectedTeam.id)}/members/reset-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${store.authProfile.token}`
+        },
+        body: JSON.stringify({ name })
+      });
+      const data = (await response.json()) as { team?: Team; password?: string; error?: string };
+      if (!response.ok || !data.password) {
+        throw new Error(data.error || 'Не удалось сбросить пароль');
+      }
+      if (data.team) {
+        store.setSelectedTeam(data.team);
+      }
+      setResetPasswordMember(name);
+      setResetPasswordValue(data.password);
+      setResetPasswordCopySuccess(false);
+      setIsResetPasswordDialogOpen(true);
+    } catch (error) {
+      store.setError(error instanceof Error ? error.message : 'Не удалось сбросить пароль');
+    } finally {
+      setBusyMemberName(null);
+    }
+  };
+
+  const handleChangeTeamPassword = async () => {
+    if (!store.authProfile || !selectedTeam || !changeTeamPasswordValue.trim()) return;
+
+    setIsLoading(true);
+    setChangeTeamPasswordError(null);
+    store.setError(null);
+    try {
+      const response = await fetch(`${getApiBase()}/api/teams/${encodeURIComponent(selectedTeam.id)}/password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${store.authProfile.token}`
+        },
+        body: JSON.stringify({ password: changeTeamPasswordValue.trim() })
+      });
+      const data = (await response.json()) as Team | { error?: string };
+      if (!response.ok || 'error' in data) {
+        throw new Error('error' in data && data.error ? data.error : 'Не удалось сменить пароль команды');
+      }
+      store.setSelectedTeam(data as Team);
+      setIsChangeTeamPasswordDialogOpen(false);
+      setChangeTeamPasswordValue('');
+    } catch (error) {
+      setChangeTeamPasswordError(error instanceof Error ? error.message : 'Не удалось сменить пароль команды');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleCopyResetPassword = async () => {
+    if (!resetPasswordValue) return;
+    try {
+      await navigator.clipboard.writeText(resetPasswordValue);
+      setResetPasswordCopySuccess(true);
+      setTimeout(() => setResetPasswordCopySuccess(false), 2000);
+    } catch (error) {
+      store.setError('Не удалось скопировать пароль');
     }
   };
 
@@ -732,7 +927,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
           <Button variant="outlined" onClick={handleChangeTeam}>
             Сменить команду
           </Button>
-          <Button onClick={() => { setIsChoosingTeam(false); store.clearAuthProfile(); }}>Сменить аккаунт</Button>
+          <Button onClick={() => { setIsChoosingTeam(false); store.clearAuthProfile(); }}>Выйти</Button>
         </Box>
       </Box>
 
@@ -742,21 +937,38 @@ const Login: React.FC<Props> = observer(({ store }) => {
         </Typography>
       )}
 
-      <Box sx={{ flex: 1 }}>
-        {isRoomsLoading ? (
-          <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <CircularProgress />
-          </Box>
-        ) : (
-          <RoomTiles
-            rooms={availableRooms}
-            currentUserName={store.authProfile?.name || ''}
-            onRoomClick={handleRoomClick}
-            onCreateClick={handleOpenCreateDialog}
-            onDeleteClick={handleOpenDeleteDialog}
-            onInviteClick={handleOpenInviteDialog}
-          />
-        )}
+      <Box sx={{ flex: 1, display: 'flex', gap: 2, alignItems: 'flex-start', minHeight: 0 }}>
+        <Box sx={{ flex: 1, minWidth: 0, width: '100%' }}>
+          {isRoomsLoading ? (
+            <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <CircularProgress />
+            </Box>
+          ) : (
+            <RoomTiles
+              rooms={availableRooms}
+              currentUserName={store.authProfile?.name || ''}
+              onRoomClick={handleRoomClick}
+              onCreateClick={handleOpenCreateDialog}
+              onDeleteClick={handleOpenDeleteDialog}
+              onInviteClick={handleOpenInviteDialog}
+            />
+          )}
+        </Box>
+        <TeamMembersPanel
+          members={store.selectedTeam?.members || []}
+          owner={store.selectedTeam?.owner || ''}
+          currentUserName={currentUserName}
+          isAdmin={isTeamAdmin}
+          isLoading={isTeamMembersLoading}
+          busyMemberName={busyMemberName}
+          onRemoveMember={handleOpenRemoveMemberDialog}
+          onResetPassword={handleResetMemberPassword}
+          onChangeTeamPassword={() => {
+            setChangeTeamPasswordValue('');
+            setChangeTeamPasswordError(null);
+            setIsChangeTeamPasswordDialogOpen(true);
+          }}
+        />
       </Box>
 
       <Dialog open={isCreateDialogOpen} onClose={() => setIsCreateDialogOpen(false)} fullWidth maxWidth="xs">
@@ -940,6 +1152,132 @@ const Login: React.FC<Props> = observer(({ store }) => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <Dialog
+        open={isRemoveMemberDialogOpen}
+        onClose={() => {
+          setIsRemoveMemberDialogOpen(false);
+          setMemberToRemove('');
+        }}
+        fullWidth
+        maxWidth="xs"
+      >
+        <DialogTitle>Удалить участника</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Удалить <b>{memberToRemove}</b> из команды? Этот человек больше не будет в списке участников.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              setIsRemoveMemberDialogOpen(false);
+              setMemberToRemove('');
+            }}
+          >
+            Отмена
+          </Button>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={handleRemoveMember}
+            disabled={Boolean(busyMemberName)}
+          >
+            {busyMemberName ? <CircularProgress size={18} color="inherit" /> : 'Удалить'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={isResetPasswordDialogOpen}
+        onClose={() => setIsResetPasswordDialogOpen(false)}
+        fullWidth
+        maxWidth="xs"
+      >
+        <DialogTitle>Новый пароль</DialogTitle>
+        <DialogContent>
+          <DialogContentText sx={{ mb: 1.5 }}>
+            Пароль для <b>{resetPasswordMember}</b> сброшен. Передайте его участнику — старый больше не подойдёт.
+          </DialogContentText>
+          <TextField
+            fullWidth
+            label="Временный пароль"
+            value={resetPasswordValue}
+            InputProps={{ readOnly: true }}
+            margin="normal"
+          />
+          {resetPasswordCopySuccess && (
+            <Alert severity="success" sx={{ mt: 1 }}>
+              Пароль скопирован.
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setIsResetPasswordDialogOpen(false)}>
+            Закрыть
+          </Button>
+          <Button variant="contained" onClick={handleCopyResetPassword} disabled={!resetPasswordValue}>
+            Скопировать
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={isChangeTeamPasswordDialogOpen}
+        onClose={() => {
+          setIsChangeTeamPasswordDialogOpen(false);
+          setChangeTeamPasswordError(null);
+        }}
+        fullWidth
+        maxWidth="xs"
+      >
+        <DialogTitle>Сменить пароль команды</DialogTitle>
+        <DialogContent>
+          <DialogContentText sx={{ mb: 1 }}>
+            После смены пароля участникам нужно будет ввести его заново, чтобы войти в команду.
+          </DialogContentText>
+          {changeTeamPasswordError && (
+            <Alert severity="error" sx={{ mb: 1 }}>
+              {changeTeamPasswordError}
+            </Alert>
+          )}
+          <TextField
+            autoFocus
+            fullWidth
+            type="password"
+            label="Новый пароль команды"
+            margin="normal"
+            value={changeTeamPasswordValue}
+            onChange={(event) => {
+              setChangeTeamPasswordValue(event.target.value);
+              if (changeTeamPasswordError) setChangeTeamPasswordError(null);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                handleChangeTeamPassword();
+              }
+            }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              setIsChangeTeamPasswordDialogOpen(false);
+              setChangeTeamPasswordError(null);
+            }}
+          >
+            Отмена
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleChangeTeamPassword}
+            disabled={isLoading || !changeTeamPasswordValue.trim()}
+          >
+            {isLoading ? <CircularProgress size={18} color="inherit" /> : 'Сохранить'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 
@@ -982,7 +1320,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
           currentUserName={store.authProfile.name}
           isLoading={isTeamsLoading}
           onRefresh={fetchAvailableTeams}
-          onTeamClick={handleOpenJoinTeamDialog}
+          onTeamClick={handleSelectTeam}
           onCreateClick={() => setIsCreateTeamDialogOpen(true)}
           onLogout={() => store.clearAuthProfile()}
         />

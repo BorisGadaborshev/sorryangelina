@@ -31,10 +31,20 @@ export const TeamModel = {
   },
 
   async findOne(where: { id: string }): Promise<TeamDocument | null> {
-    const { rows } = await pool.query('select id, name, password_hash, owner, created_at from teams where id=$1', [where.id]);
+    const { rows } = await pool.query(
+      'select id, name, password_hash, password_version, owner, created_at from teams where id=$1',
+      [where.id]
+    );
     if (rows.length === 0) return null;
 
-    const teamRow = rows[0] as { id: string; name: string; password_hash: string; owner: string; created_at: string };
+    const teamRow = rows[0] as {
+      id: string;
+      name: string;
+      password_hash: string;
+      password_version: number;
+      owner: string;
+      created_at: string;
+    };
     const membersRes = await pool.query('select team_id, name, role from team_members where team_id=$1 order by created_at asc', [where.id]);
     const members = (membersRes.rows as Array<{ team_id: string; name: string; role: TeamMember['role'] }>).map((member) => ({
       teamId: member.team_id,
@@ -46,6 +56,7 @@ export const TeamModel = {
       id: teamRow.id,
       name: teamRow.name,
       passwordHash: teamRow.password_hash,
+      passwordVersion: Number(teamRow.password_version) || 1,
       owner: teamRow.owner,
       createdAt: teamRow.created_at,
       members
@@ -67,6 +78,40 @@ export const TeamModel = {
       `insert into team_members (team_id, name, role) values ($1,$2,$3)
        on conflict (team_id, name) do nothing`,
       [teamId, name, role]
+    );
+    return this.findOne({ id: teamId });
+  },
+
+  async removeMember(teamId: string, name: string): Promise<TeamDocument | null> {
+    await pool.query('delete from team_members where team_id=$1 and name=$2', [teamId, name]);
+    return this.findOne({ id: teamId });
+  },
+
+  async setMemberPasswordUnlock(teamId: string, name: string, passwordVersion: number): Promise<void> {
+    await pool.query(
+      'update team_members set unlocked_password_version = $1 where team_id=$2 and name=$3',
+      [passwordVersion, teamId, name]
+    );
+  },
+
+  async getMemberPasswordUnlock(teamId: string, name: string): Promise<number | null> {
+    const { rows } = await pool.query(
+      'select unlocked_password_version from team_members where team_id=$1 and name=$2',
+      [teamId, name]
+    );
+    if (rows.length === 0) return null;
+    const value = (rows[0] as { unlocked_password_version: number | null }).unlocked_password_version;
+    return value == null ? null : Number(value);
+  },
+
+  async updatePassword(teamId: string, passwordHash: string): Promise<TeamDocument | null> {
+    await pool.query(
+      `update teams
+       set password_hash = $1,
+           password_version = coalesce(password_version, 1) + 1,
+           updated_at = now()
+       where id = $2`,
+      [passwordHash, teamId]
     );
     return this.findOne({ id: teamId });
   }

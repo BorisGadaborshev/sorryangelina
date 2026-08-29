@@ -56,7 +56,7 @@ const TeamLobby: React.FC<Props> = ({ teams, currentUserName, isLoading, onRefre
           <Button variant="outlined" onClick={onRefresh} disabled={isLoading}>
             Обновить
           </Button>
-          <Button onClick={onLogout}>Сменить аккаунт</Button>
+          <Button onClick={onLogout}>Выйти</Button>
         </Box>
       </Box>
 

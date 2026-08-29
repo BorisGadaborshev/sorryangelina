@@ -1,6 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { RetroStore } from '../store/RetroStore';
-import { Room, RoomState, User, Card, CardComment, CardReaction, FacilitatorAnnouncement, DiscussionNavigationState, Phase, PhaseTimerState, ChatMessage, Mood, RetroRatingState, RoomFeatures, SprintVipState, WhiteboardStroke, CreateRoomOptions } from '../types';
+import { Room, RoomState, User, Card, CardComment, CardReaction, FacilitatorAnnouncement, DiscussionNavigationState, Phase, PhaseTimerState, ChatMessage, Mood, RetroRatingState, RoomFeatures, SprintVipState, WhiteboardStroke, CreateRoomOptions, ColumnColorId } from '../types';
 
 export class SocketService {
   private socket: Socket;
@@ -186,6 +186,10 @@ export class SocketService {
       this.store.deleteCard(cardId);
     });
 
+    this.socket.on('cards-cleared', () => {
+      this.store.clearAllCards();
+    });
+
     this.socket.on('card-moved', ({ cardId, column }: { cardId: string; column: number }) => {
       console.log('Card moved:', { cardId, column });
       this.store.moveCard(cardId, column);
@@ -243,7 +247,7 @@ export class SocketService {
       this.store.setRetroRating(rating);
     });
 
-    this.socket.on('facilitator-selected', (announcement: FacilitatorAnnouncement) => {
+    this.socket.on('facilitator-selected', (announcement: FacilitatorAnnouncement | null) => {
       this.store.setFacilitatorAnnouncement(announcement);
     });
 
@@ -253,6 +257,10 @@ export class SocketService {
 
     this.socket.on('column-titles-updated', ({ titles }: { titles: string[] }) => {
       this.store.setColumnTitles(titles);
+    });
+
+    this.socket.on('column-colors-updated', ({ colors }: { colors: ColumnColorId[] }) => {
+      this.store.setColumnColors(colors);
     });
 
     this.socket.on('room-features-updated', ({ features }: { features: RoomFeatures }) => {
@@ -558,6 +566,7 @@ export class SocketService {
       console.error('Cannot add card: no current user');
       return;
     }
+    if (!this.store.canAddCards(column)) return;
     console.log('Adding card with user:', currentUser);
     this.socket.emit('add-card', { text, type, column, imageUrl });
   }
@@ -578,6 +587,11 @@ export class SocketService {
       return;
     }
     this.socket.emit('delete-card', { cardId });
+  }
+
+  deleteAllCards(): void {
+    if (!this.socket || !this.store.isAdmin) return;
+    this.socket.emit('delete-all-cards');
   }
 
   mergeCards(targetCardId: string, sourceCardId: string): void {
@@ -673,7 +687,12 @@ export class SocketService {
     this.socket.emit('set-column-titles', { titles });
   }
 
+  setColumnColors(colors: ColumnColorId[]): void {
+    this.socket.emit('set-column-colors', { colors });
+  }
+
   setRoomFeatures(features: RoomFeatures): void {
+    if (!this.socket || !this.store.isAdmin) return;
     this.socket.emit('set-room-features', { features });
   }
 

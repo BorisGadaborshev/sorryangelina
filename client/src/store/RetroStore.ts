@@ -1,5 +1,5 @@
 import { makeAutoObservable, runInAction } from 'mobx';
-import { AuthProfile, Card, CardComment, CardReaction, ChatMessage, DEFAULT_COLUMN_TITLES, DEFAULT_ROOM_FEATURES, DiscussionNavigationState, FacilitatorAnnouncement, Mood, Phase, PhaseTimerState, RetroRatingState, Room, RoomFeatures, RoomState, SprintVipState, Team, User, WhiteboardStroke } from '../types';
+import { AuthProfile, Card, CardComment, CardReaction, ChatMessage, ColumnColorId, DEFAULT_COLUMN_COLORS, DEFAULT_COLUMN_TITLES, DEFAULT_ROOM_FEATURES, DiscussionNavigationState, FacilitatorAnnouncement, LETS_DO_COLUMN_INDEX, Mood, Phase, PhaseTimerState, RetroRatingState, Room, RoomFeatures, RoomState, SprintVipState, Team, User, WhiteboardStroke, normalizeColumnColors } from '../types';
 import { Socket } from 'socket.io-client';
 import { SocketService } from '../services/socket';
 
@@ -15,6 +15,7 @@ interface PersistedBoardState {
   cards: Card[];
   users: User[];
   columnTitles: string[];
+  columnColors: ColumnColorId[];
   roomFeatures: RoomFeatures;
   currentUser: User | null;
 }
@@ -39,9 +40,9 @@ export class RetroStore {
   isFacilitatorDialogOpen = false;
   discussionNavigation: DiscussionNavigationState | null = null;
   columnTitles: string[] = [...DEFAULT_COLUMN_TITLES];
+  columnColors: ColumnColorId[] = [...DEFAULT_COLUMN_COLORS];
   roomFeatures: RoomFeatures = { ...DEFAULT_ROOM_FEATURES };
   sprintVip: SprintVipState = { voteCount: 0 };
-  mergeTargetCardId: string | null = null;
   retroRating: RetroRatingState = {
     hasVoted: false,
     votesCount: 0,
@@ -98,6 +99,7 @@ export class RetroStore {
       cards: this.cards,
       users: this.users,
       columnTitles: this.columnTitles,
+      columnColors: this.columnColors,
       roomFeatures: this.roomFeatures,
       currentUser: this.currentUser,
     };
@@ -135,6 +137,7 @@ export class RetroStore {
         this.columnTitles = parsed.columnTitles?.length === DEFAULT_COLUMN_TITLES.length
           ? [...parsed.columnTitles]
           : [...DEFAULT_COLUMN_TITLES];
+        this.columnColors = normalizeColumnColors(parsed.columnColors);
         this.roomFeatures = parsed.roomFeatures
           ? { ...DEFAULT_ROOM_FEATURES, ...parsed.roomFeatures }
           : { ...DEFAULT_ROOM_FEATURES };
@@ -417,6 +420,7 @@ export class RetroStore {
         } else {
           this.columnTitles = [...DEFAULT_COLUMN_TITLES];
         }
+        this.columnColors = normalizeColumnColors(room.columnColors);
         this.roomFeatures = room.features
           ? { ...DEFAULT_ROOM_FEATURES, ...room.features }
           : { ...DEFAULT_ROOM_FEATURES };
@@ -457,9 +461,9 @@ export class RetroStore {
         this.isFacilitatorDialogOpen = false;
         this.discussionNavigation = null;
         this.columnTitles = [...DEFAULT_COLUMN_TITLES];
+        this.columnColors = [...DEFAULT_COLUMN_COLORS];
         this.roomFeatures = { ...DEFAULT_ROOM_FEATURES };
         this.sprintVip = { voteCount: 0 };
-        this.mergeTargetCardId = null;
         this.retroRating = { hasVoted: false, votesCount: 0, totalCount: 0, resultsVisible: false };
         this.isReconnecting = false;
         console.log('Cleared room and session');
@@ -471,9 +475,6 @@ export class RetroStore {
     console.log('Setting phase:', phase);
     runInAction(() => {
       this.phase = phase;
-      if (phase !== 'creation') {
-        this.mergeTargetCardId = null;
-      }
       if (phase !== 'discussion') {
         this.discussionNavigation = null;
         this.facilitatorAnnouncement = null;
@@ -486,9 +487,6 @@ export class RetroStore {
     console.log('Setting cards:', cards);
     runInAction(() => {
       this.cards = cards;
-      if (this.mergeTargetCardId && !cards.some((card) => card.id === this.mergeTargetCardId)) {
-        this.mergeTargetCardId = null;
-      }
     });
   }
 
@@ -509,12 +507,6 @@ export class RetroStore {
     runInAction(() => {
       this.cards = state.cards;
       this.phase = state.phase;
-      if (
-        state.phase !== 'creation' ||
-        (this.mergeTargetCardId && !state.cards.some((card) => card.id === this.mergeTargetCardId))
-      ) {
-        this.mergeTargetCardId = null;
-      }
       if (state.phase !== 'discussion') {
         this.discussionNavigation = null;
         this.facilitatorAnnouncement = null;
@@ -570,14 +562,14 @@ export class RetroStore {
     console.log('Deleting card:', cardId);
     runInAction(() => {
       this.cards = this.cards.filter(c => c.id !== cardId);
-      if (this.mergeTargetCardId === cardId) {
-        this.mergeTargetCardId = null;
-      }
     });
   }
 
-  setMergeTargetCard(cardId: string | null) {
-    this.mergeTargetCardId = cardId;
+  clearAllCards() {
+    runInAction(() => {
+      this.cards = [];
+    });
+    this.persistBoardState();
   }
 
   moveCard(cardId: string, column: number) {
@@ -651,6 +643,48 @@ export class RetroStore {
     return this.currentUser?.role === 'admin' || this.currentUser?.name === card.createdBy;
   }
 
+  canAddCards(columnIndex: number): boolean {
+    if (this.currentUser?.role === 'admin') return true;
+    if (columnIndex !== LETS_DO_COLUMN_INDEX) return true;
+    return this.roomFeatures.membersCanAddCards;
+  }
+
+  isCardTextHidden(card: Card): boolean {
+    if (!this.roomFeatures.hideCardTextDuringCreation) return false;
+    if (this.phase !== 'creation') return false;
+    if (this.currentUser?.role === 'admin') return false;
+    if (this.currentUser?.name === card.createdBy) return false;
+    if (card.column === LETS_DO_COLUMN_INDEX) return false;
+    return true;
+  }
+
+  canUseCardSocial(card: Card): boolean {
+    if (this.phase === 'rating') return false;
+    if (!this.roomFeatures.reactionsEnabled && !this.roomFeatures.commentsEnabled) return false;
+    if (card.column === LETS_DO_COLUMN_INDEX) return true;
+    return !this.isCardTextHidden(card);
+  }
+
+  canMoveCard(card: Card): boolean {
+    if (this.currentUser?.role === 'admin') return true;
+    if (!this.roomFeatures.moveCardsEnabled) return false;
+    return this.currentUser?.name === card.createdBy;
+  }
+
+  get canUseCardDragDrop(): boolean {
+    if (this.phase !== 'creation') return false;
+    if (this.currentUser?.role === 'admin') return true;
+    return this.roomFeatures.moveCardsEnabled;
+  }
+
+  get canMergeCards(): boolean {
+    return (
+      this.phase === 'creation' &&
+      this.currentUser?.role === 'admin' &&
+      this.roomFeatures.cardEditingEnabled
+    );
+  }
+
   canChangePhase(): boolean {
     if (!this.currentUser?.name) return false;
     return this.currentUser.role === 'admin' || this.room?.owner === this.currentUser.name;
@@ -689,6 +723,24 @@ export class RetroStore {
     this.socketService?.setColumnTitles(titles);
   }
 
+  getColumnColor(index: number): ColumnColorId {
+    return this.columnColors[index] ?? DEFAULT_COLUMN_COLORS[index];
+  }
+
+  setColumnColors(colors: ColumnColorId[]) {
+    runInAction(() => {
+      this.columnColors = normalizeColumnColors(colors);
+      if (this.room) {
+        this.room = { ...this.room, columnColors: [...this.columnColors] };
+      }
+    });
+  }
+
+  requestColumnColorsUpdate(colors: ColumnColorId[]) {
+    this.setColumnColors(colors);
+    this.socketService?.setColumnColors(this.columnColors);
+  }
+
   setRoomFeatures(features: RoomFeatures) {
     runInAction(() => {
       this.roomFeatures = { ...DEFAULT_ROOM_FEATURES, ...features };
@@ -699,6 +751,7 @@ export class RetroStore {
   }
 
   requestRoomFeaturesUpdate(features: RoomFeatures) {
+    if (!this.isAdmin) return;
     this.setRoomFeatures(features);
     this.socketService?.setRoomFeatures(features);
   }

@@ -1,15 +1,17 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { observer } from 'mobx-react-lite';
-import { Card as CardType, CARD_REACTION_EMOJIS } from '../types';
+import { Card as CardType, CARD_REACTION_EMOJIS, cardTextToEditorValue, editorValueToCardText, getCardTextSegments, getColumnColorStyles } from '../types';
 import { Card, CardContent, Typography, IconButton, TextField, Box, Tooltip, Alert, Button, Menu, MenuItem, ListItemIcon, ListItemText, Popover, Divider } from '@mui/material';
-import { Delete, Edit, MoreVert, Check, ChatBubbleOutline, AddReaction, VisibilityOff, AddCircleOutline } from '@mui/icons-material';
+import { Delete, Edit, MoreVert, Check, ChatBubbleOutline, AddReaction, VisibilityOff } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import { RetroStore } from '../store/RetroStore';
+import { getDislikeIconLabel, getLikeIconLabel, VoteIcon } from './VoteIcon';
 
 interface Props {
   card: CardType;
   index: number;
   store: RetroStore;
+  isMergeDropTarget?: boolean;
 }
 
 const formatRelativeTime = (iso: string): string => {
@@ -23,7 +25,44 @@ const formatRelativeTime = (iso: string): string => {
   return `${days} дн. назад`;
 };
 
-const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
+const formatCommentAuthorName = (fullName: string): string => {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) return fullName.trim();
+  const [surname, ...rest] = parts;
+  const initials = rest
+    .map((part) => part.charAt(0))
+    .filter(Boolean)
+    .map((letter) => `${letter.toUpperCase()}.`)
+    .join('');
+  return initials ? `${surname} ${initials}` : surname;
+};
+
+const CardBodyText: React.FC<{ text: string; variant?: 'body1' | 'body2' }> = ({ text, variant = 'body1' }) => {
+  const theme = useTheme();
+  const segments = getCardTextSegments(text);
+
+  return (
+    <Box>
+      {segments.map((segment, index) => (
+        <React.Fragment key={`${index}-${segment.slice(0, 24)}`}>
+          {index > 0 && (
+            <Divider
+              sx={{
+                my: 1,
+                borderColor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.12)'
+              }}
+            />
+          )}
+          <Typography variant={variant} sx={{ wordBreak: 'break-word' }}>
+            {segment}
+          </Typography>
+        </React.Fragment>
+      ))}
+    </Box>
+  );
+};
+
+const RetroCard: React.FC<Props> = observer(({ card, index, store, isMergeDropTarget = false }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [text, setText] = useState(card.text);
   const [imageUrl, setImageUrl] = useState(card.imageUrl || '');
@@ -42,15 +81,16 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
 
   const handleEdit = () => {
     if (store.canEditCard(card) && (store.phase === 'creation' || store.phase === 'discussion')) {
-      setText(card.text);
+      setText(cardTextToEditorValue(card.text));
       setImageUrl(card.imageUrl || '');
       setIsEditing(true);
     }
   };
 
   const handleSave = () => {
-    if (text.trim() && store.socket && (store.phase === 'creation' || store.phase === 'discussion') && store.canEditCard(card)) {
-      store.socketService?.updateCard(card.id, text.trim(), imageUrl.trim() || undefined);
+    const nextText = editorValueToCardText(text);
+    if (nextText && store.socket && (store.phase === 'creation' || store.phase === 'discussion') && store.canEditCard(card)) {
+      store.socketService?.updateCard(card.id, nextText, imageUrl.trim() || undefined);
       setIsEditing(false);
     }
   };
@@ -113,58 +153,16 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
     store.socketService?.toggleCardReaction(card.id, emoji);
   };
 
-  const handleMergeClick = (event: React.MouseEvent<HTMLElement>) => {
-    event.stopPropagation();
-    const targetCardId = store.mergeTargetCardId;
-    if (!targetCardId) {
-      store.setMergeTargetCard(card.id);
-      return;
-    }
-    if (targetCardId === card.id) {
-      store.setMergeTargetCard(null);
-      return;
-    }
-    store.socketService?.mergeCards(targetCardId, card.id);
-    store.setMergeTargetCard(null);
-  };
-
-  const cardColor = theme.palette.mode === 'dark'
-    ? {
-        liked: '#28372d',
-        disliked: '#3a2b30',
-        suggestion: '#253344'
-      }[card.type]
-    : {
-        liked: '#b2dfdb',
-        disliked: '#f8bbd0',
-        suggestion: '#e1bee7'
-      }[card.type];
+  const cardColor = getColumnColorStyles(store.getColumnColor(card.column), theme.palette.mode).fill;
 
   const features = store.roomFeatures;
   const isEditingAllowed = (store.phase === 'creation' || (store.phase === 'discussion' && store.canEditCard(card)));
   const currentUserId = store.currentUser?.id || '';
-  const currentUserName = store.currentUser?.name || '';
-  const isCardOwner = Boolean(currentUserName) && currentUserName === card.createdBy;
-  const isAdmin = store.currentUser?.role === 'admin';
-  const isMergeTarget = store.mergeTargetCardId === card.id;
-  const canMerge =
-    isAdmin &&
-    features.cardEditingEnabled &&
-    store.phase === 'creation';
-  const mergeTooltip = isMergeTarget
-    ? 'Отменить объединение'
-    : store.mergeTargetCardId
-      ? 'Добавить эту карточку к выбранной'
-      : 'Выбрать основную карточку';
-  const isTextHidden =
-    features.hideCardTextDuringCreation &&
-    store.phase === 'creation' &&
-    !isCardOwner &&
-    !isAdmin;
+  const isTextHidden = store.isCardTextHidden(card);
   const hasLiked = card.likes?.includes(currentUserId) || false;
   const hasDisliked = card.dislikes?.includes(currentUserId) || false;
   const canEdit = store.canEditCard(card);
-  const canUseSocial = store.phase !== 'rating' && (features.reactionsEnabled || features.commentsEnabled);
+  const canUseSocial = store.canUseCardSocial(card);
   const showReactions = features.reactionsEnabled;
   const showComments = features.commentsEnabled;
   const showDislikes = features.dislikesEnabled;
@@ -190,10 +188,11 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
       sx={{
         margin: 0.6,
         backgroundColor: cardColor,
-        color: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.92)' : 'inherit',
+        color: cardColor && theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.92)' : 'inherit',
         position: 'relative',
-        outline: isMergeTarget ? `3px solid ${theme.palette.primary.main}` : '3px solid transparent',
-        outlineOffset: -2
+        outline: isMergeDropTarget ? `3px solid ${theme.palette.primary.main}` : '3px solid transparent',
+        outlineOffset: -2,
+        transition: 'outline-color 0.15s ease'
       }}
     >
       <CardContent sx={{ pb: '4px !important', '&:last-child': { pb: '4px' } }}>
@@ -264,9 +263,7 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
                     </Typography>
                   </Box>
                 ) : (
-                  <Typography variant="body1" sx={{ wordBreak: 'break-word' }}>
-                    {card.text}
-                  </Typography>
+                  <CardBodyText text={card.text} />
                 )}
                 {showAuthor && (
                   <Typography variant="caption" sx={{ opacity: 0.7, display: 'block', mt: 0.5 }}>
@@ -274,51 +271,35 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
                   </Typography>
                 )}
               </Box>
-              {(canMerge || (canEdit && isEditingAllowed)) && (
+              {canEdit && isEditingAllowed && (
                 <Box sx={{ display: 'flex', alignItems: 'center', mt: -0.5, mr: -0.5, flexShrink: 0 }}>
-                  {canMerge && (
-                    <Tooltip title={mergeTooltip}>
-                      <IconButton
-                        size="small"
-                        onClick={handleMergeClick}
-                        aria-label={mergeTooltip}
-                        color={isMergeTarget ? 'primary' : 'default'}
-                      >
-                        <AddCircleOutline fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                  )}
-                  {canEdit && isEditingAllowed && (
-                    <>
-                      <IconButton
-                        size="small"
-                        onClick={handleMenuOpen}
-                        aria-label="Действия с карточкой"
-                      >
-                        <MoreVert fontSize="small" />
-                      </IconButton>
-                      <Menu
-                        anchorEl={menuAnchorEl}
-                        open={isMenuOpen}
-                        onClose={handleMenuClose}
-                        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-                        transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-                      >
-                        <MenuItem onClick={handleEditFromMenu}>
-                          <ListItemIcon>
-                            <Edit fontSize="small" />
-                          </ListItemIcon>
-                          <ListItemText>Редактировать</ListItemText>
-                        </MenuItem>
-                        <MenuItem onClick={handleDeleteFromMenu}>
-                          <ListItemIcon>
-                            <Delete fontSize="small" />
-                          </ListItemIcon>
-                          <ListItemText>Удалить</ListItemText>
-                        </MenuItem>
-                      </Menu>
-                    </>
-                  )}
+                  <IconButton
+                    size="small"
+                    onClick={handleMenuOpen}
+                    aria-label="Действия с карточкой"
+                  >
+                    <MoreVert fontSize="small" />
+                  </IconButton>
+                  <Menu
+                    anchorEl={menuAnchorEl}
+                    open={isMenuOpen}
+                    onClose={handleMenuClose}
+                    anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                    transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+                  >
+                    <MenuItem onClick={handleEditFromMenu}>
+                      <ListItemIcon>
+                        <Edit fontSize="small" />
+                      </ListItemIcon>
+                      <ListItemText>Редактировать</ListItemText>
+                    </MenuItem>
+                    <MenuItem onClick={handleDeleteFromMenu}>
+                      <ListItemIcon>
+                        <Delete fontSize="small" />
+                      </ListItemIcon>
+                      <ListItemText>Удалить</ListItemText>
+                    </MenuItem>
+                  </Menu>
                 </Box>
               )}
             </Box>
@@ -351,7 +332,7 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
               </Typography>
             )}
 
-            {showReactions && !isTextHidden && groupedReactions.length > 0 && (
+            {showReactions && canUseSocial && groupedReactions.length > 0 && (
               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 1 }}>
                 {groupedReactions.map((group) => (
                   <Box
@@ -379,18 +360,63 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
               </Box>
             )}
 
-            {canUseSocial && !isTextHidden && comments.map((comment) => (
+            {canUseSocial && comments.map((comment) => {
+              const authorShortName = formatCommentAuthorName(comment.userName || '');
+              return (
               <Box key={comment.id} sx={{ mt: 1 }}>
-                <Typography variant="body2" sx={{ wordBreak: 'break-word' }}>
+                <Box
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'baseline',
+                    gap: 0.75,
+                    minWidth: 0
+                  }}
+                >
+                  {authorShortName && (
+                    <Tooltip title={comment.userName} placement="top">
+                      <Typography
+                        variant="caption"
+                        sx={{
+                          fontWeight: 600,
+                          lineHeight: 1.3,
+                          minWidth: 0,
+                          maxWidth: '58%',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          color: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.62)' : 'rgba(0,0,0,0.55)'
+                        }}
+                      >
+                        {authorShortName}
+                      </Typography>
+                    </Tooltip>
+                  )}
+                  <Typography
+                    variant="caption"
+                    sx={{
+                      flexShrink: 0,
+                      color: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.42)' : 'rgba(0,0,0,0.38)'
+                    }}
+                  >
+                    {formatRelativeTime(comment.createdAt)}
+                  </Typography>
+                </Box>
+                <Typography
+                  variant="body2"
+                  sx={{
+                    wordBreak: 'break-word',
+                    fontStyle: 'italic',
+                    fontSize: '0.8rem',
+                    color: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.58)' : 'rgba(0,0,0,0.5)'
+                  }}
+                >
                   {comment.text}
                 </Typography>
-                <Typography variant="caption" sx={{ opacity: 0.7 }}>
-                  {formatRelativeTime(comment.createdAt)}
-                </Typography>
               </Box>
-            ))}
+              );
+            })}
 
-            {showComments && !isTextHidden && showCommentInput && (
+            {showComments && canUseSocial && showCommentInput && (
               <Box
                 sx={{
                   display: 'flex',
@@ -426,7 +452,7 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
             {(store.phase === 'voting' || store.phase === 'discussion') && (
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                  <Tooltip title="Персик">
+                  <Tooltip title={getLikeIconLabel(features.likeIcon)}>
                     <span>
                       <IconButton
                         size="small"
@@ -434,9 +460,7 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
                         color={hasLiked ? 'primary' : 'default'}
                         disabled={store.phase !== 'voting'}
                       >
-                        <Typography component="span" sx={{ fontSize: '1.05rem', lineHeight: 1 }}>
-                          🍑
-                        </Typography>
+                        <VoteIcon type="like" id={features.likeIcon} size={18} />
                       </IconButton>
                     </span>
                   </Tooltip>
@@ -446,7 +470,7 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
                 </Box>
                 {showDislikes && (
                 <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                  <Tooltip title="Тухлый помидор">
+                  <Tooltip title={getDislikeIconLabel(features.dislikeIcon)}>
                     <span>
                       <IconButton
                         size="small"
@@ -454,9 +478,7 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
                         color={hasDisliked ? 'error' : 'default'}
                         disabled={store.phase !== 'voting'}
                       >
-                        <Typography component="span" sx={{ fontSize: '1.05rem', lineHeight: 1 }}>
-                          🍅
-                        </Typography>
+                        <VoteIcon type="dislike" id={features.dislikeIcon} size={18} />
                       </IconButton>
                     </span>
                   </Tooltip>
@@ -479,7 +501,7 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
               </Alert>
             )}
 
-            {canUseSocial && !isTextHidden && (
+            {canUseSocial && (
               <Box
                 sx={{
                   display: 'flex',
@@ -537,7 +559,7 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store }) => {
         )}
       </CardContent>
 
-      {showReactions && canUseSocial && !isEditing && !isTextHidden && (
+      {showReactions && canUseSocial && !isEditing && (
         <Popover
             open={isReactionPickerOpen}
             anchorEl={reactionAnchorEl}

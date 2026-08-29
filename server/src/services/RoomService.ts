@@ -1,5 +1,5 @@
 import { RoomModel } from '../models/Room';
-import { Room, RoomDocument, User, Card, CardComment, CardReaction, Phase, CreateRoomOptions, RoomFeatures, COLUMN_COUNT, CARD_REACTION_EMOJIS } from '../types';
+import { Room, RoomDocument, User, Card, CardComment, CardReaction, Phase, CreateRoomOptions, RoomFeatures, COLUMN_COUNT, CARD_REACTION_EMOJIS, normalizeColumnColors } from '../types';
 import { normalizeRoomFeatures } from '../utils/roomFeatures';
 import bcrypt from 'bcryptjs';
 
@@ -73,6 +73,15 @@ export class RoomService {
     }
     const normalized = titles.map((title) => title.trim());
     const room = await RoomModel.updateColumnTitles(roomId, normalized);
+    return room ? this.convertToRoom(room) : null;
+  }
+
+  static async updateColumnColors(roomId: string, colors: string[]): Promise<Room | null> {
+    const normalized = normalizeColumnColors(colors);
+    if (normalized.some((color, index) => color !== colors[index])) {
+      return null;
+    }
+    const room = await RoomModel.updateColumnColors(roomId, normalized);
     return room ? this.convertToRoom(room) : null;
   }
 
@@ -265,6 +274,12 @@ export class RoomService {
       },
       { new: true }
     );
+    return room ? this.convertToRoom(room) : null;
+  }
+
+  static async deleteAllCards(roomId: string): Promise<Room | null> {
+    await RoomModel.deleteAllCards(roomId);
+    const room = await RoomModel.findOne({ id: roomId });
     return room ? this.convertToRoom(room) : null;
   }
 
@@ -692,7 +707,7 @@ export class RoomService {
   }
 
   private static convertToRoom(doc: RoomDocument): Room {
-    const { id, teamId, owner, phase, columnTitles, createdAt, users, cards } = doc;
+    const { id, teamId, owner, phase, columnTitles, columnColors, createdAt, users, cards } = doc;
     const features = normalizeRoomFeatures(doc.features);
     const hasAdmin = Boolean(users?.some((user) => user.role === 'admin'));
     console.log('Converting room document:', {
@@ -708,6 +723,7 @@ export class RoomService {
       owner,
       phase,
       columnTitles: doc.columnTitles,
+      columnColors: columnColors ?? normalizeColumnColors(undefined),
       features,
       createdAt,
       users: users ? users.map(user => ({
