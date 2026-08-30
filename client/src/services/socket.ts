@@ -658,7 +658,6 @@ export class SocketService {
     console.log('Updating ready state:', isReady);
     try {
       await this.ensureConnection();
-      await this.attemptSessionRestore();
     } catch (error) {
       console.error('Failed to connect before ready state update:', error);
       return;

@@ -203,15 +203,20 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   const nextPhase = getNextPhase(store.phase, features.retroRatingEnabled);
   const canAdvancePhase = store.isAdmin && nextPhase !== null;
   useEffect(() => {
-    if (!allUsersReady) {
+    if (allUsersReady) {
+      if (!allReadyDismissedRef.current) {
+        setIsAllReadyModalOpen(true);
+      }
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => {
       allReadyDismissedRef.current = false;
       setIsAllReadyModalOpen(false);
-      return;
-    }
-    if (!allReadyDismissedRef.current) {
-      setIsAllReadyModalOpen(true);
-    }
-  }, [allUsersReady, store.phase, readyCount, totalCount]);
+    }, 400);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [allUsersReady, store.phase]);
 
   const handleCloseAllReadyModal = () => {
     allReadyDismissedRef.current = true;
