@@ -21,7 +21,7 @@ export const COLUMN_COLOR_IDS = [
 
 export type ColumnColorId = typeof COLUMN_COLOR_IDS[number];
 
-export const DEFAULT_COLUMN_COLORS: ColumnColorId[] = ['none', 'none', 'none'];
+export const DEFAULT_COLUMN_COLORS: ColumnColorId[] = ['teal', 'pink', 'blue'];
 
 export const isColumnColorId = (value: unknown): value is ColumnColorId =>
   typeof value === 'string' && (COLUMN_COLOR_IDS as readonly string[]).includes(value);

@@ -29,7 +29,7 @@ export const COLUMN_COLOR_IDS = [
 
 export type ColumnColorId = typeof COLUMN_COLOR_IDS[number];
 
-export const DEFAULT_COLUMN_COLORS: ColumnColorId[] = ['none', 'none', 'none'];
+export const DEFAULT_COLUMN_COLORS: ColumnColorId[] = ['teal', 'pink', 'blue'];
 
 export const COLUMN_COLOR_PRESETS: Record<ColumnColorId, {
   label: string;
