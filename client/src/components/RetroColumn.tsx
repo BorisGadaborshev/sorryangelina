@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { observer } from 'mobx-react-lite';
-import { Paper, Typography, Box, TextField, Button, IconButton, Popover, Tooltip, Menu, MenuItem, ListItemIcon, ListItemText, useMediaQuery } from '@mui/material';
+import { Paper, Typography, Box, TextField, IconButton, Popover, Tooltip, Menu, MenuItem, ListItemIcon, ListItemText, useMediaQuery } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import { Droppable, Draggable } from '@hello-pangea/dnd';
 import { RetroStore } from '../store/RetroStore';
@@ -19,6 +19,15 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 
 const getSpeechRecognition = (): SpeechRecognitionConstructor | null =>
   window.SpeechRecognition || window.webkitSpeechRecognition || null;
+
+const extractPastedImageUrl = (pasted: string): { url: string; leftover: string } | null => {
+  const match = pasted.match(/https?:\/\/[^\s<>"']+/i);
+  if (!match || match.index === undefined) return null;
+  const url = match[0].replace(/[)\].,;!?]+$/g, '');
+  if (!/^https?:\/\//i.test(url)) return null;
+  const leftover = `${pasted.slice(0, match.index)}${pasted.slice(match.index + match[0].length)}`.trim();
+  return { url, leftover };
+};
 
 interface Props {
   type: 'liked' | 'disliked' | 'suggestion';
@@ -51,9 +60,8 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
   const [newCardImageUrl, setNewCardImageUrl] = useState('');
   const [selectedEmoji, setSelectedEmoji] = useState('');
   const [localCards, setLocalCards] = useState<Card[]>([]);
-  const [addCardAnchorEl, setAddCardAnchorEl] = useState<HTMLButtonElement | null>(null);
+  const [isComposerOpen, setIsComposerOpen] = useState(false);
   const [anchorEl, setAnchorEl] = useState<HTMLButtonElement | null>(null);
-  const [imageAnchorEl, setImageAnchorEl] = useState<HTMLButtonElement | null>(null);
   const [cursorPosition, setCursorPosition] = useState<number>(0);
   const [isListening, setIsListening] = useState(false);
   const [interimTranscript, setInterimTranscript] = useState('');
@@ -242,16 +250,22 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
   };
 
   useEffect(() => {
-    if (!addCardAnchorEl) {
+    if (!isComposerOpen) {
       stopListening();
       setSpeechError(null);
       setInterimTranscript('');
+      setAnchorEl(null);
+      return;
     }
-  }, [addCardAnchorEl]);
+    const focusTimer = window.setTimeout(() => {
+      textFieldRef.current?.focus();
+    }, 0);
+    return () => window.clearTimeout(focusTimer);
+  }, [isComposerOpen]);
 
   useEffect(() => {
     if (!canAddCards) {
-      setAddCardAnchorEl(null);
+      setIsComposerOpen(false);
     }
   }, [canAddCards]);
 
@@ -259,17 +273,56 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
     speechRecognitionRef.current?.abort();
   }, []);
 
-  const handleAddCard = () => {
-    if (newCardText.trim() && store.socket && store.phase === 'creation' && canAddCards) {
-      const text = selectedEmoji ? `${selectedEmoji} ${newCardText.trim()}` : newCardText.trim();
-      store.socketService?.addCard(text, type, columnIndex, newCardImageUrl.trim() || undefined);
-      setNewCardText('');
-      setNewCardImageUrl('');
-      setSelectedEmoji('');
-      setAnchorEl(null);
-      setImageAnchorEl(null);
-      setAddCardAnchorEl(null);
+  const resetComposerInput = () => {
+    stopListening();
+    setNewCardText('');
+    setNewCardImageUrl('');
+    setSelectedEmoji('');
+    setSpeechError(null);
+    setInterimTranscript('');
+    newCardTextRef.current = '';
+    cursorPositionRef.current = 0;
+    setTimeout(() => {
+      textFieldRef.current?.focus();
+    }, 0);
+  };
+
+  const handleComposerResetOrClose = () => {
+    if (!newCardText.trim() && !newCardImageUrl.trim()) {
+      resetComposerInput();
+      setIsComposerOpen(false);
+      return;
     }
+    resetComposerInput();
+  };
+
+  const handleAddCard = () => {
+    const trimmed = newCardText.trim();
+    const imageUrl = newCardImageUrl.trim();
+    if ((!trimmed && !imageUrl) || !store.socket || store.phase !== 'creation' || !canAddCards) return;
+    const text = selectedEmoji && trimmed ? `${selectedEmoji} ${trimmed}` : trimmed;
+    store.socketService?.addCard(text, type, columnIndex, imageUrl || undefined);
+    resetComposerInput();
+    setIsComposerOpen(false);
+  };
+
+  const applyPastedImageUrl = (url: string, leftover: string) => {
+    setNewCardImageUrl(url);
+    const start = textFieldRef.current?.selectionStart ?? cursorPositionRef.current;
+    const end = textFieldRef.current?.selectionEnd ?? start;
+    const current = newCardTextRef.current;
+    const nextText = current.slice(0, start) + leftover + current.slice(end);
+    const nextCursor = start + leftover.length;
+    newCardTextRef.current = nextText;
+    cursorPositionRef.current = nextCursor;
+    setNewCardText(nextText);
+    setCursorPosition(nextCursor);
+    setTimeout(() => {
+      if (textFieldRef.current) {
+        textFieldRef.current.focus();
+        textFieldRef.current.setSelectionRange(nextCursor, nextCursor);
+      }
+    }, 0);
   };
 
   const handleEmojiClick = (emoji: string) => {
@@ -315,9 +368,9 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
         maxWidth: '100%',
         flex: isMobile ? '0 0 auto' : '1 1 0',
         minWidth: isMobile ? '100%' : 0,
-        minHeight: isMobile ? 'auto' : 0,
-        height: isMobile ? 'auto' : '100%',
-        maxHeight: isMobile ? 'none' : '100%',
+        minHeight: isMobile ? 'auto' : '100%',
+        height: 'auto',
+        maxHeight: 'none',
         p: 1.25,
         bgcolor: 'transparent',
         backgroundImage: 'none',
@@ -525,11 +578,12 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
               <span>
                 <IconButton
                   color="primary"
+                  aria-label="Добавить карточку"
                   disabled={!canAddCards}
-                  onClick={(event) => {
+                  onClick={() => {
                     if (!canAddCards) return;
                     onAddCardStart?.();
-                    setAddCardAnchorEl(event.currentTarget);
+                    setIsComposerOpen((open) => !open);
                   }}
                   sx={{
                     position: 'relative',
@@ -546,103 +600,110 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
               </span>
             </Tooltip>
           </Box>
-          <Popover
-            open={Boolean(addCardAnchorEl)}
-            anchorEl={addCardAnchorEl}
-            onClose={() => setAddCardAnchorEl(null)}
-            anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-            transformOrigin={{ vertical: 'top', horizontal: 'center' }}
-          >
-            <Box sx={{ p: 1.5, width: 360, maxWidth: '92vw' }}>
-              <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
-                <TextField
-                  fullWidth
-                  multiline
-                  rows={isMobile ? 2 : 3}
-                  variant="outlined"
-                  placeholder="Добавить новую карточку..."
-                  value={displayedCardText}
-                  onChange={(e) => {
-                    if (isListening) {
-                      setInterimTranscript('');
-                    }
-                    const value = e.target.value;
-                    newCardTextRef.current = value;
-                    setNewCardText(value);
-                  }}
-                  inputRef={textFieldRef}
-                  size="small"
-                  sx={isListening ? {
-                    '& .MuiOutlinedInput-root': {
-                      animation: 'dictationPulse 1.4s ease-in-out infinite',
-                      '@keyframes dictationPulse': {
-                        '0%': { boxShadow: '0 0 0 0 rgba(211, 47, 47, 0.35)' },
-                        '70%': { boxShadow: '0 0 0 8px rgba(211, 47, 47, 0)' },
-                        '100%': { boxShadow: '0 0 0 0 rgba(211, 47, 47, 0)' }
-                      },
-                      '& fieldset': {
-                        borderColor: 'error.main',
-                        borderWidth: 2
-                      }
-                    }
-                  } : undefined}
-                  inputProps={{
-                    onClick: handleCursorTracking,
-                    onKeyUp: handleCursorTracking,
-                    onSelect: handleCursorTracking
-                  }}
-                  InputProps={{
-                    endAdornment: (
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                        <IconButton 
-                          onClick={(e) => setAnchorEl(e.currentTarget)}
-                          sx={{ p: 0.5, opacity: 0.6, '&:hover': { backgroundColor: 'transparent', opacity: 1 } }}
-                        >
-                          <EmojiEmotionsIcon fontSize="small" />
-                        </IconButton>
-                        <IconButton
-                          onClick={(e) => setImageAnchorEl(e.currentTarget)}
-                          color={newCardImageUrl.trim() ? 'primary' : 'default'}
-                          sx={{ p: 0.5, opacity: 0.7, '&:hover': { backgroundColor: 'transparent', opacity: 1 } }}
-                          disabled={!store.roomFeatures.mediaEnabled}
-                        >
-                          <ImageIcon fontSize="small" />
-                        </IconButton>
-                        <Tooltip title={isListening ? 'Остановить надиктовку' : 'Надиктовать текст'}>
-                          <span>
-                            <IconButton
-                              onClick={handleToggleDictation}
-                              disabled={!isSpeechSupported}
-                              color={isListening ? 'error' : 'default'}
-                              sx={{
-                                p: 0.5,
-                                opacity: isListening ? 1 : 0.7,
-                                animation: isListening ? 'micPulse 1s ease-in-out infinite' : 'none',
-                                '@keyframes micPulse': {
-                                  '0%, 100%': { transform: 'scale(1)' },
-                                  '50%': { transform: 'scale(1.15)' }
-                                },
-                                '&:hover': { backgroundColor: 'transparent', opacity: 1 }
-                              }}
-                            >
-                              <MicIcon fontSize="small" />
-                            </IconButton>
-                          </span>
-                        </Tooltip>
-                      </Box>
-                    )
-                  }}
-                />
-              </Box>
+          {isComposerOpen && (
+            <Box
+              sx={{
+                mt: 0.75,
+                px: 1.25,
+                pt: 0.75,
+                pb: 0.5,
+                borderRadius: 1.5,
+                border: '2px solid',
+                borderColor: isListening ? 'error.main' : 'primary.main',
+                bgcolor: 'background.paper',
+                animation: isListening ? 'dictationPulse 1.4s ease-in-out infinite' : 'none',
+                '@keyframes dictationPulse': {
+                  '0%': { boxShadow: '0 0 0 0 rgba(211, 47, 47, 0.35)' },
+                  '70%': { boxShadow: '0 0 0 8px rgba(211, 47, 47, 0)' },
+                  '100%': { boxShadow: '0 0 0 0 rgba(211, 47, 47, 0)' }
+                }
+              }}
+            >
+              <TextField
+                fullWidth
+                multiline
+                minRows={2}
+                variant="standard"
+                placeholder="Напишите что-нибудь..."
+                value={displayedCardText}
+                onChange={(e) => {
+                  if (isListening) {
+                    setInterimTranscript('');
+                  }
+                  const value = e.target.value;
+                  newCardTextRef.current = value;
+                  setNewCardText(value);
+                }}
+                onPaste={(event) => {
+                  if (!store.roomFeatures.mediaEnabled) return;
+                  const pasted = event.clipboardData.getData('text');
+                  const extracted = extractPastedImageUrl(pasted);
+                  if (!extracted) return;
+                  event.preventDefault();
+                  applyPastedImageUrl(extracted.url, extracted.leftover);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    event.preventDefault();
+                    handleComposerResetOrClose();
+                    return;
+                  }
+                  if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                    event.preventDefault();
+                    handleAddCard();
+                  }
+                }}
+                inputRef={textFieldRef}
+                InputProps={{ disableUnderline: true }}
+                inputProps={{
+                  onClick: handleCursorTracking,
+                  onKeyUp: handleCursorTracking,
+                  onSelect: handleCursorTracking
+                }}
+              />
+              {newCardImageUrl.trim() && (
+                <Box sx={{ position: 'relative', mt: 0.5 }}>
+                  <Box
+                    component="img"
+                    src={newCardImageUrl.trim()}
+                    alt="preview"
+                    sx={{
+                      width: '100%',
+                      maxHeight: 120,
+                      objectFit: 'contain',
+                      borderRadius: 1,
+                      border: '1px solid',
+                      borderColor: 'divider'
+                    }}
+                  />
+                  <Tooltip title="Убрать изображение">
+                    <IconButton
+                      size="small"
+                      aria-label="Убрать изображение"
+                      onClick={() => setNewCardImageUrl('')}
+                      sx={{
+                        position: 'absolute',
+                        top: 4,
+                        right: 4,
+                        bgcolor: 'background.paper',
+                        opacity: 0.9,
+                        '&:hover': { bgcolor: 'background.paper' }
+                      }}
+                    >
+                      <CloseIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                </Box>
+              )}
               {speechError && (
-                <Typography variant="caption" color="error" sx={{ display: 'block', mb: 1 }}>
+                <Typography variant="caption" color="error" sx={{ display: 'block', mb: 0.5 }}>
                   {speechError}
                 </Typography>
               )}
               {isListening && (
                 <Box
                   sx={{
-                    mb: 1,
+                    mb: 0.75,
                     px: 1,
                     py: 0.75,
                     borderRadius: 1,
@@ -673,22 +734,90 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
                   </Typography>
                 </Box>
               )}
-              <Button
-                fullWidth
-                variant="contained"
-                onClick={handleAddCard}
-                disabled={!newCardText.trim()}
-              >
-                Добавить
-              </Button>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 0.5 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <Tooltip title="Эмодзи">
+                    <IconButton
+                      size="small"
+                      aria-label="Эмодзи"
+                      onClick={(e) => setAnchorEl(e.currentTarget)}
+                      sx={{ p: 0.5, opacity: 0.7, '&:hover': { backgroundColor: 'transparent', opacity: 1 } }}
+                    >
+                      <EmojiEmotionsIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title="Выбрать изображение с диска">
+                    <span>
+                      <IconButton
+                        size="small"
+                        aria-label="Выбрать изображение с диска"
+                        onClick={() => imageInputRef.current?.click()}
+                        color={newCardImageUrl.trim() ? 'primary' : 'default'}
+                        sx={{ p: 0.5, opacity: 0.7, '&:hover': { backgroundColor: 'transparent', opacity: 1 } }}
+                        disabled={!store.roomFeatures.mediaEnabled}
+                      >
+                        <ImageIcon fontSize="small" />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                  <Tooltip title={isListening ? 'Остановить надиктовку' : 'Надиктовать текст'}>
+                    <span>
+                      <IconButton
+                        size="small"
+                        aria-label={isListening ? 'Остановить надиктовку' : 'Надиктовать текст'}
+                        onClick={handleToggleDictation}
+                        disabled={!isSpeechSupported}
+                        color={isListening ? 'error' : 'default'}
+                        sx={{
+                          p: 0.5,
+                          opacity: isListening ? 1 : 0.7,
+                          animation: isListening ? 'micPulse 1s ease-in-out infinite' : 'none',
+                          '@keyframes micPulse': {
+                            '0%, 100%': { transform: 'scale(1)' },
+                            '50%': { transform: 'scale(1.15)' }
+                          },
+                          '&:hover': { backgroundColor: 'transparent', opacity: 1 }
+                        }}
+                      >
+                        <MicIcon fontSize="small" />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <Tooltip title={newCardText.trim() || newCardImageUrl.trim() ? 'Сбросить' : 'Закрыть'}>
+                    <IconButton
+                      size="small"
+                      aria-label={newCardText.trim() || newCardImageUrl.trim() ? 'Сбросить' : 'Закрыть'}
+                      onClick={handleComposerResetOrClose}
+                      sx={{ opacity: 0.7 }}
+                    >
+                      <CloseIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title="Сохранить">
+                    <span>
+                      <IconButton
+                        size="small"
+                        aria-label="Сохранить"
+                        color="primary"
+                        onClick={handleAddCard}
+                        disabled={!newCardText.trim() && !newCardImageUrl.trim()}
+                      >
+                        <CheckIcon fontSize="small" />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                </Box>
+              </Box>
             </Box>
-          </Popover>
+          )}
           <Popover
             open={Boolean(anchorEl)}
             anchorEl={anchorEl}
             onClose={() => setAnchorEl(null)}
-            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'left' }}
           >
             <Box sx={{ p: 1.5, display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 0.5, maxWidth: '400px' }}>
               {EMOJI_GROUPS[type].map((emoji) => (
@@ -702,66 +831,13 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
               ))}
             </Box>
           </Popover>
-          <Popover
-            open={Boolean(imageAnchorEl)}
-            anchorEl={imageAnchorEl}
-            onClose={() => setImageAnchorEl(null)}
-            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-          >
-            <Box sx={{ p: 1.5, width: 320 }}>
-              <TextField
-                fullWidth
-                variant="outlined"
-                size="small"
-                label="Ссылка на изображение"
-                placeholder="https://..."
-                value={newCardImageUrl}
-                onChange={(event) => setNewCardImageUrl(event.target.value)}
-                helperText="Можно вставить ссылку или выбрать файл"
-              />
-              <input
-                ref={imageInputRef}
-                type="file"
-                accept="image/*"
-                style={{ display: 'none' }}
-                onChange={handleSelectImageFile}
-              />
-              <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  onClick={() => imageInputRef.current?.click()}
-                >
-                  Выбрать файл
-                </Button>
-                {newCardImageUrl.trim() && (
-                  <Button
-                    size="small"
-                    color="error"
-                    onClick={() => setNewCardImageUrl('')}
-                  >
-                    Убрать
-                  </Button>
-                )}
-              </Box>
-              {newCardImageUrl.trim() && (
-                <Box
-                  component="img"
-                  src={newCardImageUrl.trim()}
-                  alt="preview"
-                  sx={{
-                    mt: 1,
-                    width: '100%',
-                    maxHeight: 140,
-                    objectFit: 'contain',
-                    borderRadius: 1,
-                    border: '1px solid rgba(0,0,0,0.1)'
-                  }}
-                />
-              )}
-            </Box>
-          </Popover>
+          <input
+            ref={imageInputRef}
+            type="file"
+            accept="image/*"
+            style={{ display: 'none' }}
+            onChange={handleSelectImageFile}
+          />
         </Box>
       )}
 
@@ -774,7 +850,7 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
               sx={{
                 flexGrow: 1,
                 minHeight: 0,
-                overflowY: 'auto',
+                overflow: 'visible',
                 display: 'flex',
                 flexDirection: 'column',
                 borderRadius: 1,
@@ -808,7 +884,7 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
           )}
         </Droppable>
       ) : (
-        <Box sx={{ flexGrow: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+        <Box sx={{ flexGrow: 1, minHeight: 0, overflow: 'visible', display: 'flex', flexDirection: 'column' }}>
           {localCards.map((card, index) => (
             <RetroCard key={card.id} card={card} index={index} store={store} />
           ))}

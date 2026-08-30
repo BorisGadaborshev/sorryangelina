@@ -105,6 +105,7 @@ export interface RoomFeatures {
   chatEnabled: boolean;
   readyEnabled: boolean;
   facilitatorEnabled: boolean;
+  backgroundImage: string;
 }
 
 export const DEFAULT_ROOM_FEATURES: RoomFeatures = {
@@ -127,7 +128,8 @@ export const DEFAULT_ROOM_FEATURES: RoomFeatures = {
   cardEditingEnabled: true,
   chatEnabled: true,
   readyEnabled: true,
-  facilitatorEnabled: false
+  facilitatorEnabled: false,
+  backgroundImage: ''
 };
 
 export interface Room {

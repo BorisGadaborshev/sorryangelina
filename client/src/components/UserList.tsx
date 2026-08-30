@@ -44,7 +44,8 @@ const UserList: React.FC<UserListProps> = observer(({
     || store.selectedTeam?.id
     || (store.authProfile?.type === 'fixed' ? BUILTIN_TEAM_ID : undefined);
   const isBuiltinTeam = teamId === BUILTIN_TEAM_ID;
-  const currentUser = users.find(u => u.id === currentUserId);
+  const currentUser = users.find(u => u.id === currentUserId)
+    || users.find(u => u.name === store.currentUser?.name);
   const isAdmin = currentUser?.role === 'admin';
   const readyEnabled = store.roomFeatures.readyEnabled;
   const myVipVote = store.sprintVip.myVote;
@@ -135,16 +136,19 @@ const UserList: React.FC<UserListProps> = observer(({
 
   return (
     <Box sx={{ 
-      width: '100%', 
+      width: '100%',
+      height: '100%',
+      minHeight: 0,
       maxWidth: 360, 
       bgcolor: 'background.paper',
       borderRadius: 1,
       boxShadow: 1,
       p: 1,
       display: 'flex',
-      flexDirection: 'column'
+      flexDirection: 'column',
+      overflow: 'hidden'
     }}>
-      <Box sx={{ p: 1 }}>
+      <Box sx={{ p: 1, flexShrink: 0 }}>
         <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 0.5 }}>
           Участники (
           {readyEnabled ? (
@@ -179,7 +183,7 @@ const UserList: React.FC<UserListProps> = observer(({
         )}
       </Box>
       {store.roomFeatures.sprintVipEnabled && (
-      <Box sx={{ px: 1, pb: 1 }}>
+      <Box sx={{ px: 1, pb: 1, flexShrink: 0 }}>
         <Typography variant="subtitle2" gutterBottom>
           VIP спринта
         </Typography>
@@ -194,7 +198,8 @@ const UserList: React.FC<UserListProps> = observer(({
         )}
       </Box>
       )}
-      <List>
+      <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+      <List sx={{ py: 0 }}>
         {users.map((user) => {
           const moodMeta = getMoodMeta(user.mood);
           const isSprintVip = store.sprintVip.vipUserName === user.name;
@@ -387,6 +392,7 @@ const UserList: React.FC<UserListProps> = observer(({
           )}
         </Box>
       )}
+      </Box>
     </Box>
   );
 });

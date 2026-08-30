@@ -23,7 +23,8 @@ const phaseLabel: Record<string, string> = {
 };
 
 const tileSx = {
-  height: 150
+  minHeight: 150,
+  height: '100%'
 };
 
 const formatDate = (value?: string): string => {
@@ -77,11 +78,19 @@ const RoomTiles: React.FC<Props> = ({ rooms, currentUserName, onRoomClick, onCre
   }, [rooms, search, phaseFilter, sortOrder]);
 
   return (
-    <Box sx={{ width: '100%' }}>
+    <Box sx={{ width: '100%', minWidth: 0 }}>
       <Typography variant="subtitle1" sx={{ mb: 1 }}>
         Доступные комнаты и создание
       </Typography>
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '2fr 1fr 1fr' }, gap: 1.5, mb: 2 }}>
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: '2fr 1fr 1fr' },
+          gap: 1.5,
+          mb: 2,
+          minWidth: 0
+        }}
+      >
         <TextField
           size="small"
           label="Поиск по ID комнаты"
@@ -134,7 +143,9 @@ const RoomTiles: React.FC<Props> = ({ rooms, currentUserName, onRoomClick, onCre
               )}
               <CardActionArea onClick={() => onRoomClick(room.id)} sx={{ height: '100%' }}>
                 <CardContent sx={{ height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                  <Typography variant="subtitle1">{room.id}</Typography>
+                  <Typography variant="subtitle1" sx={{ overflowWrap: 'anywhere', pr: 4 }}>
+                    {room.id}
+                  </Typography>
                   <Box>
                     <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
                       Создана: {formatDate(room.createdAt)}
@@ -142,7 +153,7 @@ const RoomTiles: React.FC<Props> = ({ rooms, currentUserName, onRoomClick, onCre
                     <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                       Участников: {room.usersCount}
                     </Typography>
-                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, flexWrap: 'wrap' }}>
                       <Chip size="small" label={phaseLabel[room.phase] || room.phase} />
                       <Button
                         size="small"

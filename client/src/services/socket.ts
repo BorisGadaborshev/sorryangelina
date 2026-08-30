@@ -6,6 +6,8 @@ export class SocketService {
   private socket: Socket;
   private store: RetroStore;
   private isRestoringSession = false;
+  private restorePromise: Promise<void> | null = null;
+  private restoredSocketId: string | null = null;
   private sessionSyncRequired = false;
   private lastSessionSyncAt = 0;
   private static readonly SESSION_SYNC_COOLDOWN_MS = 1500;
@@ -70,6 +72,7 @@ export class SocketService {
 
       this.store.persistBoardState();
       this.sessionSyncRequired = true;
+      this.restoredSocketId = null;
       if (!this.store.canRenderBoard) {
         this.store.setReconnecting(true);
       }
@@ -119,7 +122,8 @@ export class SocketService {
             name: userToUpdate.name,
             roomId: room.id,
             role: userToUpdate.role,
-            mood: userToUpdate.mood
+            mood: userToUpdate.mood,
+            isReady: userToUpdate.isReady
           });
         }
       } else if (userId) {
@@ -136,7 +140,8 @@ export class SocketService {
             name: userToUpdate.name,
             roomId: room.id,
             role: userToUpdate.role,
-            mood: userToUpdate.mood
+            mood: userToUpdate.mood,
+            isReady: userToUpdate.isReady
           });
         }
       }
@@ -154,6 +159,7 @@ export class SocketService {
       this.store.setReconnecting(false);
       this.sessionSyncRequired = false;
       this.lastSessionSyncAt = Date.now();
+      this.restoredSocketId = this.socket.id ?? null;
     });
 
     this.socket.on('state-updated', (state: RoomState) => {
@@ -267,6 +273,13 @@ export class SocketService {
       this.store.setRoomFeatures(features);
     });
 
+    this.socket.on('room-background-updated', ({ backgroundImage }: { backgroundImage: string }) => {
+      this.store.setRoomFeatures({
+        ...this.store.roomFeatures,
+        backgroundImage: backgroundImage || ''
+      });
+    });
+
     this.socket.on('sprint-vip-state', (state: SprintVipState) => {
       this.store.setSprintVip(state);
     });
@@ -330,7 +343,9 @@ export class SocketService {
     }
 
     const now = Date.now();
+    const thisSocketNeedsRestore = this.restoredSocketId !== this.socket.id;
     if (
+      !thisSocketNeedsRestore &&
       !this.sessionSyncRequired &&
       now - this.lastSessionSyncAt < SocketService.SESSION_SYNC_COOLDOWN_MS
     ) {
@@ -348,10 +363,26 @@ export class SocketService {
     }
 
     if (this.isRestoringSession) {
-      return;
+      return this.restorePromise ?? Promise.resolve();
     }
 
     this.isRestoringSession = true;
+    this.restorePromise = this.runSessionRestore(roomId, userId, username, token, hasCachedBoard);
+    try {
+      await this.restorePromise;
+    } finally {
+      this.isRestoringSession = false;
+      this.restorePromise = null;
+    }
+  }
+
+  private async runSessionRestore(
+    roomId: string,
+    userId: string,
+    username: string,
+    token: string,
+    hasCachedBoard: boolean
+  ): Promise<void> {
     if (!hasCachedBoard) {
       this.store.setReconnecting(true);
     }
@@ -361,6 +392,7 @@ export class SocketService {
       this.store.setError(null);
       this.store.setReconnecting(false);
       this.lastSessionSyncAt = Date.now();
+      this.restoredSocketId = this.socket.id ?? null;
     } catch (error) {
       console.error('Failed to restore session after reconnect:', error);
       try {
@@ -370,6 +402,7 @@ export class SocketService {
         this.store.setReconnecting(false);
         this.sessionSyncRequired = false;
         this.lastSessionSyncAt = Date.now();
+        this.restoredSocketId = this.socket.id ?? null;
       } catch (joinError) {
         console.error('Rejoin failed after restore error:', joinError);
         this.sessionSyncRequired = true;
@@ -378,8 +411,6 @@ export class SocketService {
           this.store.setReconnecting(false);
         }
       }
-    } finally {
-      this.isRestoringSession = false;
     }
   }
 
@@ -490,7 +521,8 @@ export class SocketService {
               name: currentUser.name,
               roomId: room.id,
               role: currentUser.role || 'user',
-              mood: currentUser.mood
+              mood: currentUser.mood,
+              isReady: currentUser.isReady
             });
           }
 
@@ -626,11 +658,16 @@ export class SocketService {
     console.log('Updating ready state:', isReady);
     try {
       await this.ensureConnection();
+      await this.attemptSessionRestore();
     } catch (error) {
       console.error('Failed to connect before ready state update:', error);
       return;
     }
-    this.socket.emit('update-ready-state', { isReady });
+    this.socket.emit('update-ready-state', {
+      isReady,
+      token: this.store.authProfile?.token,
+      roomId: this.store.room?.id
+    });
   }
 
   setPhaseTimer(durationSeconds: number): void {
@@ -693,7 +730,13 @@ export class SocketService {
 
   setRoomFeatures(features: RoomFeatures): void {
     if (!this.socket || !this.store.isAdmin) return;
-    this.socket.emit('set-room-features', { features });
+    const { backgroundImage: _backgroundImage, ...featuresWithoutBackground } = features;
+    this.socket.emit('set-room-features', { features: featuresWithoutBackground });
+  }
+
+  setRoomBackground(backgroundImage: string): void {
+    if (!this.socket || !this.store.isAdmin) return;
+    this.socket.emit('set-room-background', { backgroundImage });
   }
 
   async restoreSession(roomId: string, userId: string, username: string, token?: string): Promise<void> {
@@ -742,7 +785,8 @@ export class SocketService {
               name: restoredUser.name,
               roomId: room.id,
               role: restoredUser.role,
-              mood: restoredUser.mood
+              mood: restoredUser.mood,
+              isReady: restoredUser.isReady
             });
           }
 
@@ -751,6 +795,7 @@ export class SocketService {
           this.store.setReconnecting(false);
           this.sessionSyncRequired = false;
           this.lastSessionSyncAt = Date.now();
+          this.restoredSocketId = this.socket.id ?? null;
           resolve();
         };
 

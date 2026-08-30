@@ -1,6 +1,13 @@
 import { RoomModel } from '../models/Room';
 import { Room, RoomDocument, User, Card, CardComment, CardReaction, Phase, CreateRoomOptions, RoomFeatures, COLUMN_COUNT, CARD_REACTION_EMOJIS, normalizeColumnColors } from '../types';
 import { normalizeRoomFeatures } from '../utils/roomFeatures';
+import {
+  deleteCardMedia,
+  deleteRoomCardMedia,
+  deleteRoomMedia,
+  reassignCardMedia,
+  wipeAllUploads
+} from './ImageStore';
 import bcrypt from 'bcryptjs';
 
 const NO_ROOM_PASSWORD_MARKER = '__no_room_password__';
@@ -179,7 +186,12 @@ export class RoomService {
     return updatedRoom ? this.convertToRoom(updatedRoom) : null;
   }
 
-  static async removeUser(roomId: string, userId: string, userName?: string): Promise<Room | null> {
+  static async removeUser(
+    roomId: string,
+    userId: string,
+    userName?: string,
+    preferUserNames?: string[]
+  ): Promise<Room | null> {
     const room = await RoomModel.findOne({ id: roomId });
     if (!room) return null;
 
@@ -207,7 +219,10 @@ export class RoomService {
     if (!updatedRoom) return null;
 
     if (wasAdmin && remainingUsers.length > 0) {
-      const nextAdminId = await RoomModel.getNextRoomAdminUserId(roomId, resolvedUserId);
+      const preferredNames = new Set(preferUserNames ?? []);
+      const preferredAdmin = remainingUsers.find((user) => preferredNames.has(user.name));
+      const nextAdminId = preferredAdmin?.id
+        ?? await RoomModel.getNextRoomAdminUserId(roomId, resolvedUserId);
       if (nextAdminId) {
         const roomWithAdmin = await RoomModel.setRoomAdmin(roomId, nextAdminId);
         return roomWithAdmin ? this.convertToRoom(roomWithAdmin) : this.convertToRoom(updatedRoom);
@@ -267,6 +282,7 @@ export class RoomService {
   }
 
   static async deleteCard(roomId: string, cardId: string): Promise<Room | null> {
+    await deleteCardMedia(roomId, cardId);
     const room = await RoomModel.findOneAndUpdate(
       { id: roomId },
       { 
@@ -278,12 +294,21 @@ export class RoomService {
   }
 
   static async deleteAllCards(roomId: string): Promise<Room | null> {
+    await deleteRoomCardMedia(roomId);
     await RoomModel.deleteAllCards(roomId);
     const room = await RoomModel.findOne({ id: roomId });
     return room ? this.convertToRoom(room) : null;
   }
 
   static async mergeCards(roomId: string, targetCardId: string, sourceCardId: string): Promise<Room | null> {
+    const current = await RoomModel.findOne({ id: roomId });
+    const targetCard = current?.cards.find((card) => card.id === targetCardId);
+    const sourceCard = current?.cards.find((card) => card.id === sourceCardId);
+    if (sourceCard?.imageUrl && !targetCard?.imageUrl) {
+      await reassignCardMedia(roomId, sourceCardId, targetCardId);
+    } else {
+      await deleteCardMedia(roomId, sourceCardId);
+    }
     const room = await RoomModel.mergeCards(roomId, targetCardId, sourceCardId);
     return room ? this.convertToRoom(room) : null;
   }
@@ -489,6 +514,7 @@ export class RoomService {
   }
 
   static async deleteRoom(roomId: string): Promise<void> {
+    await deleteRoomMedia(roomId);
     await RoomModel.deleteOne({ id: roomId });
   }
 
@@ -607,6 +633,7 @@ export class RoomService {
   }
 
   static async clearDatabase(): Promise<void> {
+    await wipeAllUploads();
     await RoomModel.deleteMany();
     console.log('Database cleared successfully');
   }
@@ -619,20 +646,9 @@ export class RoomService {
   ): Promise<Room | null> {
     console.log('Updating user ready state:', { roomId, userId, userName, isReady });
 
-    let room = await RoomModel.findOneAndUpdate(
-      {
-        id: roomId,
-        'users.id': userId
-      },
-      {
-        $set: {
-          'users.$.isReady': isReady
-        }
-      },
-      { new: true }
-    );
+    let room: RoomDocument | null = null;
 
-    if (!room && userName) {
+    if (userName) {
       room = await RoomModel.findOneAndUpdate(
         {
           id: roomId,
@@ -642,6 +658,21 @@ export class RoomService {
           $set: {
             'users.$.isReady': isReady,
             'users.$.id': userId
+          }
+        },
+        { new: true }
+      );
+    }
+
+    if (!room) {
+      room = await RoomModel.findOneAndUpdate(
+        {
+          id: roomId,
+          'users.id': userId
+        },
+        {
+          $set: {
+            'users.$.isReady': isReady
           }
         },
         { new: true }

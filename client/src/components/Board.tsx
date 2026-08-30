@@ -1,15 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { observer } from 'mobx-react-lite';
-import { Box, AppBar, Toolbar, Typography, Button, ButtonGroup, CircularProgress, IconButton, Tooltip, Tabs, Tab, useMediaQuery, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, FormControl, Select, MenuItem, Menu, Slider, Divider } from '@mui/material';
+import { Box, AppBar, Toolbar, Typography, Button, ButtonGroup, CircularProgress, IconButton, Tooltip, Tabs, Tab, useMediaQuery, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, FormControl, Select, MenuItem, Menu, Divider } from '@mui/material';
 import { DragDropContext, DropResult } from '@hello-pangea/dnd';
 import SettingsIcon from '@mui/icons-material/Settings';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import MusicNoteIcon from '@mui/icons-material/MusicNote';
-import PauseIcon from '@mui/icons-material/Pause';
-import PlayArrowIcon from '@mui/icons-material/PlayArrow';
-import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import PersonIcon from '@mui/icons-material/Person';
@@ -24,6 +21,7 @@ import ChatTerminal from './ChatTerminal';
 import CollaborativeWhiteboard from './CollaborativeWhiteboard';
 import RetroRatingView from './RetroRatingView';
 import RoomSettingsSidebar from './RoomSettingsSidebar';
+import MusicPlayerWidget from './MusicPlayerWidget';
 import { Mood, Phase } from '../types';
 
 interface Props {
@@ -40,7 +38,11 @@ const MOOD_OPTIONS: Array<{ value: Mood; emoji: string; label: string; color: st
   { value: 'awful', emoji: '😠', label: 'Злой', color: '#ff5b62', labelColor: '#ffffff' }
 ];
 const WHITEBOARD_COLORS = ['#111111', '#006dff', '#00a878', '#ff6b00', '#e11d48', '#7c3aed'];
-const TIMER_MUSIC_SRC = '/audio/timer-music.mp3';
+
+const toCssBackgroundUrl = (value: string): string => {
+  const escaped = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return `url("${escaped}")`;
+};
 
 const PHASE_ACTIVE_GREEN = '#34c759';
 
@@ -92,17 +94,15 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   const [selectedMood, setSelectedMood] = useState<Mood | null>(null);
   const [isAllReadyModalOpen, setIsAllReadyModalOpen] = useState(false);
   const allReadyDismissedRef = useRef(false);
-  const timerAudioRef = useRef<HTMLAudioElement | null>(null);
   const previousTimerRef = useRef({ running: false, remainingSeconds: 0 });
+  const wasTimerRunningRef = useRef(false);
   const appliedSavedMoodRef = useRef<string | null>(null);
+  const [isMusicWidgetOpen, setIsMusicWidgetOpen] = useState(false);
   const [timerMusicVolume, setTimerMusicVolume] = useState(() => {
     const saved = localStorage.getItem('timerMusicVolume');
     const parsed = saved ? Number(saved) : 0.35;
     return Number.isFinite(parsed) ? parsed : 0.35;
   });
-  const [isTimerMusicPaused, setIsTimerMusicPaused] = useState(false);
-  const [isTimerAudioBlocked, setIsTimerAudioBlocked] = useState(false);
-  const [isTimerAudioUnavailable, setIsTimerAudioUnavailable] = useState(false);
 
   useEffect(() => {
     if (store.room) {
@@ -202,8 +202,6 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   const allUsersReady = readyEnabled && totalCount > 0 && readyCount === totalCount;
   const nextPhase = getNextPhase(store.phase, features.retroRatingEnabled);
   const canAdvancePhase = store.isAdmin && nextPhase !== null;
-  const isColumnPhase = store.phase === 'creation' || store.phase === 'voting';
-
   useEffect(() => {
     if (!allUsersReady) {
       allReadyDismissedRef.current = false;
@@ -229,28 +227,15 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   };
 
   useEffect(() => {
-    const audio = timerAudioRef.current;
-    if (!audio) return;
-    audio.volume = timerMusicVolume;
     localStorage.setItem('timerMusicVolume', String(timerMusicVolume));
   }, [timerMusicVolume]);
 
   useEffect(() => {
-    const audio = timerAudioRef.current;
-    if (!audio) return;
-
-    if (store.phaseTimer.running && !isTimerMusicPaused && !isTimerAudioUnavailable && canPlayTimerMusic) {
-      audio.play()
-        .then(() => setIsTimerAudioBlocked(false))
-        .catch(() => setIsTimerAudioBlocked(true));
-      return;
+    if (store.phaseTimer.running && !wasTimerRunningRef.current && canPlayTimerMusic) {
+      setIsMusicWidgetOpen(true);
     }
-
-    audio.pause();
-    if (!store.phaseTimer.running) {
-      audio.currentTime = 0;
-    }
-  }, [store.phaseTimer.running, isTimerMusicPaused, isTimerAudioUnavailable, canPlayTimerMusic]);
+    wasTimerRunningRef.current = store.phaseTimer.running;
+  }, [store.phaseTimer.running, canPlayTimerMusic]);
 
   useEffect(() => {
     if (!canUseChat && isChatVisible) {
@@ -348,9 +333,8 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
         gap: 2,
         width: '100%',
         minWidth: 0,
-        minHeight: isMobile ? 'auto' : 0,
-        height: isMobile ? 'auto' : '100%',
-        flex: isMobile ? undefined : '1 1 auto',
+        minHeight: isMobile ? 'auto' : '100%',
+        height: 'auto',
         alignItems: 'stretch',
       }}>
         <RetroColumn
@@ -411,7 +395,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   );
 
   return (
-    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <Box sx={{ height: '100vh', maxHeight: '100vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
       {store.isReconnecting && !store.cards.length && (
         <Box sx={{
           px: 2,
@@ -420,11 +404,12 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
           color: 'warning.contrastText',
           textAlign: 'center',
           typography: 'body2',
+          flexShrink: 0,
         }}>
           Загрузка доски...
         </Box>
       )}
-      <AppBar position="static" color="default" elevation={1} sx={{ bgcolor: 'background.paper', color: 'text.primary' }}>
+      <AppBar position="static" color="default" elevation={1} sx={{ bgcolor: 'background.paper', color: 'text.primary', flexShrink: 0 }}>
         <Toolbar sx={{ gap: 1, flexWrap: isMobile ? 'wrap' : 'nowrap', alignItems: 'center', minHeight: 64 }}>
           <Typography
             variant="h6"
@@ -554,9 +539,26 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                 )}
                 {!isCompactDesktop ? timerControls : null}
               </Box>
-            ) : !isCompactDesktop ? (
-              timerControls
-            ) : null;
+            ) : (
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mr: isMobile ? 0 : 1, ml: 'auto' }}>
+                {!isCompactDesktop ? timerControls : null}
+                <Typography
+                  variant="body2"
+                  sx={{
+                    whiteSpace: 'nowrap',
+                    fontWeight: 600,
+                    color: PHASE_ACTIVE_GREEN,
+                    px: 1.25,
+                    py: 0.5,
+                    border: `2px solid ${PHASE_ACTIVE_GREEN}`,
+                    borderRadius: 1,
+                    lineHeight: 1.2,
+                  }}
+                >
+                  {getPhaseTranslation(store.phase)}
+                </Typography>
+              </Box>
+            );
             
           })()}
           {!isCompactDesktop && !isMobile && (
@@ -675,42 +677,18 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
 
               {canPlayTimerMusic && (
               <Box sx={{ mb: 1.5 }}>
-                <Typography variant="subtitle2" sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 1 }}>
-                  <MusicNoteIcon fontSize="small" />
-                  Музыка таймера
-                </Typography>
                 <Button
                   size="small"
                   variant="outlined"
                   fullWidth
-                  startIcon={isTimerMusicPaused ? <PlayArrowIcon /> : <PauseIcon />}
-                  disabled={isTimerAudioUnavailable}
-                  onClick={() => setIsTimerMusicPaused((prev) => !prev)}
+                  startIcon={<MusicNoteIcon fontSize="small" />}
+                  onClick={() => {
+                    setIsMusicWidgetOpen(true);
+                    setTimerAnchorEl(null);
+                  }}
                 >
-                  {isTimerMusicPaused ? 'Включить музыку' : 'Пауза музыки'}
+                  Плеер музыки
                 </Button>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}>
-                  <VolumeUpIcon fontSize="small" color="action" />
-                  <Slider
-                    size="small"
-                    value={Math.round(timerMusicVolume * 100)}
-                    min={0}
-                    max={100}
-                    onChange={(_, value) => setTimerMusicVolume((Array.isArray(value) ? value[0] : value) / 100)}
-                    aria-label="Громкость музыки таймера"
-                    disabled={isTimerAudioUnavailable}
-                  />
-                </Box>
-                {isTimerAudioBlocked && store.phaseTimer.running && !isTimerMusicPaused && (
-                  <Typography variant="caption" color="warning.main" sx={{ display: 'block' }}>
-                    Браузер заблокировал автозапуск. Нажмите “Включить музыку”.
-                  </Typography>
-                )}
-                {isTimerAudioUnavailable && (
-                  <Typography variant="caption" color="error" sx={{ display: 'block' }}>
-                    Трек не найден. Добавьте файл в client/public/audio/timer-music.mp3.
-                  </Typography>
-                )}
               </Box>
               )}
 
@@ -761,29 +739,39 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
           </Menu>
         </Toolbar>
       </AppBar>
-      <audio
-        ref={timerAudioRef}
-        src={TIMER_MUSIC_SRC}
-        loop
-        preload="auto"
-        onCanPlay={() => setIsTimerAudioUnavailable(false)}
-        onError={() => setIsTimerAudioUnavailable(true)}
+      <MusicPlayerWidget
+        open={isMusicWidgetOpen}
+        enabled={canPlayTimerMusic}
+        timerRunning={store.phaseTimer.running}
+        remainingLabel={formatDuration(store.phaseTimer.remainingSeconds)}
+        volume={timerMusicVolume}
+        onVolumeChange={setTimerMusicVolume}
+        onClose={() => setIsMusicWidgetOpen(false)}
       />
 
       {/* Контент */}
       <Box sx={{ 
         display: 'flex', 
-        flexGrow: 1, 
+        flexGrow: 1,
+        minHeight: 0,
+        overflow: 'hidden',
         p: 1.25, 
         gap: 1.25,
-        // height: 'calc(100vh - 64px)',
-        // overflow: 'hidden',
         minWidth: 0,
+        ...(store.roomFeatures.backgroundImage
+          ? {
+              backgroundImage: toCssBackgroundUrl(store.roomFeatures.backgroundImage),
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+              backgroundRepeat: 'no-repeat',
+              backgroundColor: 'background.default'
+            }
+          : {})
       }}>
         {isMobile ? (
-          <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1, gap: 1 }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1, minHeight: 0, overflow: 'hidden', gap: 1 }}>
             {mobileTab === 1 ? (
-              <Box sx={{ flexGrow: 1, overflowY: 'auto' }}>
+              <Box sx={{ flexGrow: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
                 <UserList 
                   users={store.users}
                   onlineUsers={store.users.map(u => u.id)}
@@ -795,7 +783,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                 />
               </Box>
             ) : (
-              <Box sx={{ flexGrow: 1, overflowY: 'auto' }}>
+              <Box sx={{ flexGrow: 1, minHeight: 0, overflowY: 'auto' }}>
                 {renderContent()}
               </Box>
             )}
@@ -810,7 +798,8 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
             <Box sx={{ 
               width: isUserListVisible ? 300 : 0,
               flexShrink: 0,
-              height: 'calc(100vh - 80px)',
+              alignSelf: 'stretch',
+              minHeight: 0,
               overflow: 'hidden',
               bgcolor: 'background.paper',
               borderRadius: 1,
@@ -820,7 +809,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
               display: 'flex',
               flexDirection: 'column'
             }}>
-              <Box sx={{ flexGrow: 1, overflowY: 'auto' }}>
+              <Box sx={{ flexGrow: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
                 <UserList 
                   users={store.users}
                   onlineUsers={store.users.map(u => u.id)}
@@ -923,11 +912,9 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
               flexGrow: 1,
               minWidth: 0,
               minHeight: 0,
-              overflow: isColumnPhase ? 'hidden' : 'auto',
+              overflow: 'auto',
               overflowX: 'hidden',
               position: 'relative',
-              display: isColumnPhase ? 'flex' : 'block',
-              flexDirection: 'column',
             }}>
               {renderContent()}
               {canDrawOnBoard && (
@@ -948,7 +935,11 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                   flexShrink: 0,
                   minWidth: 280,
                   maxWidth: 380,
-                  overflow: 'hidden'
+                  minHeight: 0,
+                  alignSelf: 'stretch',
+                  overflow: 'hidden',
+                  display: 'flex',
+                  flexDirection: 'column'
                 }}
               >
                 <ChatTerminal store={store} />

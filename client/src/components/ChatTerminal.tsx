@@ -26,7 +26,7 @@ const ChatTerminal: React.FC<Props> = observer(({ store, compact = false }) => {
         display: 'flex',
         flexDirection: 'column',
         height: compact ? 220 : '100%',
-        minHeight: compact ? 220 : 260,
+        minHeight: compact ? 220 : 0,
         bgcolor: '#0f111a',
         color: '#d7e0ea',
         borderRadius: 1,

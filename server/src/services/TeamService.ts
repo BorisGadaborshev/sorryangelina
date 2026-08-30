@@ -97,6 +97,26 @@ export class TeamService {
     return team ? this.convertToTeam(team) : null;
   }
 
+  static async unlockTeamRoster(teamId: string, password: string | undefined): Promise<string[]> {
+    await this.ensureBuiltinTeam();
+    const team = await TeamModel.findOne({ id: teamId });
+    if (!team) {
+      throw new Error('Team not found');
+    }
+
+    const providedPassword = password?.trim() || '';
+    if (!providedPassword) {
+      throw new Error('Team password is required');
+    }
+
+    const isValid = await bcrypt.compare(providedPassword, team.passwordHash);
+    if (!isValid) {
+      throw new Error('Invalid team password');
+    }
+
+    return this.getTeamRosterNames(teamId);
+  }
+
   static async joinTeam(teamId: string, password: string | undefined, username: string): Promise<Team> {
     await this.ensureBuiltinTeam();
     const team = await TeamModel.findOne({ id: teamId });

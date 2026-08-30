@@ -44,14 +44,15 @@ const TeamMembersPanel: React.FC<Props> = ({
     <Paper
       variant="outlined"
       sx={{
-        width: 320,
+        width: { xs: '100%', md: 320 },
         maxWidth: '100%',
         flexShrink: 0,
         p: 1.5,
         display: 'flex',
         flexDirection: 'column',
-        maxHeight: 'calc(100vh - 120px)',
-        overflow: 'hidden'
+        maxHeight: { xs: 420, md: 'calc(100vh - 120px)' },
+        overflow: 'hidden',
+        boxSizing: 'border-box'
       }}
     >
       <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 1, mb: 0.5 }}>
@@ -120,6 +121,7 @@ const TeamMembersPanel: React.FC<Props> = ({
               >
                 <ListItemText
                   primary={member.name}
+                  primaryTypographyProps={{ sx: { overflowWrap: 'anywhere' } }}
                   secondary={
                     <Box sx={{ display: 'flex', gap: 0.5, mt: 0.5, flexWrap: 'wrap' }}>
                       {isOwner && <Chip size="small" label="Создатель" />}

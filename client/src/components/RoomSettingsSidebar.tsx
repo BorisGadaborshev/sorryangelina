@@ -38,7 +38,11 @@ import LightModeIcon from '@mui/icons-material/LightMode';
 import AddIcon from '@mui/icons-material/Add';
 import AddCardIcon from '@mui/icons-material/AddCard';
 import RemoveIcon from '@mui/icons-material/Remove';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
+import WallpaperIcon from '@mui/icons-material/Wallpaper';
 import { RetroStore } from '../store/RetroStore';
+import AboutAppDialog from './AboutAppDialog';
+import BackgroundImageDialog from './BackgroundImageDialog';
 import { DislikeIconId, LikeIconId, MAX_VOTE_LIMIT, MIN_VOTE_LIMIT, RoomFeatures } from '../types';
 import {
   DISLIKE_ICON_OPTIONS,
@@ -111,6 +115,8 @@ const FeatureToggle: React.FC<FeatureToggleProps> = ({ active, label, tooltip, i
 const RoomSettingsSidebar: React.FC<Props> = observer(({ store, open, onClose, themeMode, onToggleTheme, isUserListVisible, onToggleUserList }) => {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isDeleteAllCardsDialogOpen, setIsDeleteAllCardsDialogOpen] = useState(false);
+  const [isAboutOpen, setIsAboutOpen] = useState(false);
+  const [isBackgroundDialogOpen, setIsBackgroundDialogOpen] = useState(false);
   const showTooltips = useMediaQuery('(hover: hover) and (pointer: fine)');
   const features = store.roomFeatures;
   const canEditFeatures = store.isAdmin;
@@ -303,6 +309,21 @@ const RoomSettingsSidebar: React.FC<Props> = observer(({ store, open, onClose, t
                 icon={<PeopleIcon fontSize="inherit" />}
                 onClick={onToggleUserList}
                 showTooltip={showTooltips}
+              />
+              <FeatureToggle
+                active={Boolean(features.backgroundImage)}
+                label="Фон"
+                tooltip={
+                  !canEditFeatures
+                    ? 'Только администратор может менять фон доски'
+                    : features.backgroundImage
+                      ? 'Изменить или убрать фоновое изображение. Фон видят все участники'
+                      : 'Добавить фоновое изображение доски. Фон видят все участники'
+                }
+                icon={<WallpaperIcon fontSize="inherit" />}
+                onClick={() => setIsBackgroundDialogOpen(true)}
+                showTooltip={showTooltips}
+                disabled={!canEditFeatures}
               />
               <FeatureToggle
                 active={features.membersCanAddCards}
@@ -530,6 +551,17 @@ const RoomSettingsSidebar: React.FC<Props> = observer(({ store, open, onClose, t
                   Удалить комнату
                 </Button>
               )}
+              <Button
+                fullWidth
+                variant="text"
+                color="inherit"
+                startIcon={<InfoOutlinedIcon />}
+                onClick={() => setIsAboutOpen(true)}
+                aria-label="О приложении"
+                sx={{ mt: 1, color: 'text.secondary' }}
+              >
+                О приложении
+              </Button>
             </Box>
           </Box>
         </Box>
@@ -556,6 +588,14 @@ const RoomSettingsSidebar: React.FC<Props> = observer(({ store, open, onClose, t
           </Button>
         </DialogActions>
       </Dialog>
+
+      <AboutAppDialog open={isAboutOpen} onClose={() => setIsAboutOpen(false)} />
+      <BackgroundImageDialog
+        open={isBackgroundDialogOpen}
+        currentValue={features.backgroundImage}
+        onClose={() => setIsBackgroundDialogOpen(false)}
+        onSave={(value) => store.requestRoomBackgroundUpdate(value)}
+      />
 
       <Dialog open={isDeleteDialogOpen} onClose={() => setIsDeleteDialogOpen(false)}>
         <DialogTitle>Удалить комнату?</DialogTitle>

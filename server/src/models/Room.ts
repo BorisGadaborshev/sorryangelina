@@ -279,17 +279,24 @@ export const RoomModel = {
           typeof update.$set['users.$.is_ready'] !== 'undefined' ||
           typeof update.$set['users.$.mood'] !== 'undefined'
         ) {
-          if (filter['users.id']) {
+          if (filter['users.id'] || filter['users.name']) {
             const newId = update.$set['users.$.id'];
             const role = update.$set['users.$.role'];
             const isReady = typeof update.$set['users.$.isReady'] !== 'undefined' ? update.$set['users.$.isReady'] : update.$set['users.$.is_ready'];
             const mood = update.$set['users.$.mood'];
-            await client.query('update room_users set id = coalesce($1, id), role = coalesce($2, role), is_ready = coalesce($3, is_ready), mood = coalesce($4, mood) where room_id=$5 and id=$6', [newId ?? null, role ?? null, typeof isReady === 'boolean' ? isReady : null, mood ?? null, roomId, filter['users.id']]);
-          } else if (filter['users.name']) {
-            const newId = update.$set['users.$.id'];
-            const role = update.$set['users.$.role'];
-            const mood = update.$set['users.$.mood'];
-            await client.query('update room_users set id = coalesce($1, id), role = coalesce($2, role), mood = coalesce($3, mood) where room_id=$4 and name=$5', [newId ?? null, role ?? null, mood ?? null, roomId, filter['users.name']]);
+            const result = filter['users.id']
+              ? await client.query(
+                  'update room_users set id = coalesce($1, id), role = coalesce($2, role), is_ready = coalesce($3, is_ready), mood = coalesce($4, mood) where room_id=$5 and id=$6',
+                  [newId ?? null, role ?? null, typeof isReady === 'boolean' ? isReady : null, mood ?? null, roomId, filter['users.id']]
+                )
+              : await client.query(
+                  'update room_users set id = coalesce($1, id), role = coalesce($2, role), is_ready = coalesce($3, is_ready), mood = coalesce($4, mood) where room_id=$5 and name=$6',
+                  [newId ?? null, role ?? null, typeof isReady === 'boolean' ? isReady : null, mood ?? null, roomId, filter['users.name']]
+                );
+            if ((result.rowCount ?? 0) === 0) {
+              await client.query('ROLLBACK');
+              return null;
+            }
           }
         }
         if (
@@ -428,7 +435,7 @@ export const RoomModel = {
   },
 
   async deleteMany(): Promise<void> {
-    await pool.query('truncate table card_votes, cards, room_users, rooms restart identity cascade');
+    await pool.query('truncate table card_votes, card_comments, card_reactions, cards, room_users, room_media, rooms restart identity cascade');
   },
 
   async find(where?: { teamId?: string }): Promise<RoomDocument[]> {

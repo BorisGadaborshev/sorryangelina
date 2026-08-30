@@ -70,6 +70,7 @@ export interface RoomFeatures {
   chatEnabled: boolean;
   readyEnabled: boolean;
   facilitatorEnabled: boolean;
+  backgroundImage: string;
 }
 
 export interface User {

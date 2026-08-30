@@ -20,7 +20,20 @@ export const DEFAULT_ROOM_FEATURES: RoomFeatures = {
   cardEditingEnabled: true,
   chatEnabled: true,
   readyEnabled: true,
-  facilitatorEnabled: false
+  facilitatorEnabled: false,
+  backgroundImage: ''
+};
+
+const MAX_BACKGROUND_IMAGE_LENGTH = 3 * 1024 * 1024;
+
+export const normalizeBackgroundImage = (value: unknown): string => {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > MAX_BACKGROUND_IMAGE_LENGTH) return '';
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  if (/^data:image\/[a-zA-Z0-9.+-]+;base64,/i.test(trimmed)) return trimmed;
+  if (/^\/uploads\/[a-zA-Z0-9._-]+$/.test(trimmed)) return trimmed;
+  return '';
 };
 
 const isVoteLimit = (value: unknown): value is VoteLimit =>
@@ -73,6 +86,7 @@ export const normalizeRoomFeatures = (raw?: Partial<RoomFeatures> & { votesPerUs
     cardEditingEnabled: raw?.cardEditingEnabled ?? DEFAULT_ROOM_FEATURES.cardEditingEnabled,
     chatEnabled: raw?.chatEnabled ?? DEFAULT_ROOM_FEATURES.chatEnabled,
     readyEnabled: raw?.readyEnabled ?? DEFAULT_ROOM_FEATURES.readyEnabled,
-    facilitatorEnabled: raw?.facilitatorEnabled ?? DEFAULT_ROOM_FEATURES.facilitatorEnabled
+    facilitatorEnabled: raw?.facilitatorEnabled ?? DEFAULT_ROOM_FEATURES.facilitatorEnabled,
+    backgroundImage: normalizeBackgroundImage(raw?.backgroundImage)
   };
 };

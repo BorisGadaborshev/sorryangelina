@@ -15,7 +15,8 @@ import {
   Tab,
   Tabs,
   TextField,
-  Typography
+  Typography,
+  useTheme
 } from '@mui/material';
 import { RetroStore } from '../store/RetroStore';
 import { AuthProfile, AvailableRoom, AvailableTeam, BUILTIN_TEAM_ID, Team } from '../types';
@@ -36,21 +37,22 @@ interface FixedLoginResponse {
 const getApiBase = (): string => (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3001');
 
 const Login: React.FC<Props> = observer(({ store }) => {
+  const theme = useTheme();
+  const isDark = theme.palette.mode === 'dark';
   const [authTab, setAuthTab] = useState(0);
+  const [loginStep, setLoginStep] = useState<'teams' | 'credentials'>('teams');
   const [isLoading, setIsLoading] = useState(false);
   const [isRoomsLoading, setIsRoomsLoading] = useState(false);
   const [isTeamsLoading, setIsTeamsLoading] = useState(false);
-  const [fixedUsers, setFixedUsers] = useState<string[]>([]);
+  const [loginNames, setLoginNames] = useState<string[]>([]);
   const [availableTeams, setAvailableTeams] = useState<AvailableTeam[]>([]);
   const [availableRooms, setAvailableRooms] = useState<AvailableRoom[]>([]);
 
-  const [fixedName, setFixedName] = useState('');
-  const [fixedPassword, setFixedPassword] = useState('');
-  const [accountName, setAccountName] = useState('');
-  const [accountPassword, setAccountPassword] = useState('');
+  const [loginName, setLoginName] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
   const [registerName, setRegisterName] = useState('');
   const [registerPassword, setRegisterPassword] = useState('');
-  const [guestName, setGuestName] = useState('');
+  const [pendingTeamPassword, setPendingTeamPassword] = useState('');
 
   const [selectedRoomId, setSelectedRoomId] = useState('');
   const [createRoomId, setCreateRoomId] = useState('');
@@ -72,12 +74,6 @@ const Login: React.FC<Props> = observer(({ store }) => {
   const [inviteRoomId, setInviteRoomId] = useState('');
   const [inviteRoomPassword, setInviteRoomPassword] = useState('');
   const [inviteCopySuccess, setInviteCopySuccess] = useState(false);
-  const [isFixedUsersUnlocked, setIsFixedUsersUnlocked] = useState(
-    () => localStorage.getItem('fixedUsersUnlocked') === 'true'
-  );
-  const [isSuboDialogOpen, setIsSuboDialogOpen] = useState(false);
-  const [suboInput, setSuboInput] = useState('');
-  const [suboError, setSuboError] = useState<string | null>(null);
   const [isAutoJoiningBuiltinTeam, setIsAutoJoiningBuiltinTeam] = useState(false);
   const [isChoosingTeam, setIsChoosingTeam] = useState(false);
   const [isTeamMembersLoading, setIsTeamMembersLoading] = useState(false);
@@ -93,27 +89,6 @@ const Login: React.FC<Props> = observer(({ store }) => {
   const [changeTeamPasswordError, setChangeTeamPasswordError] = useState<string | null>(null);
   const selectedTeam = store.selectedTeam;
   const isFixedAuth = store.authProfile?.type === 'fixed';
-
-  const fetchFixedUsers = useCallback(async (accessCode: string) => {
-    try {
-      const response = await fetch(`${getApiBase()}/api/auth/fixed-users`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accessCode }),
-      });
-      if (!response.ok) {
-        throw new Error('Failed to fetch fixed users');
-      }
-      const data = (await response.json()) as { users: string[] };
-      setFixedUsers(data.users);
-      setFixedName((prev) => (prev || data.users[0] || ''));
-    } catch (error) {
-      setIsFixedUsersUnlocked(false);
-      localStorage.removeItem('fixedUsersUnlocked');
-      localStorage.removeItem('suboAccessCode');
-      store.setError('Не удалось загрузить фиксированные ФИО');
-    }
-  }, [store]);
 
   const fetchAvailableRooms = useCallback(async () => {
     if (!selectedTeam) {
@@ -186,18 +161,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
   }, [store]);
 
   useEffect(() => {
-    if (!isFixedUsersUnlocked) return;
-    const accessCode = localStorage.getItem('suboAccessCode');
-    if (!accessCode) {
-      setIsFixedUsersUnlocked(false);
-      localStorage.removeItem('fixedUsersUnlocked');
-      return;
-    }
-    void fetchFixedUsers(accessCode);
-  }, [fetchFixedUsers, isFixedUsersUnlocked]);
-
-  useEffect(() => {
-    if (store.authProfile && (!isFixedAuth || isChoosingTeam)) {
+    if (!store.authProfile || (store.authProfile && (!isFixedAuth || isChoosingTeam))) {
       fetchAvailableTeams();
     }
   }, [fetchAvailableTeams, store.authProfile, isFixedAuth, isChoosingTeam]);
@@ -242,13 +206,23 @@ const Login: React.FC<Props> = observer(({ store }) => {
     }
   }, [autoJoinBuiltinTeam, isFixedAuth, selectedTeam, isChoosingTeam]);
 
-  const handleAuthSuccess = (profile: AuthProfile) => {
+  const resetLoginTeamSelection = () => {
+    setLoginStep('teams');
+    setLoginNames([]);
+    setLoginName('');
+    setLoginPassword('');
+    setPendingTeamPassword('');
+    setSelectedTeamForJoin(null);
+    setJoinTeamPassword('');
+    setJoinTeamError(null);
+  };
+
+  const handleAuthSuccess = (profile: AuthProfile, options?: { chooseTeam?: boolean }) => {
     store.setAuthProfile(profile);
     store.setError(null);
-    setIsChoosingTeam(false);
-    setAccountPassword('');
+    setIsChoosingTeam(Boolean(options?.chooseTeam));
     setRegisterPassword('');
-    setFixedPassword('');
+    setLoginPassword('');
   };
 
   const handleChangeTeam = () => {
@@ -258,45 +232,57 @@ const Login: React.FC<Props> = observer(({ store }) => {
     void fetchAvailableTeams();
   };
 
-  const handleFixedLogin = async () => {
-    if (!fixedName || !fixedPassword) return;
-    setIsLoading(true);
-    store.setError(null);
-    try {
-      const response = await fetch(`${getApiBase()}/api/auth/fixed-login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: fixedName, password: fixedPassword })
-      });
-      const data = (await response.json()) as FixedLoginResponse | { error: string };
-      if (!response.ok) {
-        throw new Error('error' in data ? data.error : 'Не удалось войти');
-      }
-      handleAuthSuccess((data as FixedLoginResponse).profile);
-    } catch (error) {
-      store.setError(error instanceof Error ? error.message : 'Не удалось войти');
-    } finally {
-      setIsLoading(false);
+  const joinTeamWithProfile = async (profile: AuthProfile, teamId: string, password?: string): Promise<Team> => {
+    const response = await fetch(`${getApiBase()}/api/teams/${encodeURIComponent(teamId)}/join`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${profile.token}`
+      },
+      body: JSON.stringify(password ? { password } : {})
+    });
+    const data = (await response.json()) as Team | { error?: string };
+    if (!response.ok || 'error' in data) {
+      throw new Error('error' in data && data.error ? data.error : 'Не удалось войти в команду');
     }
+    return data as Team;
   };
 
-  const handleAccountLogin = async () => {
-    if (!accountName || !accountPassword) return;
+  const handleTeamMemberLogin = async () => {
+    if (!loginName || !loginPassword || !selectedTeamForJoin) return;
     setIsLoading(true);
     store.setError(null);
     try {
-      const response = await fetch(`${getApiBase()}/api/auth/login`, {
+      const isBuiltinTeam = selectedTeamForJoin.id === BUILTIN_TEAM_ID;
+      const response = await fetch(`${getApiBase()}${isBuiltinTeam ? '/api/auth/fixed-login' : '/api/auth/login'}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: accountName, password: accountPassword })
+        body: JSON.stringify({ name: loginName, password: loginPassword })
       });
-      const data = (await response.json()) as { profile?: AuthProfile; error?: string };
-      if (!response.ok || !data.profile) {
-        throw new Error(data.error || 'Не удалось войти в учетку');
+      const data = (await response.json()) as FixedLoginResponse | { profile?: AuthProfile; error: string };
+      if (!response.ok) {
+        const message = 'error' in data ? data.error : 'Не удалось войти';
+        throw new Error(
+          message === 'Invalid password'
+            ? 'Неверный пароль'
+            : message === 'Account not found'
+              ? 'Учетная запись не найдена'
+              : message === 'Name is not in fixed list'
+                ? 'Это ФИО не состоит в команде'
+                : message
+        );
       }
-      handleAuthSuccess(data.profile);
+      const profile = 'profile' in data && data.profile ? data.profile : null;
+      if (!profile) {
+        throw new Error('Не удалось войти');
+      }
+
+      const team = await joinTeamWithProfile(profile, selectedTeamForJoin.id, pendingTeamPassword || undefined);
+      handleAuthSuccess(profile);
+      completeTeamJoin(team);
+      resetLoginTeamSelection();
     } catch (error) {
-      store.setError(error instanceof Error ? error.message : 'Не удалось войти в учетку');
+      store.setError(error instanceof Error ? error.message : 'Не удалось войти');
     } finally {
       setIsLoading(false);
     }
@@ -316,31 +302,9 @@ const Login: React.FC<Props> = observer(({ store }) => {
       if (!response.ok || !data.profile) {
         throw new Error(data.error || 'Не удалось создать учетку');
       }
-      handleAuthSuccess(data.profile);
+      handleAuthSuccess(data.profile, { chooseTeam: true });
     } catch (error) {
       store.setError(error instanceof Error ? error.message : 'Не удалось создать учетку');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleGuestLogin = async () => {
-    if (!guestName.trim()) return;
-    setIsLoading(true);
-    store.setError(null);
-    try {
-      const response = await fetch(`${getApiBase()}/api/auth/guest`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: guestName.trim() })
-      });
-      const data = (await response.json()) as { profile?: AuthProfile; error?: string };
-      if (!response.ok || !data.profile) {
-        throw new Error(data.error || 'Не удалось войти гостем');
-      }
-      handleAuthSuccess(data.profile);
-    } catch (error) {
-      store.setError(error instanceof Error ? error.message : 'Не удалось войти гостем');
     } finally {
       setIsLoading(false);
     }
@@ -429,7 +393,37 @@ const Login: React.FC<Props> = observer(({ store }) => {
   };
 
   const handleJoinTeam = async () => {
-    if (!store.authProfile || !selectedTeamForJoin || !joinTeamPassword.trim()) return;
+    if (!selectedTeamForJoin || !joinTeamPassword.trim()) return;
+
+    if (!store.authProfile) {
+      setIsLoading(true);
+      setJoinTeamError(null);
+      store.setError(null);
+      try {
+        const response = await fetch(`${getApiBase()}/api/teams/${encodeURIComponent(selectedTeamForJoin.id)}/unlock`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: joinTeamPassword.trim() })
+        });
+        const data = (await response.json()) as { members?: string[]; error?: string };
+        if (!response.ok || !data.members) {
+          throw new Error(data.error || 'Не удалось открыть команду');
+        }
+        setPendingTeamPassword(joinTeamPassword.trim());
+        setLoginNames(data.members);
+        setLoginName(data.members[0] || '');
+        setLoginPassword('');
+        setLoginStep('credentials');
+        setIsJoinTeamDialogOpen(false);
+        setJoinTeamPassword('');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Не удалось открыть команду';
+        setJoinTeamError(message === 'Invalid team password' ? 'Неверный пароль команды' : message);
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
 
     setIsLoading(true);
     setJoinTeamError(null);
@@ -742,57 +736,58 @@ const Login: React.FC<Props> = observer(({ store }) => {
     inviteTelegramText || `Привет! Зову вас на ретро.\nКомната: ${inviteRoomId}`
   )}`;
 
-  const handleSuboSubmit = () => {
-    const normalized = suboInput.trim();
-    if (!/^\d{4}-\d$/.test(normalized)) {
-      setSuboError('Формат номера: NNNN-N');
-      return;
-    }
-    if (normalized !== '1395-5') {
-      setSuboError('Неверный номер СУБО');
-      return;
-    }
-    setIsFixedUsersUnlocked(true);
-    localStorage.setItem('fixedUsersUnlocked', 'true');
-    localStorage.setItem('suboAccessCode', normalized);
-    void fetchFixedUsers(normalized);
-    setIsSuboDialogOpen(false);
-    setSuboInput('');
-    setSuboError(null);
-  };
-
   const renderAuthBlock = () => (
     <>
-      <Tabs value={authTab} onChange={(_, value) => setAuthTab(value)} variant="scrollable" allowScrollButtonsMobile sx={{ mb: 2 }}>
-        <Tab label={isFixedUsersUnlocked ? 'Команда "Карты и Партнеры"' : 'Вход по СУБО'} />
-        <Tab label="Вход в учетку" />
-        <Tab label="Новая учетка" />
-        <Tab label="Гость" />
+      <Tabs
+        value={authTab}
+        onChange={(_, value) => {
+          setAuthTab(value);
+          store.setError(null);
+        }}
+        variant="fullWidth"
+        sx={{ mb: 2 }}
+      >
+        <Tab label="Вход" />
+        <Tab label="Регистрация" />
       </Tabs>
 
-      {authTab === 0 && (
+      {authTab === 0 && loginStep === 'teams' && (
+        <TeamLobby
+          teams={availableTeams}
+          isLoading={isTeamsLoading}
+          onRefresh={fetchAvailableTeams}
+          onTeamClick={handleOpenJoinTeamDialog}
+          variant="embedded"
+        />
+      )}
+
+      {authTab === 0 && loginStep === 'credentials' && (
         <>
-          {!isFixedUsersUnlocked ? (
-            <Box sx={{ mt: 1 }}>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-                Для просмотра списка ФИО введите номер СУБО.
-              </Typography>
-              <Button fullWidth variant="outlined" onClick={() => setIsSuboDialogOpen(true)}>
-                Ввести номер СУБО
-              </Button>
-            </Box>
+          <Button size="small" onClick={resetLoginTeamSelection} sx={{ mb: 1 }}>
+            К командам
+          </Button>
+          <Typography variant="subtitle1" sx={{ mb: 0.5 }}>
+            {selectedTeamForJoin?.name}
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            Выберите ФИО и введите пароль
+          </Typography>
+          {loginNames.length === 0 ? (
+            <Alert severity="info" sx={{ mt: 1 }}>
+              В команде пока нет участников. Зарегистрируйтесь и войдите в команду после создания учетки.
+            </Alert>
           ) : (
             <>
               <TextField
                 fullWidth
                 select
-                label="Выберите ФИО"
+                label="ФИО"
                 margin="normal"
-                value={fixedName}
-                onChange={(event) => setFixedName(event.target.value)}
+                value={loginName}
+                onChange={(event) => setLoginName(event.target.value)}
                 disabled={isLoading}
               >
-                {fixedUsers.map((name) => (
+                {loginNames.map((name) => (
                   <MenuItem key={name} value={name}>
                     {name}
                   </MenuItem>
@@ -801,20 +796,26 @@ const Login: React.FC<Props> = observer(({ store }) => {
               <TextField
                 fullWidth
                 type="password"
-                label="Пароль (при первом входе будет создан)"
+                label={selectedTeamForJoin?.id === BUILTIN_TEAM_ID ? 'Пароль (при первом входе будет создан)' : 'Пароль'}
                 margin="normal"
-                value={fixedPassword}
-                onChange={(event) => setFixedPassword(event.target.value)}
+                value={loginPassword}
+                onChange={(event) => setLoginPassword(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') {
                     event.preventDefault();
-                    handleFixedLogin();
+                    void handleTeamMemberLogin();
                   }
                 }}
                 disabled={isLoading}
               />
-              <Button fullWidth variant="contained" sx={{ mt: 2 }} onClick={handleFixedLogin} disabled={isLoading || !fixedName || !fixedPassword}>
-                {isLoading ? <CircularProgress size={20} color="inherit" /> : 'Войти по ФИО'}
+              <Button
+                fullWidth
+                variant="contained"
+                sx={{ mt: 2 }}
+                onClick={handleTeamMemberLogin}
+                disabled={isLoading || !loginName || !loginPassword}
+              >
+                {isLoading ? <CircularProgress size={20} color="inherit" /> : 'Войти'}
               </Button>
             </>
           )}
@@ -823,40 +824,12 @@ const Login: React.FC<Props> = observer(({ store }) => {
 
       {authTab === 1 && (
         <>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            После регистрации вы сможете выбрать комнату или создать свою.
+          </Typography>
           <TextField
             fullWidth
-            label="ФИО"
-            margin="normal"
-            value={accountName}
-            onChange={(event) => setAccountName(event.target.value)}
-            disabled={isLoading}
-          />
-          <TextField
-            fullWidth
-            type="password"
-            label="Пароль"
-            margin="normal"
-            value={accountPassword}
-            onChange={(event) => setAccountPassword(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault();
-                handleAccountLogin();
-              }
-            }}
-            disabled={isLoading}
-          />
-          <Button fullWidth variant="contained" sx={{ mt: 2 }} onClick={handleAccountLogin} disabled={isLoading || !accountName || !accountPassword}>
-            {isLoading ? <CircularProgress size={20} color="inherit" /> : 'Войти'}
-          </Button>
-        </>
-      )}
-
-      {authTab === 2 && (
-        <>
-          <TextField
-            fullWidth
-            label="ФИО"
+            label="Имя"
             margin="normal"
             value={registerName}
             onChange={(event) => setRegisterName(event.target.value)}
@@ -872,30 +845,19 @@ const Login: React.FC<Props> = observer(({ store }) => {
             onKeyDown={(event) => {
               if (event.key === 'Enter') {
                 event.preventDefault();
-                handleRegister();
+                void handleRegister();
               }
             }}
             disabled={isLoading}
           />
-          <Button fullWidth variant="contained" sx={{ mt: 2 }} onClick={handleRegister} disabled={isLoading || !registerName || !registerPassword}>
-            {isLoading ? <CircularProgress size={20} color="inherit" /> : 'Создать учетку'}
-          </Button>
-        </>
-      )}
-
-      {authTab === 3 && (
-        <>
-          <TextField
+          <Button
             fullWidth
-            label="ФИО гостя"
-            margin="normal"
-            value={guestName}
-            onChange={(event) => setGuestName(event.target.value)}
-            disabled={isLoading}
-            required
-          />
-          <Button fullWidth variant="contained" sx={{ mt: 2 }} onClick={handleGuestLogin} disabled={isLoading || !guestName.trim()}>
-            {isLoading ? <CircularProgress size={20} color="inherit" /> : 'Войти гостем'}
+            variant="contained"
+            sx={{ mt: 2 }}
+            onClick={handleRegister}
+            disabled={isLoading || !registerName || !registerPassword}
+          >
+            {isLoading ? <CircularProgress size={20} color="inherit" /> : 'Создать учетку'}
           </Button>
         </>
       )}
@@ -907,20 +869,41 @@ const Login: React.FC<Props> = observer(({ store }) => {
       sx={{
         minHeight: '100vh',
         width: '100%',
+        maxWidth: '100%',
+        overflowX: 'hidden',
         bgcolor: 'background.default',
         display: 'flex',
         flexDirection: 'column',
         p: { xs: 2, md: 3 }
       }}
     >
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 1, mb: 2 }}>
-        <Box>
-          <Typography variant="h5">Комнаты команды {store.selectedTeam?.name}</Typography>
-          <Typography variant="body2" color="text.secondary">
+      <Box
+        sx={{
+          display: 'flex',
+          flexDirection: { xs: 'column', sm: 'row' },
+          justifyContent: 'space-between',
+          alignItems: { xs: 'stretch', sm: 'flex-start' },
+          gap: 1.5,
+          mb: 2
+        }}
+      >
+        <Box sx={{ minWidth: 0, flex: '1 1 auto' }}>
+          <Typography variant="h5" sx={{ overflowWrap: 'anywhere' }}>
+            Комнаты команды {store.selectedTeam?.name}
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>
             Вы вошли как: <b>{store.authProfile?.name}</b>
           </Typography>
         </Box>
-        <Box sx={{ display: 'flex', gap: 1 }}>
+        <Box
+          sx={{
+            display: 'flex',
+            flexDirection: { xs: 'column', sm: 'row' },
+            flexWrap: { sm: 'wrap' },
+            gap: 1,
+            flexShrink: 0
+          }}
+        >
           <Button variant="outlined" onClick={fetchAvailableRooms} disabled={isRoomsLoading}>
             Обновить
           </Button>
@@ -937,7 +920,17 @@ const Login: React.FC<Props> = observer(({ store }) => {
         </Typography>
       )}
 
-      <Box sx={{ flex: 1, display: 'flex', gap: 2, alignItems: 'flex-start', minHeight: 0 }}>
+      <Box
+        sx={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: { xs: 'column', md: 'row' },
+          gap: 2,
+          alignItems: { xs: 'stretch', md: 'flex-start' },
+          minHeight: 0,
+          minWidth: 0
+        }}
+      >
         <Box sx={{ flex: 1, minWidth: 0, width: '100%' }}>
           {isRoomsLoading ? (
             <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -1391,15 +1384,25 @@ const Login: React.FC<Props> = observer(({ store }) => {
   return (
     <Box
       sx={{
-        height: '100vh',
+        minHeight: '100vh',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         bgcolor: 'background.default',
-        p: 2
+        p: 2,
+        pb: { xs: 14, sm: 12 }
       }}
     >
-      <Paper elevation={3} sx={{ p: 3, width: '100%', maxWidth: 720 }}>
+      <Paper
+        elevation={3}
+        sx={{
+          p: 3,
+          width: '100%',
+          maxWidth: authTab === 0 && loginStep === 'teams' ? 720 : 480,
+          maxHeight: { xs: 'calc(100vh - 140px)', sm: '90vh' },
+          overflow: 'auto'
+        }}
+      >
         <Typography variant="h5" sx={{ mb: 2 }}>
           Ретроспектива
         </Typography>
@@ -1411,51 +1414,96 @@ const Login: React.FC<Props> = observer(({ store }) => {
         {renderAuthBlock()}
       </Paper>
       <Dialog
-        open={isSuboDialogOpen}
+        open={isJoinTeamDialogOpen}
         onClose={() => {
-          setIsSuboDialogOpen(false);
-          setSuboError(null);
+          setIsJoinTeamDialogOpen(false);
+          setJoinTeamError(null);
         }}
         fullWidth
         maxWidth="xs"
       >
-        <DialogTitle>Введите номер СУБО</DialogTitle>
+        <DialogTitle>Войти в команду {selectedTeamForJoin?.name}</DialogTitle>
         <DialogContent>
+          {joinTeamError && (
+            <Alert severity="error" sx={{ mb: 1 }}>
+              {joinTeamError}
+            </Alert>
+          )}
           <TextField
             autoFocus
-            margin="dense"
             fullWidth
-            label="Номер СУБО"
-            placeholder="NNNN-N"
-            value={suboInput}
+            type="password"
+            label="Пароль команды"
+            margin="normal"
+            value={joinTeamPassword}
             onChange={(event) => {
-              setSuboInput(event.target.value);
-              if (suboError) setSuboError(null);
+              setJoinTeamPassword(event.target.value);
+              if (joinTeamError) setJoinTeamError(null);
             }}
             onKeyDown={(event) => {
               if (event.key === 'Enter') {
                 event.preventDefault();
-                handleSuboSubmit();
+                void handleJoinTeam();
               }
             }}
-            error={Boolean(suboError)}
-            helperText={suboError || 'Формат: NNNN-N'}
           />
         </DialogContent>
         <DialogActions>
           <Button
             onClick={() => {
-              setIsSuboDialogOpen(false);
-              setSuboError(null);
+              setIsJoinTeamDialogOpen(false);
+              setJoinTeamError(null);
             }}
           >
             Отмена
           </Button>
-          <Button variant="contained" onClick={handleSuboSubmit}>
-            Подтвердить
+          <Button variant="contained" onClick={handleJoinTeam} disabled={isLoading || !joinTeamPassword.trim()}>
+            {isLoading ? <CircularProgress size={18} color="inherit" /> : 'Продолжить'}
           </Button>
         </DialogActions>
       </Dialog>
+      <Box
+        role="status"
+        sx={{
+          position: 'fixed',
+          left: { xs: 12, sm: 24 },
+          right: { xs: 12, sm: 24 },
+          bottom: { xs: 12, sm: 20 },
+          zIndex: 1100,
+          display: 'flex',
+          justifyContent: 'center',
+          pointerEvents: 'none'
+        }}
+      >
+        <Paper
+          elevation={6}
+          sx={{
+            pointerEvents: 'auto',
+            maxWidth: 720,
+            width: '100%',
+            px: { xs: 1.75, sm: 2.5 },
+            py: { xs: 1.25, sm: 1.5 },
+            borderRadius: { xs: 2.5, sm: 3 },
+            bgcolor: isDark ? '#f4f4f5' : '#1a1a1a',
+            color: isDark ? '#141414' : '#f5f5f5',
+            boxShadow: isDark
+              ? '0 8px 24px rgba(0, 0, 0, 0.45)'
+              : '0 8px 24px rgba(0, 0, 0, 0.22)'
+          }}
+        >
+          <Typography
+            variant="body2"
+            sx={{
+              fontSize: { xs: '0.75rem', sm: '0.875rem' },
+              lineHeight: { xs: 1.4, sm: 1.5 },
+              textAlign: 'center'
+            }}
+          >
+            Настоящий сайт не осуществляет сбор, обработку или хранение персональных данных пользователей, а также не
+            использует файлы cookie и не фиксирует IP-адреса посетителей.
+          </Typography>
+        </Paper>
+      </Box>
     </Box>
   );
 });

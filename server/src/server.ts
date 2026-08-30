@@ -12,6 +12,16 @@ import { signAuthToken, verifyAuthToken } from './config/jwt';
 import dotenv from 'dotenv';
 import path from 'path';
 import { connectDB } from './config/database';
+import {
+  ensureUploadDir,
+  getUploadDir,
+  IMAGE_CLEANUP_INTERVAL_MS,
+  migrateInlineImages,
+  purgeExpiredImages,
+  replaceBackgroundImage,
+  replaceCardImage
+} from './services/ImageStore';
+import { getRandomRadioStation } from './services/RadioBrowser';
 
 dotenv.config();
 
@@ -48,6 +58,7 @@ app.use(cors({
 }));
 
 app.use(express.json());
+app.use('/uploads', express.static(getUploadDir(), { index: false, fallthrough: true }));
 
 // Serve static files from the React app
 const clientBuildPath = path.join(__dirname, '../../../client/build');
@@ -131,6 +142,22 @@ app.post('/api/teams', async (req, res) => {
   } catch (error) {
     console.error('Error creating team:', error);
     res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to create team' });
+  }
+});
+
+app.post('/api/teams/:teamId/unlock', async (req, res) => {
+  const { password } = req.body as { password?: string };
+
+  try {
+    const members = await TeamService.unlockTeamRoster(req.params.teamId, password);
+    res.json({ members });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to unlock team';
+    if (message !== 'Team password is required' && message !== 'Invalid team password') {
+      console.error('Error unlocking team:', error);
+    }
+    const status = message === 'Team not found' ? 404 : 400;
+    res.status(status).json({ error: message });
   }
 });
 
@@ -346,6 +373,7 @@ app.delete('/api/rooms/:roomId', async (req, res) => {
     roomFacilitators.delete(roomId);
     roomDiscussionNavigation.delete(roomId);
     roomSprintVipVotes.delete(roomId);
+    cancelPendingDeparturesForRoom(roomId);
 
     res.json({ message: 'Room deleted successfully' });
   } catch (error) {
@@ -461,7 +489,7 @@ const io = new Server(httpServer, {
   pingTimeout: 60000,
   pingInterval: 25000,
   connectTimeout: 45000,
-  maxHttpBufferSize: 1e6,
+  maxHttpBufferSize: 5e6,
   transports: ['websocket', 'polling'],
   allowUpgrades: true,
   upgradeTimeout: 10000,
@@ -574,15 +602,6 @@ const getCardTypeByColumn = (column: number): Card['type'] => {
   return 'liked';
 };
 
-const normalizeImageUrl = (value: unknown): string | undefined => {
-  if (typeof value !== 'string') return undefined;
-  const trimmed = value.trim();
-  if (!trimmed) return undefined;
-  if (/^https?:\/\//i.test(trimmed)) return trimmed;
-  if (/^data:image\/[a-zA-Z0-9.+-]+;base64,/i.test(trimmed)) return trimmed;
-  return undefined;
-};
-
 const normalizeMood = (value: unknown): Mood | undefined => {
   if (typeof value !== 'string') return undefined;
   const allowed: Mood[] = ['great', 'good', 'neutral', 'bad', 'awful'];
@@ -658,8 +677,45 @@ const roomFacilitators = new Map<string, FacilitatorAnnouncement>();
 const roomDiscussionNavigation = new Map<string, DiscussionNavigationState>();
 const roomSprintVipVotes = new Map<string, Map<string, string>>();
 const roomUserSocketPresence = new Map<string, Map<string, Set<string>>>();
+const pendingUserDepartures = new Map<string, ReturnType<typeof setTimeout>>();
+const USER_DISCONNECT_GRACE_MS = Math.max(
+  0,
+  Number(process.env.USER_DISCONNECT_GRACE_MS) || 5 * 60 * 1000
+);
+
+const userPresenceKey = (roomId: string, userName: string): string => `${roomId}:${userName}`;
+
+const hasRoomPresence = (roomId: string, userName: string): boolean => {
+  return (roomUserSocketPresence.get(roomId)?.get(userName)?.size ?? 0) > 0;
+};
+
+const getPresentUserNames = (roomId: string): string[] => {
+  const roomMap = roomUserSocketPresence.get(roomId);
+  if (!roomMap) return [];
+  return [...roomMap.entries()]
+    .filter(([, sockets]) => sockets.size > 0)
+    .map(([name]) => name);
+};
+
+const cancelPendingUserDeparture = (roomId: string, userName: string): void => {
+  const key = userPresenceKey(roomId, userName);
+  const timeout = pendingUserDepartures.get(key);
+  if (!timeout) return;
+  clearTimeout(timeout);
+  pendingUserDepartures.delete(key);
+};
+
+const cancelPendingDeparturesForRoom = (roomId: string): void => {
+  const prefix = `${roomId}:`;
+  for (const [key, timeout] of pendingUserDepartures) {
+    if (!key.startsWith(prefix)) continue;
+    clearTimeout(timeout);
+    pendingUserDepartures.delete(key);
+  }
+};
 
 const addRoomPresence = (roomId: string, userName: string, socketId: string): void => {
+  cancelPendingUserDeparture(roomId, userName);
   let roomMap = roomUserSocketPresence.get(roomId);
   if (!roomMap) {
     roomMap = new Map();
@@ -914,17 +970,12 @@ const emitSprintVipStateToSocket = (socket: Socket, room: Room): void => {
   socket.emit('sprint-vip-state', buildPersonalSprintVipState(room, voterName));
 };
 
-const handleUserLeavingRoom = async (socket: Socket, user: User): Promise<Room | null> => {
-  const roomId = user.roomId || (typeof socket.data.roomId === 'string' ? socket.data.roomId : '');
-  if (!roomId) return null;
-
-  const shouldRemoveFromRoom = removeRoomPresence(roomId, user.name, socket.id);
-
-  socket.leave(roomId);
-  delete socket.data.userId;
-  delete socket.data.userName;
-
-  if (!shouldRemoveFromRoom) {
+const persistUserLeave = async (
+  user: User,
+  roomId: string,
+  options: { requireAbsent?: boolean } = {}
+): Promise<Room | null> => {
+  if (options.requireAbsent && hasRoomPresence(roomId, user.name)) {
     return null;
   }
 
@@ -933,9 +984,15 @@ const handleUserLeavingRoom = async (socket: Socket, user: User): Promise<Room |
 
   const userInRoom = room.users.find((roomUser) => roomUser.name === user.name)
     ?? room.users.find((roomUser) => roomUser.id === user.id);
-  const userIdForCleanup = userInRoom?.id ?? user.id;
+  if (!userInRoom) return room;
 
-  const updatedRoom = await RoomService.removeUser(roomId, userIdForCleanup, user.name);
+  const userIdForCleanup = userInRoom.id;
+  const updatedRoom = await RoomService.removeUser(
+    roomId,
+    userIdForCleanup,
+    user.name,
+    getPresentUserNames(roomId)
+  );
   if (!updatedRoom) return null;
 
   getRetroRatingState(roomId).votes.delete(userIdForCleanup);
@@ -952,6 +1009,7 @@ const handleUserLeavingRoom = async (socket: Socket, user: User): Promise<Room |
   if (updatedRoom.users.length === 0) {
     roomSprintVipVotes.delete(roomId);
     roomUserSocketPresence.delete(roomId);
+    cancelPendingDeparturesForRoom(roomId);
     console.log('Room is empty:', roomId);
   } else {
     io.to(roomId).emit('user-left', user);
@@ -967,14 +1025,54 @@ const handleUserLeavingRoom = async (socket: Socket, user: User): Promise<Room |
   return updatedRoom;
 };
 
+const handleUserLeavingRoom = async (socket: Socket, user: User): Promise<Room | null> => {
+  const roomId = user.roomId || (typeof socket.data.roomId === 'string' ? socket.data.roomId : '');
+  if (!roomId) return null;
+
+  cancelPendingUserDeparture(roomId, user.name);
+  const shouldRemoveFromRoom = removeRoomPresence(roomId, user.name, socket.id);
+
+  socket.leave(roomId);
+  delete socket.data.userId;
+  delete socket.data.userName;
+
+  if (!shouldRemoveFromRoom) {
+    return null;
+  }
+
+  return persistUserLeave(user, roomId);
+};
+
+const schedulePendingUserDeparture = (user: User, roomId: string): void => {
+  cancelPendingUserDeparture(roomId, user.name);
+  const key = userPresenceKey(roomId, user.name);
+  const timeout = setTimeout(() => {
+    pendingUserDepartures.delete(key);
+    if (hasRoomPresence(roomId, user.name)) {
+      return;
+    }
+    console.log('Disconnect grace elapsed, removing user from room:', {
+      roomId,
+      userName: user.name,
+      graceMs: USER_DISCONNECT_GRACE_MS
+    });
+    void persistUserLeave(user, roomId, { requireAbsent: true });
+  }, USER_DISCONNECT_GRACE_MS);
+  pendingUserDepartures.set(key, timeout);
+};
+
 const handleUserDisconnect = (socket: Socket, user: User): void => {
   const roomId = user.roomId || (typeof socket.data.roomId === 'string' ? socket.data.roomId : '');
   if (!roomId) return;
 
   removeRoomPresence(roomId, user.name, socket.id);
-  // A transport disconnect is temporary: browsers can suspend background tabs.
-  // Keep the persisted room membership and role so restore-session can reconnect
-  // the same logical user without transferring administrator rights.
+  // Browsers often drop the socket when a tab is backgrounded. Keep membership
+  // and admin role for a grace period so the same person can come back.
+  if (hasRoomPresence(roomId, user.name)) {
+    cancelPendingUserDeparture(roomId, user.name);
+    return;
+  }
+  schedulePendingUserDeparture({ ...user, roomId }, roomId);
 };
 
 const resolveSocketActor = async (socket: Socket, currentUser: User | null): Promise<User | null> => {
@@ -1257,10 +1355,13 @@ io.on('connection', (socket) => {
         const isAdmin = room.users.some((user) => user.name === actorName && user.role === 'admin');
         if (!isAdmin) return;
       }
-      const safeImageUrl = features.mediaEnabled ? normalizeImageUrl(imageUrl) : undefined;
+      const cardId = Date.now().toString();
+      const safeImageUrl = features.mediaEnabled && imageUrl
+        ? await replaceCardImage(actorRoomId, cardId, imageUrl)
+        : undefined;
 
       const card: Card = {
-        id: Date.now().toString(),
+        id: cardId,
         text,
         type,
         createdBy: actorName,
@@ -1317,7 +1418,9 @@ io.on('connection', (socket) => {
         updates.text = text;
       }
       if (typeof imageUrl !== 'undefined') {
-        updates.imageUrl = features.mediaEnabled ? normalizeImageUrl(imageUrl) : undefined;
+        updates.imageUrl = features.mediaEnabled
+          ? await replaceCardImage(currentUser.roomId, cardId, imageUrl)
+          : undefined;
       }
       if (Object.keys(updates).length === 0) return;
 
@@ -1562,11 +1665,30 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('update-ready-state', async ({ isReady }) => {
+  socket.on('update-ready-state', async ({ isReady, token, roomId: payloadRoomId }) => {
     try {
-      const actor = await resolveSocketActor(socket, currentUser);
+      let actor = await resolveSocketActor(socket, currentUser);
       if (!actor?.roomId || !actor.name) {
-        console.log('Ready state update ignored: session not resolved');
+        const auth = typeof token === 'string' ? verifyAuthToken(token) : null;
+        const roomId = typeof payloadRoomId === 'string' && payloadRoomId
+          ? payloadRoomId
+          : (typeof socket.data.roomId === 'string' ? socket.data.roomId : undefined);
+        if (auth?.name && roomId) {
+          const room = await RoomService.getRoom(roomId);
+          const user = room?.users.find((roomUser) => roomUser.name === auth.name);
+          if (user) {
+            actor = { ...user, roomId };
+            socket.join(roomId);
+          }
+        }
+      }
+      if (!actor?.roomId || !actor.name) {
+        console.log('Ready state update ignored: session not resolved', {
+          hasToken: typeof token === 'string',
+          payloadRoomId,
+          socketRoomId: socket.data.roomId,
+          socketUserName: socket.data.userName
+        });
         return;
       }
 
@@ -2046,10 +2168,13 @@ io.on('connection', (socket) => {
       const isAdmin = room.users.some((user) => user.name === actorName && user.role === 'admin');
       if (!isAdmin) return;
 
-      const updatedRoom = await RoomService.updateRoomFeatures(actorRoomId, features as Partial<RoomFeatures>);
+      const featurePatch = { ...(features as Partial<RoomFeatures>) };
+      delete featurePatch.backgroundImage;
+      const updatedRoom = await RoomService.updateRoomFeatures(actorRoomId, featurePatch);
       if (!updatedRoom?.features) return;
 
-      io.to(actorRoomId).emit('room-features-updated', { features: updatedRoom.features });
+      const { backgroundImage: _backgroundImage, ...featuresWithoutBackground } = updatedRoom.features;
+      io.to(actorRoomId).emit('room-features-updated', { features: featuresWithoutBackground });
 
       if (updatedRoom.phase === 'discussion') {
         if (updatedRoom.features.facilitatorEnabled && !roomFacilitators.get(actorRoomId)) {
@@ -2065,6 +2190,29 @@ io.on('connection', (socket) => {
       }
     } catch (error) {
       console.error('Error updating room features:', error);
+    }
+  });
+
+  socket.on('set-room-background', async ({ backgroundImage }) => {
+    const actor = await resolveSocketActor(socket, currentUser);
+    if (!actor?.roomId) return;
+    currentUser = actor;
+    const actorRoomId = actor.roomId;
+    const actorName = actor.name;
+
+    try {
+      const room = await RoomService.getRoom(actorRoomId);
+      if (!room) return;
+      const isAdmin = room.users.some((user) => user.name === actorName && user.role === 'admin');
+      if (!isAdmin) return;
+
+      const nextBackground = await replaceBackgroundImage(actorRoomId, backgroundImage);
+      const updatedRoom = await RoomService.updateRoomFeatures(actorRoomId, { backgroundImage: nextBackground });
+      if (!updatedRoom?.features) return;
+
+      io.to(actorRoomId).emit('room-background-updated', { backgroundImage: updatedRoom.features.backgroundImage });
+    } catch (error) {
+      console.error('Error updating room background:', error);
     }
   });
 
@@ -2108,7 +2256,11 @@ io.on('connection', (socket) => {
       }
 
       const roomId = currentUser.roomId;
-      const updatedRoom = await RoomService.removeUser(roomId, userId);
+      const kickedUser = room.users.find((user) => user.id === userId);
+      if (kickedUser) {
+        cancelPendingUserDeparture(roomId, kickedUser.name);
+      }
+      const updatedRoom = await RoomService.removeUser(roomId, userId, kickedUser?.name, getPresentUserNames(roomId));
       if (!updatedRoom) return;
 
       const socketsInRoom = await io.in(roomId).fetchSockets();
@@ -2175,6 +2327,7 @@ io.on('connection', (socket) => {
       roomFacilitators.delete(roomId);
       roomDiscussionNavigation.delete(roomId);
       roomSprintVipVotes.delete(roomId);
+      cancelPendingDeparturesForRoom(roomId);
 
       io.to(roomId).emit('room-deleted');
       io.in(roomId).socketsLeave(roomId);
@@ -2206,6 +2359,16 @@ io.on('connection', (socket) => {
   });
 });
 
+app.get('/api/radio/station', async (_req, res) => {
+  try {
+    const station = await getRandomRadioStation();
+    res.json(station);
+  } catch (error) {
+    console.error('Error fetching Radio-Browser station:', error);
+    res.status(502).json({ error: 'Failed to fetch radio station' });
+  }
+});
+
 // Handle React routing, return all requests to React app
 app.get('*', (req, res) => {
   console.log('Serving index.html for path:', req.path);
@@ -2215,4 +2378,40 @@ app.get('*', (req, res) => {
 const PORT = process.env.PORT || 3001;
 httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-}); 
+  void ensureUploadDir()
+    .then(() => migrateInlineImages())
+    .catch((error) => {
+      console.error('Failed to prepare image storage:', error);
+    });
+});
+
+const broadcastExpiredImages = async () => {
+  try {
+    const changes = await purgeExpiredImages();
+    for (const change of changes) {
+      const room = await RoomService.getRoom(change.roomId);
+      if (!room) continue;
+      rooms.set(change.roomId, room);
+      const roomState = roomStates.get(change.roomId);
+      if (roomState) {
+        roomState.cards = room.cards;
+      }
+      if (change.backgroundCleared) {
+        io.to(change.roomId).emit('room-background-updated', { backgroundImage: room.features?.backgroundImage || '' });
+      }
+      if (change.clearedCardIds.length > 0) {
+        io.to(change.roomId).emit('state-updated', {
+          cards: room.cards,
+          phase: room.phase,
+          users: room.users
+        });
+      }
+    }
+  } catch (error) {
+    console.error('Failed to purge expired images:', error);
+  }
+};
+
+setInterval(() => {
+  void broadcastExpiredImages();
+}, IMAGE_CLEANUP_INTERVAL_MS); 

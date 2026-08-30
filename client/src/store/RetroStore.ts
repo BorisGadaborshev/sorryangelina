@@ -741,19 +741,33 @@ export class RetroStore {
     this.socketService?.setColumnColors(this.columnColors);
   }
 
-  setRoomFeatures(features: RoomFeatures) {
+  setRoomFeatures(features: Partial<RoomFeatures>) {
     runInAction(() => {
-      this.roomFeatures = { ...DEFAULT_ROOM_FEATURES, ...features };
+      const next: RoomFeatures = { ...DEFAULT_ROOM_FEATURES, ...this.roomFeatures, ...features };
+      if (typeof features.backgroundImage === 'undefined') {
+        next.backgroundImage = this.roomFeatures.backgroundImage;
+      }
+      this.roomFeatures = next;
       if (this.room) {
-        this.room = { ...this.room, features: { ...DEFAULT_ROOM_FEATURES, ...features } };
+        this.room = { ...this.room, features: { ...next } };
       }
     });
+  }
+
+  setRoomBackground(backgroundImage: string) {
+    this.setRoomFeatures({ backgroundImage: backgroundImage || '' });
   }
 
   requestRoomFeaturesUpdate(features: RoomFeatures) {
     if (!this.isAdmin) return;
     this.setRoomFeatures(features);
     this.socketService?.setRoomFeatures(features);
+  }
+
+  requestRoomBackgroundUpdate(backgroundImage: string) {
+    if (!this.isAdmin) return;
+    this.setRoomBackground(backgroundImage);
+    this.socketService?.setRoomBackground(backgroundImage);
   }
 
   getUserReadyCount(): number {
