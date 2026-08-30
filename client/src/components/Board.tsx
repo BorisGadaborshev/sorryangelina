@@ -23,6 +23,7 @@ import RetroRatingView from './RetroRatingView';
 import RoomSettingsSidebar from './RoomSettingsSidebar';
 import MusicPlayerWidget from './MusicPlayerWidget';
 import { Mood, Phase } from '../types';
+import { toCssBackgroundUrl } from '../utils/media';
 
 interface Props {
   store: RetroStore;
@@ -38,11 +39,6 @@ const MOOD_OPTIONS: Array<{ value: Mood; emoji: string; label: string; color: st
   { value: 'awful', emoji: '😠', label: 'Злой', color: '#ff5b62', labelColor: '#ffffff' }
 ];
 const WHITEBOARD_COLORS = ['#111111', '#006dff', '#00a878', '#ff6b00', '#e11d48', '#7c3aed'];
-
-const toCssBackgroundUrl = (value: string): string => {
-  const escaped = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  return `url("${escaped}")`;
-};
 
 const PHASE_ACTIVE_GREEN = '#34c759';
 

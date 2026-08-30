@@ -7,6 +7,7 @@ import { RetroStore } from '../store/RetroStore';
 import { Card as CardType, DiscussionNavigationState, getCardTextSegments, getColumnColorStyles } from '../types';
 import RetroCard from './RetroCard';
 import { VoteIcon } from './VoteIcon';
+import { resolveMediaUrl } from '../utils/media';
 
 interface Props {
   store: RetroStore;
@@ -293,7 +294,7 @@ const DiscussionView: React.FC<Props> = observer(({ store }) => {
                   {card.imageUrl && (
                     <Box
                       component="img"
-                      src={card.imageUrl}
+                      src={resolveMediaUrl(card.imageUrl)}
                       alt="thumb"
                       sx={{
                         width: '100%',

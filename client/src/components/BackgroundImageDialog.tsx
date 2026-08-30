@@ -11,8 +11,7 @@ import {
   Typography
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
-
-const MAX_BACKGROUND_FILE_BYTES = 2 * 1024 * 1024;
+import { fileToImageDataUrl, IMAGE_FILE_ACCEPT, resolveMediaUrl } from '../utils/media';
 
 interface Props {
   open: boolean;
@@ -25,6 +24,7 @@ const isValidBackgroundValue = (value: string): boolean => {
   const trimmed = value.trim();
   if (!trimmed) return false;
   if (trimmed.startsWith('data:image/')) return true;
+  if (/^\/(?:api\/)?uploads\/[a-zA-Z0-9._-]+$/.test(trimmed)) return true;
   try {
     const parsed = new URL(trimmed);
     return parsed.protocol === 'http:' || parsed.protocol === 'https:';
@@ -57,35 +57,19 @@ const BackgroundImageDialog: React.FC<Props> = ({ open, currentValue, onClose, o
     setError(isValidBackgroundValue(trimmed) ? '' : 'Вставьте ссылку на изображение (http/https) или выберите файл');
   };
 
-  const handleSelectFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSelectFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
 
-    if (!file.type.startsWith('image/')) {
-      setError('Можно выбрать только файл изображения');
-      return;
-    }
-    if (file.size > MAX_BACKGROUND_FILE_BYTES) {
-      setError('Файл слишком большой. Максимум 2 МБ');
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = typeof reader.result === 'string' ? reader.result : '';
-      if (!result.startsWith('data:image/')) {
-        setError('Не удалось прочитать файл изображения');
-        return;
-      }
+    try {
+      const result = await fileToImageDataUrl(file);
       setUrlDraft('');
       setPreview(result);
       setError('');
-    };
-    reader.onerror = () => {
-      setError('Не удалось прочитать файл');
-    };
-    reader.readAsDataURL(file);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Не удалось прочитать файл');
+    }
   };
 
   const handleSave = () => {
@@ -142,7 +126,7 @@ const BackgroundImageDialog: React.FC<Props> = ({ open, currentValue, onClose, o
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*"
+            accept={IMAGE_FILE_ACCEPT}
             hidden
             onChange={handleSelectFile}
           />
@@ -155,7 +139,7 @@ const BackgroundImageDialog: React.FC<Props> = ({ open, currentValue, onClose, o
         {preview && (
           <Box
             component="img"
-            src={preview}
+            src={resolveMediaUrl(preview)}
             alt="Предпросмотр фона"
             referrerPolicy="no-referrer"
             onError={() => {

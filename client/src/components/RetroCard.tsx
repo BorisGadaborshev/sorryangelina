@@ -6,6 +6,7 @@ import { Delete, Edit, MoreVert, Check, ChatBubbleOutline, AddReaction, Visibili
 import { useTheme } from '@mui/material/styles';
 import { RetroStore } from '../store/RetroStore';
 import { getDislikeIconLabel, getLikeIconLabel, VoteIcon } from './VoteIcon';
+import { fileToImageDataUrl, IMAGE_FILE_ACCEPT, resolveMediaUrl } from '../utils/media';
 
 interface Props {
   card: CardType;
@@ -67,6 +68,7 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store, isMergeDropTa
   const [text, setText] = useState(card.text);
   const [imageUrl, setImageUrl] = useState(card.imageUrl || '');
   const [imageLoadError, setImageLoadError] = useState(false);
+  const [imagePickError, setImagePickError] = useState('');
   const [menuAnchorEl, setMenuAnchorEl] = useState<null | HTMLElement>(null);
   const [showCommentInput, setShowCommentInput] = useState(false);
   const [commentDraft, setCommentDraft] = useState('');
@@ -83,6 +85,7 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store, isMergeDropTa
     if (store.canEditCard(card) && (store.phase === 'creation' || store.phase === 'discussion')) {
       setText(cardTextToEditorValue(card.text));
       setImageUrl(card.imageUrl || '');
+      setImagePickError('');
       setIsEditing(true);
     }
   };
@@ -120,19 +123,18 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store, isMergeDropTa
     handleDelete();
   };
 
-  const handleSelectImageFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSelectImageFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
+    event.target.value = '';
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = typeof reader.result === 'string' ? reader.result : '';
-      if (result.startsWith('data:image/')) {
-        setImageUrl(result);
-      }
-    };
-    reader.readAsDataURL(file);
-    event.target.value = '';
+    try {
+      const dataUrl = await fileToImageDataUrl(file);
+      setImageUrl(dataUrl);
+      setImagePickError('');
+    } catch (error) {
+      setImagePickError(error instanceof Error ? error.message : 'Не удалось загрузить изображение');
+    }
   };
 
   const handleVote = (voteType: 'like' | 'dislike') => {
@@ -216,12 +218,17 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store, isMergeDropTa
                 />
                 <Button component="label" size="small" variant="outlined">
                   Загрузить файл
-                  <input hidden type="file" accept="image/*" onChange={handleSelectImageFile} />
+                  <input hidden type="file" accept={IMAGE_FILE_ACCEPT} onChange={handleSelectImageFile} />
                 </Button>
+                {imagePickError && (
+                  <Typography variant="caption" color="error">
+                    {imagePickError}
+                  </Typography>
+                )}
                 {imageUrl.trim() && (
                   <Box
                     component="img"
-                    src={imageUrl.trim()}
+                    src={resolveMediaUrl(imageUrl.trim())}
                     alt="preview"
                     sx={{
                       maxWidth: '100%',
@@ -314,7 +321,7 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store, isMergeDropTa
             {features.mediaEnabled && !isTextHidden && card.imageUrl && !imageLoadError && (
               <Box
                 component="img"
-                src={card.imageUrl}
+                src={resolveMediaUrl(card.imageUrl)}
                 alt="card"
                 onError={() => setImageLoadError(true)}
                 sx={{

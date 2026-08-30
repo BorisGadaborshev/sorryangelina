@@ -6,7 +6,8 @@ import { pool } from '../config/database';
 export const IMAGE_TTL_MS = 2 * 60 * 60 * 1000;
 export const IMAGE_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
-const LOCAL_UPLOAD_PATH = /^\/uploads\/([a-zA-Z0-9._-]+)$/;
+const LOCAL_UPLOAD_PATH = /^\/(?:api\/)?uploads\/([a-zA-Z0-9._-]+)$/;
+const PUBLIC_UPLOAD_PREFIX = '/api/uploads';
 
 const MIME_TO_EXT: Record<string, string> = {
   'image/jpeg': 'jpg',
@@ -50,6 +51,30 @@ export const ensureUploadDir = async (): Promise<void> => {
   await fs.mkdir(getUploadDir(), { recursive: true });
 };
 
+const sniffImageExt = (buffer: Buffer): string | undefined => {
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'jpg';
+  if (
+    buffer.length >= 8
+    && buffer[0] === 0x89
+    && buffer[1] === 0x50
+    && buffer[2] === 0x4e
+    && buffer[3] === 0x47
+  ) return 'png';
+  if (buffer.length >= 6 && buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) return 'gif';
+  if (
+    buffer.length >= 12
+    && buffer[0] === 0x52
+    && buffer[1] === 0x49
+    && buffer[2] === 0x46
+    && buffer[3] === 0x46
+    && buffer[8] === 0x57
+    && buffer[9] === 0x45
+    && buffer[10] === 0x42
+    && buffer[11] === 0x50
+  ) return 'webp';
+  return undefined;
+};
+
 const deleteFileIfExists = async (fileName: string | null): Promise<void> => {
   if (!fileName || fileName.includes('..') || fileName.includes('/') || fileName.includes('\\')) return;
   try {
@@ -66,8 +91,7 @@ const saveDataUrl = async (dataUrl: string): Promise<{ publicUrl: string; fileNa
   const match = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/i);
   if (!match) return undefined;
   const mime = match[1].toLowerCase();
-  const ext = MIME_TO_EXT[mime];
-  if (!ext) return undefined;
+  const mimeExt = MIME_TO_EXT[mime];
 
   let buffer: Buffer;
   try {
@@ -77,10 +101,13 @@ const saveDataUrl = async (dataUrl: string): Promise<{ publicUrl: string; fileNa
   }
   if (!buffer.length || buffer.length > MAX_IMAGE_BYTES) return undefined;
 
+  const sniffedExt = sniffImageExt(buffer) || mimeExt;
+  if (!sniffedExt) return undefined;
+
   await ensureUploadDir();
-  const fileName = `${randomUUID()}.${ext}`;
+  const fileName = `${randomUUID()}.${sniffedExt}`;
   await fs.writeFile(getFilePath(fileName), buffer);
-  return { publicUrl: `/uploads/${fileName}`, fileName };
+  return { publicUrl: `${PUBLIC_UPLOAD_PREFIX}/${fileName}`, fileName };
 };
 
 export const persistImageValue = async (value: unknown): Promise<string | undefined> => {
@@ -98,7 +125,7 @@ export const persistImageValue = async (value: unknown): Promise<string | undefi
     if (!fileName) return undefined;
     try {
       await fs.access(getFilePath(fileName));
-      return `/uploads/${fileName}`;
+      return `${PUBLIC_UPLOAD_PREFIX}/${fileName}`;
     } catch {
       return undefined;
     }

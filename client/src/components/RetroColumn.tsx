@@ -16,6 +16,7 @@ import MoreVertIcon from '@mui/icons-material/MoreVert';
 import CheckIcon from '@mui/icons-material/Check';
 import CloseIcon from '@mui/icons-material/Close';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import { fileToImageDataUrl, IMAGE_FILE_ACCEPT, resolveMediaUrl } from '../utils/media';
 
 const getSpeechRecognition = (): SpeechRecognitionConstructor | null =>
   window.SpeechRecognition || window.webkitSpeechRecognition || null;
@@ -58,6 +59,7 @@ const EMOJI_GROUPS = {
 const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enableDragDrop = false, onAddCardStart }) => {
   const [newCardText, setNewCardText] = useState('');
   const [newCardImageUrl, setNewCardImageUrl] = useState('');
+  const [imagePickError, setImagePickError] = useState('');
   const [selectedEmoji, setSelectedEmoji] = useState('');
   const [localCards, setLocalCards] = useState<Card[]>([]);
   const [isComposerOpen, setIsComposerOpen] = useState(false);
@@ -277,6 +279,7 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
     stopListening();
     setNewCardText('');
     setNewCardImageUrl('');
+    setImagePickError('');
     setSelectedEmoji('');
     setSpeechError(null);
     setInterimTranscript('');
@@ -345,19 +348,18 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
     setCursorPosition(position);
   };
 
-  const handleSelectImageFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSelectImageFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
+    event.target.value = '';
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = typeof reader.result === 'string' ? reader.result : '';
-      if (result.startsWith('data:image/')) {
-        setNewCardImageUrl(result);
-      }
-    };
-    reader.readAsDataURL(file);
-    event.target.value = '';
+    try {
+      const dataUrl = await fileToImageDataUrl(file);
+      setNewCardImageUrl(dataUrl);
+      setImagePickError('');
+    } catch (error) {
+      setImagePickError(error instanceof Error ? error.message : 'Не удалось загрузить изображение');
+    }
   };
 
   return (
@@ -665,7 +667,7 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
                 <Box sx={{ position: 'relative', mt: 0.5 }}>
                   <Box
                     component="img"
-                    src={newCardImageUrl.trim()}
+                    src={resolveMediaUrl(newCardImageUrl.trim())}
                     alt="preview"
                     sx={{
                       width: '100%',
@@ -694,6 +696,11 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
                     </IconButton>
                   </Tooltip>
                 </Box>
+              )}
+              {imagePickError && (
+                <Typography variant="caption" color="error" sx={{ display: 'block', mb: 0.5 }}>
+                  {imagePickError}
+                </Typography>
               )}
               {speechError && (
                 <Typography variant="caption" color="error" sx={{ display: 'block', mb: 0.5 }}>
@@ -834,7 +841,7 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
           <input
             ref={imageInputRef}
             type="file"
-            accept="image/*"
+            accept={IMAGE_FILE_ACCEPT}
             style={{ display: 'none' }}
             onChange={handleSelectImageFile}
           />

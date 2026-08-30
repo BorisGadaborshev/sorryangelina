@@ -58,7 +58,8 @@ app.use(cors({
 }));
 
 app.use(express.json());
-app.use('/uploads', express.static(getUploadDir(), { index: false, fallthrough: true }));
+app.use('/uploads', express.static(getUploadDir(), { index: false, fallthrough: false }));
+app.use('/api/uploads', express.static(getUploadDir(), { index: false, fallthrough: false }));
 
 // Serve static files from the React app
 const clientBuildPath = path.join(__dirname, '../../../client/build');

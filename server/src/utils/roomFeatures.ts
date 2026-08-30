@@ -32,7 +32,7 @@ export const normalizeBackgroundImage = (value: unknown): string => {
   if (!trimmed || trimmed.length > MAX_BACKGROUND_IMAGE_LENGTH) return '';
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
   if (/^data:image\/[a-zA-Z0-9.+-]+;base64,/i.test(trimmed)) return trimmed;
-  if (/^\/uploads\/[a-zA-Z0-9._-]+$/.test(trimmed)) return trimmed;
+  if (/^\/(?:api\/)?uploads\/[a-zA-Z0-9._-]+$/.test(trimmed)) return trimmed;
   return '';
 };
 
