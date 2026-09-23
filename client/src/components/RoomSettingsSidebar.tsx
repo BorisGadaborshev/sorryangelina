@@ -41,6 +41,7 @@ import RemoveIcon from '@mui/icons-material/Remove';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import WallpaperIcon from '@mui/icons-material/Wallpaper';
 import { RetroStore } from '../store/RetroStore';
+import { ACCENT_GRADIENT, ACCENT_GRADIENT_HOVER, ACCENT_SHADOW } from './readyButtonStyles';
 import AboutAppDialog from './AboutAppDialog';
 import BackgroundImageDialog from './BackgroundImageDialog';
 import { DislikeIconId, LikeIconId, MAX_VOTE_LIMIT, MIN_VOTE_LIMIT, RoomFeatures } from '../types';
@@ -93,12 +94,16 @@ const FeatureToggle: React.FC<FeatureToggleProps> = ({ active, label, tooltip, i
         borderRadius: 2,
         textTransform: 'none',
         cursor: disabled ? 'default' : 'pointer',
-        borderColor: active ? 'primary.main' : 'divider',
-        bgcolor: active ? 'primary.main' : 'background.paper',
-        color: active ? 'primary.contrastText' : 'text.secondary',
+        borderColor: active ? 'transparent' : 'divider',
+        bgcolor: active ? '#5b54e8' : 'background.paper',
+        backgroundImage: active ? ACCENT_GRADIENT : 'none',
+        boxShadow: active ? ACCENT_SHADOW : 'none',
+        color: active ? '#fff' : 'text.secondary',
         '&:hover': {
-          bgcolor: active ? (disabled ? 'primary.main' : 'primary.dark') : (disabled ? 'background.paper' : 'action.hover'),
-          borderColor: active ? (disabled ? 'primary.main' : 'primary.dark') : (disabled ? 'divider' : 'text.disabled')
+          bgcolor: active ? '#655df0' : (disabled ? 'background.paper' : 'action.hover'),
+          backgroundImage: active ? (disabled ? ACCENT_GRADIENT : ACCENT_GRADIENT_HOVER) : 'none',
+          borderColor: active ? 'transparent' : (disabled ? 'divider' : 'text.disabled'),
+          boxShadow: active ? ACCENT_SHADOW : 'none',
         }
       }}
     >
@@ -232,8 +237,8 @@ const RoomSettingsSidebar: React.FC<Props> = observer(({ store, open, onClose, t
                     height: 40,
                     borderRadius: 1.5,
                     border: '1px solid',
-                    borderColor: isSelected ? 'primary.main' : 'divider',
-                    bgcolor: isSelected ? 'action.selected' : 'background.paper',
+                    borderColor: isSelected ? '#6c63ff' : 'divider',
+                    bgcolor: isSelected ? 'rgba(108, 99, 255, 0.16)' : 'background.paper',
                     '&:hover': {
                       bgcolor: disabled ? 'background.paper' : 'action.hover'
                     }
@@ -327,11 +332,11 @@ const RoomSettingsSidebar: React.FC<Props> = observer(({ store, open, onClose, t
               />
               <FeatureToggle
                 active={features.membersCanAddCards}
-                label="А давайте"
+                label="А, давайте"
                 tooltip={
                   features.membersCanAddCards
-                    ? 'Участники могут добавлять карточки в колонку «А давайте!». Нажмите, чтобы разрешить добавление только администратору. Комментарии и реакции остаются доступны всем'
-                    : 'Только администратор может добавлять карточки в колонку «А давайте!». Комментарии и реакции доступны всем. Нажмите, чтобы разрешить добавление участникам'
+                    ? 'Участники могут добавлять карточки в колонку «А, давайте». Нажмите, чтобы разрешить добавление только администратору. Комментарии и реакции остаются доступны всем'
+                    : 'Только администратор может добавлять карточки в колонку «А, давайте». Комментарии и реакции доступны всем. Нажмите, чтобы разрешить добавление участникам'
                 }
                 icon={<AddCardIcon fontSize="inherit" />}
                 onClick={() => toggleFeature('membersCanAddCards')}
@@ -406,7 +411,7 @@ const RoomSettingsSidebar: React.FC<Props> = observer(({ store, open, onClose, t
               <FeatureToggle
                 active={features.hideCardTextDuringCreation}
                 label="Скрытие"
-                tooltip="Скрывать текст чужих карточек на этапе создания (админ видит все)"
+                tooltip="Скрывать текст чужих карточек на этапе создания (админ видит все). В колонке «А, давайте» чужие карточки тоже скрываются, если участникам разрешено их добавлять"
                 icon={<VisibilityOffIcon fontSize="inherit" />}
                 onClick={() => toggleFeature('hideCardTextDuringCreation')}
                 showTooltip={showTooltips}

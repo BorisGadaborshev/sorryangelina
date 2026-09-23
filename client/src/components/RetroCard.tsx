@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { observer } from 'mobx-react-lite';
 import { Card as CardType, CARD_REACTION_EMOJIS, cardTextToEditorValue, editorValueToCardText, getCardTextSegments, getColumnColorStyles } from '../types';
 import { Card, CardContent, Typography, IconButton, TextField, Box, Tooltip, Alert, Button, Menu, MenuItem, ListItemIcon, ListItemText, Popover, Divider } from '@mui/material';
-import { Delete, Edit, MoreVert, Check, ChatBubbleOutline, AddReaction, VisibilityOff } from '@mui/icons-material';
+import { Delete, Edit, MoreVert, Check, Close, ChatBubbleOutline, AddReaction, VisibilityOff } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import { RetroStore } from '../store/RetroStore';
 import { getDislikeIconLabel, getLikeIconLabel, VoteIcon } from './VoteIcon';
@@ -54,7 +54,7 @@ const CardBodyText: React.FC<{ text: string; variant?: 'body1' | 'body2' }> = ({
               }}
             />
           )}
-          <Typography variant={variant} sx={{ wordBreak: 'break-word' }}>
+          <Typography variant={variant} sx={{ wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>
             {segment}
           </Typography>
         </React.Fragment>
@@ -72,6 +72,8 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store, isMergeDropTa
   const [menuAnchorEl, setMenuAnchorEl] = useState<null | HTMLElement>(null);
   const [showCommentInput, setShowCommentInput] = useState(false);
   const [commentDraft, setCommentDraft] = useState('');
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const [editingCommentDraft, setEditingCommentDraft] = useState('');
   const [reactionAnchorEl, setReactionAnchorEl] = useState<null | HTMLElement>(null);
   const theme = useTheme();
   const isMenuOpen = Boolean(menuAnchorEl);
@@ -149,6 +151,23 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store, isMergeDropTa
     store.socketService?.addCardComment(card.id, trimmed);
     setCommentDraft('');
     setShowCommentInput(false);
+  };
+
+  const handleStartEditComment = (commentId: string, text: string) => {
+    setEditingCommentId(commentId);
+    setEditingCommentDraft(text);
+  };
+
+  const handleCancelEditComment = () => {
+    setEditingCommentId(null);
+    setEditingCommentDraft('');
+  };
+
+  const handleSaveComment = () => {
+    const trimmed = editingCommentDraft.trim();
+    if (!trimmed || !editingCommentId) return;
+    store.socketService?.updateCardComment(card.id, editingCommentId, trimmed);
+    handleCancelEditComment();
   };
 
   const handleToggleReaction = (emoji: string) => {
@@ -369,12 +388,14 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store, isMergeDropTa
 
             {canUseSocial && comments.map((comment) => {
               const authorShortName = formatCommentAuthorName(comment.userName || '');
+              const canEditComment = showComments && comment.userId === currentUserId;
+              const isEditingComment = editingCommentId === comment.id;
               return (
               <Box key={comment.id} sx={{ mt: 1 }}>
                 <Box
                   sx={{
                     display: 'flex',
-                    alignItems: 'baseline',
+                    alignItems: 'center',
                     gap: 0.75,
                     minWidth: 0
                   }}
@@ -405,9 +426,49 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store, isMergeDropTa
                       color: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.42)' : 'rgba(0,0,0,0.38)'
                     }}
                   >
-                    {formatRelativeTime(comment.createdAt)}
+                    {comment.updatedAt ? 'изменено' : formatRelativeTime(comment.createdAt)}
                   </Typography>
+                  {canEditComment && !isEditingComment && (
+                    <Tooltip title="Редактировать комментарий">
+                      <IconButton
+                        size="small"
+                        onClick={() => handleStartEditComment(comment.id, comment.text)}
+                        sx={{ ml: 'auto', width: 22, height: 22 }}
+                      >
+                        <Edit sx={{ fontSize: 14 }} />
+                      </IconButton>
+                    </Tooltip>
+                  )}
                 </Box>
+                {isEditingComment ? (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
+                    <TextField
+                      size="small"
+                      value={editingCommentDraft}
+                      onChange={(event) => setEditingCommentDraft(event.target.value)}
+                      fullWidth
+                      multiline
+                      maxRows={3}
+                      autoFocus
+                      onKeyDown={(event) => {
+                        if (event.key === 'Escape') {
+                          event.preventDefault();
+                          handleCancelEditComment();
+                        }
+                        if (event.key === 'Enter' && !event.shiftKey) {
+                          event.preventDefault();
+                          handleSaveComment();
+                        }
+                      }}
+                    />
+                    <IconButton size="small" onClick={handleCancelEditComment}>
+                      <Close fontSize="small" />
+                    </IconButton>
+                    <IconButton size="small" color="primary" onClick={handleSaveComment} disabled={!editingCommentDraft.trim()}>
+                      <Check fontSize="small" />
+                    </IconButton>
+                  </Box>
+                ) : (
                 <Typography
                   variant="body2"
                   sx={{
@@ -419,6 +480,7 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store, isMergeDropTa
                 >
                   {comment.text}
                 </Typography>
+                )}
               </Box>
               );
             })}

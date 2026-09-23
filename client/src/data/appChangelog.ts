@@ -6,6 +6,14 @@ export interface AppVersion {
 
 export const APP_CHANGELOG: AppVersion[] = [
   {
+    version: '1.15.03',
+    date: '23.09.2026',
+    changes: [
+      'Свой комментарий к карточке можно отредактировать',
+      'Карточку можно добавить клавишей Enter, новую строку — Shift+Enter или Alt+Enter'
+    ]
+  },
+  {
     version: '1.15.02',
     date: '30.08.2026',
     changes: [

@@ -1565,6 +1565,31 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('update-card-comment', async ({ cardId, commentId, text }) => {
+    if (!currentUser) return;
+
+    try {
+      const room = await RoomService.getRoom(currentUser.roomId);
+      if (!room || !canInteractWithCardSocial(room.phase)) return;
+      if (!getRoomFeatures(room).commentsEnabled) return;
+      if (typeof cardId !== 'string' || typeof commentId !== 'string' || typeof text !== 'string') return;
+
+      const comment = await RoomService.updateCardComment(
+        currentUser.roomId,
+        cardId,
+        commentId,
+        currentUser.id,
+        text
+      );
+      if (!comment) return;
+
+      io.to(currentUser.roomId).emit('card-comment-updated', { cardId, comment });
+    } catch (error) {
+      console.error('Error updating card comment:', error);
+      socket.emit('error', 'Failed to update card comment');
+    }
+  });
+
   socket.on('toggle-card-reaction', async ({ cardId, emoji }) => {
     if (!currentUser) return;
 

@@ -10,6 +10,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import { RetroStore } from '../store/RetroStore';
 import { BUILTIN_TEAM_ID, Mood, Phase } from '../types';
+import { getReadyButtonSx } from './readyButtonStyles';
 
 interface User {
   id: string;
@@ -171,11 +172,11 @@ const UserList: React.FC<UserListProps> = observer(({
               {currentUser.isReady ? 'Вы отметили свою готовность' : 'Отметьте свою готовность'}
             </Typography>
             <Button
-              variant="outlined"
-              color={currentUser.isReady ? "success" : "primary"}
+              variant="contained"
               fullWidth
               onClick={() => onReadyStateChange(!currentUser.isReady)}
               startIcon={currentUser.isReady ? <CheckCircleIcon /> : <RadioButtonUncheckedIcon />}
+              sx={getReadyButtonSx(Boolean(currentUser.isReady))}
             >
               {currentUser.isReady ? 'Я готов(а)' : 'Отметить готовность'}
             </Button>

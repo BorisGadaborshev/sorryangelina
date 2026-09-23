@@ -98,6 +98,7 @@ export const connectDB = async (): Promise<void> => {
     alter table teams add column if not exists password_version integer not null default 1;
     alter table team_members add column if not exists unlocked_password_version integer;
     alter table cards add column if not exists image_url text;
+    alter table card_comments add column if not exists updated_at timestamptz;
     alter table room_users add column if not exists mood text;
     alter table room_users add column if not exists joined_at timestamptz default now();
     alter table rooms add column if not exists column_titles jsonb;

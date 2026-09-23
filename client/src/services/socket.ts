@@ -211,6 +211,10 @@ export class SocketService {
       this.store.addCardComment(cardId, comment);
     });
 
+    this.socket.on('card-comment-updated', ({ cardId, comment }: { cardId: string; comment: CardComment }) => {
+      this.store.updateCardComment(cardId, comment);
+    });
+
     this.socket.on('card-reaction-updated', ({ cardId, reactions }: { cardId: string; reactions: CardReaction[] }) => {
       this.store.setCardReactions(cardId, reactions);
     });
@@ -643,6 +647,10 @@ export class SocketService {
 
   addCardComment(cardId: string, text: string): void {
     this.socket.emit('add-card-comment', { cardId, text });
+  }
+
+  updateCardComment(cardId: string, commentId: string, text: string): void {
+    this.socket.emit('update-card-comment', { cardId, commentId, text });
   }
 
   toggleCardReaction(cardId: string, emoji: string): void {

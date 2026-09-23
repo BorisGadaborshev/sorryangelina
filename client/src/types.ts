@@ -9,7 +9,7 @@ export interface User {
 
 export type Phase = 'creation' | 'voting' | 'discussion' | 'rating';
 
-export const DEFAULT_COLUMN_TITLES = ['Было хорошо', 'Было не очень', 'А давайте!:'] as const;
+export const DEFAULT_COLUMN_TITLES = ['Было хорошо', 'Было не очень', 'А, давайте'] as const;
 export const COLUMN_COUNT = DEFAULT_COLUMN_TITLES.length;
 export const LETS_DO_COLUMN_INDEX = 2;
 
@@ -151,6 +151,7 @@ export interface CardComment {
   userName: string;
   text: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface CardReaction {

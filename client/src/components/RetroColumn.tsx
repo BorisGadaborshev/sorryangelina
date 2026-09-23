@@ -135,7 +135,7 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
   };
 
   const handleCopyColumnMarkdown = async () => {
-    const markdown = buildColumnMarkdown(localCards);
+    const markdown = buildColumnMarkdown(localCards.filter((card) => !store.isCardTextHidden(card)));
     if (!markdown) return;
     try {
       await navigator.clipboard.writeText(markdown);
@@ -307,6 +307,22 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
     store.socketService?.addCard(text, type, columnIndex, imageUrl || undefined);
     resetComposerInput();
     setIsComposerOpen(false);
+  };
+
+  const insertNewlineAtCursor = () => {
+    const start = textFieldRef.current?.selectionStart ?? cursorPositionRef.current;
+    const end = textFieldRef.current?.selectionEnd ?? start;
+    const current = newCardTextRef.current;
+    const nextText = `${current.slice(0, start)}\n${current.slice(end)}`;
+    const nextCursor = start + 1;
+    newCardTextRef.current = nextText;
+    cursorPositionRef.current = nextCursor;
+    setNewCardText(nextText);
+    setCursorPosition(nextCursor);
+    setTimeout(() => {
+      textFieldRef.current?.focus();
+      textFieldRef.current?.setSelectionRange(nextCursor, nextCursor);
+    }, 0);
   };
 
   const applyPastedImageUrl = (url: string, leftover: string) => {
@@ -579,7 +595,6 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
             >
               <span>
                 <IconButton
-                  color="primary"
                   aria-label="Добавить карточку"
                   disabled={!canAddCards}
                   onClick={() => {
@@ -590,8 +605,13 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
                   sx={{
                     position: 'relative',
                     zIndex: 4,
+                    color: columnThemeColors.accent,
                     border: '1px solid',
-                    borderColor: canAddCards ? 'divider' : 'action.disabled',
+                    borderColor: canAddCards ? columnThemeColors.accent : 'action.disabled',
+                    '&:hover': {
+                      borderColor: columnThemeColors.accent,
+                      backgroundColor: columnThemeColors.fill ?? 'action.hover'
+                    },
                     '&.Mui-disabled': {
                       color: 'action.disabled'
                     }
@@ -650,10 +670,15 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
                     handleComposerResetOrClose();
                     return;
                   }
-                  if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                  if (event.key !== 'Enter' || event.nativeEvent.isComposing) return;
+                  if (event.shiftKey) return;
+                  if (event.altKey) {
                     event.preventDefault();
-                    handleAddCard();
+                    insertNewlineAtCursor();
+                    return;
                   }
+                  event.preventDefault();
+                  handleAddCard();
                 }}
                 inputRef={textFieldRef}
                 InputProps={{ disableUnderline: true }}
@@ -802,7 +827,7 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
                       <CloseIcon fontSize="small" />
                     </IconButton>
                   </Tooltip>
-                  <Tooltip title="Сохранить">
+                  <Tooltip title="Добавить (Enter)">
                     <span>
                       <IconButton
                         size="small"

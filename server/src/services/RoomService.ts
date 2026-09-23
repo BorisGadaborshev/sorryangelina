@@ -346,6 +346,24 @@ export class RoomService {
     };
   }
 
+  static async updateCardComment(
+    roomId: string,
+    cardId: string,
+    commentId: string,
+    userId: string,
+    text: string
+  ): Promise<CardComment | null> {
+    const trimmed = text.trim();
+    if (!trimmed || typeof commentId !== 'string' || !commentId) return null;
+
+    const room = await RoomModel.findOne({ id: roomId });
+    if (!room) return null;
+    const card = room.cards.find((currentCard) => currentCard.id === cardId);
+    if (!card) return null;
+
+    return RoomModel.updateCardComment(cardId, commentId, userId, trimmed);
+  }
+
   static async toggleCardReaction(
     roomId: string,
     cardId: string,

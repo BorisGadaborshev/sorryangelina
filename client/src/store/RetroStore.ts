@@ -549,6 +549,22 @@ export class RetroStore {
     });
   }
 
+  updateCardComment(cardId: string, comment: CardComment) {
+    runInAction(() => {
+      const card = this.cards.find((currentCard) => currentCard.id === cardId);
+      if (!card) return;
+      const comments = card.comments || [];
+      const index = comments.findIndex((current) => current.id === comment.id);
+      if (index === -1) {
+        card.comments = [...comments, comment];
+        return;
+      }
+      const next = comments.slice();
+      next[index] = comment;
+      card.comments = next;
+    });
+  }
+
   setCardReactions(cardId: string, reactions: CardReaction[]) {
     runInAction(() => {
       const card = this.cards.find((currentCard) => currentCard.id === cardId);
@@ -654,14 +670,13 @@ export class RetroStore {
     if (this.phase !== 'creation') return false;
     if (this.currentUser?.role === 'admin') return false;
     if (this.currentUser?.name === card.createdBy) return false;
-    if (card.column === LETS_DO_COLUMN_INDEX) return false;
+    if (card.column === LETS_DO_COLUMN_INDEX && !this.roomFeatures.membersCanAddCards) return false;
     return true;
   }
 
   canUseCardSocial(card: Card): boolean {
     if (this.phase === 'rating') return false;
     if (!this.roomFeatures.reactionsEnabled && !this.roomFeatures.commentsEnabled) return false;
-    if (card.column === LETS_DO_COLUMN_INDEX) return true;
     return !this.isCardTextHidden(card);
   }
 

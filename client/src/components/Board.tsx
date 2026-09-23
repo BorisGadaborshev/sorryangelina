@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { observer } from 'mobx-react-lite';
-import { Box, AppBar, Toolbar, Typography, Button, ButtonGroup, CircularProgress, IconButton, Tooltip, Tabs, Tab, useMediaQuery, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, FormControl, Select, MenuItem, Menu, Divider } from '@mui/material';
+import { Box, AppBar, Toolbar, Typography, Button, CircularProgress, IconButton, Tooltip, Tabs, Tab, useMediaQuery, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, FormControl, Select, MenuItem, Menu, Divider } from '@mui/material';
 import { DragDropContext, DropResult } from '@hello-pangea/dnd';
 import SettingsIcon from '@mui/icons-material/Settings';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
@@ -13,6 +13,10 @@ import PersonIcon from '@mui/icons-material/Person';
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
 import BrushIcon from '@mui/icons-material/Brush';
 import CleaningServicesIcon from '@mui/icons-material/CleaningServices';
+import EditNoteRoundedIcon from '@mui/icons-material/EditNoteRounded';
+import HowToVoteRoundedIcon from '@mui/icons-material/HowToVoteRounded';
+import ForumRoundedIcon from '@mui/icons-material/ForumRounded';
+import AutoAwesomeRoundedIcon from '@mui/icons-material/AutoAwesomeRounded';
 import RetroColumn from './RetroColumn';
 import UserList from './UserList';
 import { RetroStore } from '../store/RetroStore';
@@ -24,6 +28,7 @@ import RoomSettingsSidebar from './RoomSettingsSidebar';
 import MusicPlayerWidget from './MusicPlayerWidget';
 import { Mood, Phase } from '../types';
 import { toCssBackgroundUrl } from '../utils/media';
+import { getReadyButtonSx } from './readyButtonStyles';
 
 interface Props {
   store: RetroStore;
@@ -41,6 +46,19 @@ const MOOD_OPTIONS: Array<{ value: Mood; emoji: string; label: string; color: st
 const WHITEBOARD_COLORS = ['#111111', '#006dff', '#00a878', '#ff6b00', '#e11d48', '#7c3aed'];
 
 const PHASE_ACTIVE_GREEN = '#34c759';
+const PHASE_ACCENT = '#6c63ff';
+
+const PHASE_OPTIONS: Array<{
+  value: Phase;
+  label: string;
+  shortLabel: string;
+  icon: React.ElementType;
+}> = [
+  { value: 'creation', label: 'Создание', shortLabel: 'Создание', icon: EditNoteRoundedIcon },
+  { value: 'voting', label: 'Голосование', shortLabel: 'Голоса', icon: HowToVoteRoundedIcon },
+  { value: 'discussion', label: 'Обсуждение', shortLabel: 'Обсуждение', icon: ForumRoundedIcon },
+  { value: 'rating', label: 'Оценка ретро', shortLabel: 'Оценка', icon: AutoAwesomeRoundedIcon },
+];
 
 const getNextPhase = (phase: Phase, retroRatingEnabled: boolean): Phase | null => {
   if (phase === 'creation') return 'voting';
@@ -49,27 +67,56 @@ const getNextPhase = (phase: Phase, retroRatingEnabled: boolean): Phase | null =
   return null;
 };
 
-const getPhaseButtonSx = (isActive: boolean, extra?: object) => ({
-  color: '#fff',
-  ...(isActive && {
-    color: PHASE_ACTIVE_GREEN,
-    bgcolor: 'transparent',
-    backgroundImage: 'none',
-    boxShadow: 'none',
-    outline: `2px solid ${PHASE_ACTIVE_GREEN}`,
-    outlineOffset: '1px',
-    zIndex: 1,
-    '&.MuiButton-containedSecondary': {
-      color: PHASE_ACTIVE_GREEN,
-      bgcolor: 'transparent',
-    },
-    '&.Mui-disabled': {
-      color: PHASE_ACTIVE_GREEN,
-      bgcolor: 'transparent',
-      opacity: 1,
-    },
-  }),
-  ...extra,
+const getPhaseButtonSx = (isActive: boolean, isUnavailable: boolean, isMobile: boolean, isDarkMode: boolean) => ({
+  minWidth: 0,
+  minHeight: isMobile ? 42 : 36,
+  px: isMobile ? 1 : 1.35,
+  border: '1px solid',
+  borderColor: isActive ? 'transparent' : 'divider',
+  borderRadius: '10px !important',
+  color: isActive ? '#fff' : 'text.secondary',
+  bgcolor: isActive ? PHASE_ACCENT : (isDarkMode ? 'rgba(255,255,255,0.09)' : 'background.paper'),
+  backgroundImage: isActive
+    ? 'linear-gradient(135deg, #766dff 0%, #5b54e8 100%)'
+    : 'none',
+  boxShadow: isActive
+    ? '0 4px 12px rgba(92, 84, 232, 0.3)'
+    : (isMobile ? '0 1px 3px rgba(20, 24, 40, 0.1)' : 'none'),
+  fontSize: isMobile ? '0.75rem' : '0.78rem',
+  fontWeight: 800,
+  lineHeight: 1,
+  letterSpacing: '-0.01em',
+  textTransform: 'none',
+  whiteSpace: 'nowrap',
+  transition: 'color 160ms ease, background-color 160ms ease, box-shadow 160ms ease, transform 160ms ease',
+  '& .MuiButton-startIcon': {
+    mr: isMobile ? 0.6 : 0.7,
+    '& svg': { fontSize: isMobile ? 17 : 18 },
+  },
+  '&:hover': {
+    color: isActive ? '#fff' : 'text.primary',
+    bgcolor: isActive ? PHASE_ACCENT : (isDarkMode ? 'rgba(255,255,255,0.14)' : 'action.hover'),
+    borderColor: !isActive ? 'text.disabled' : undefined,
+    backgroundImage: isActive
+      ? 'linear-gradient(135deg, #827aff 0%, #655df0 100%)'
+      : 'none',
+    boxShadow: isActive ? '0 5px 14px rgba(92, 84, 232, 0.36)' : 'none',
+    transform: isActive ? 'none' : 'translateY(-1px)',
+  },
+  '&:focus-visible': {
+    outline: `3px solid rgba(108, 99, 255, 0.28)`,
+    outlineOffset: 1,
+  },
+  '&.Mui-disabled': {
+    color: isActive ? '#fff' : 'text.disabled',
+    bgcolor: isActive ? PHASE_ACCENT : (isDarkMode ? 'rgba(255,255,255,0.09)' : 'background.paper'),
+    borderColor: isActive ? 'transparent' : 'divider',
+    backgroundImage: isActive
+      ? 'linear-gradient(135deg, #766dff 0%, #5b54e8 100%)'
+      : 'none',
+    boxShadow: isActive ? '0 4px 12px rgba(92, 84, 232, 0.3)' : 'none',
+    opacity: isUnavailable && !isActive ? 0.42 : 1,
+  },
 });
 
 const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) => {
@@ -456,88 +503,45 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                 width: isMobile ? '100%' : 'auto',
                 gap: isMobile ? 0.5 : 0,
               }}>
-                {isMobile ? (
-                  <Box
-                    sx={{
-                      display: 'grid',
-                      gridTemplateColumns: '1fr 1fr',
-                      gap: 0.5,
-                      width: '100%',
-                    }}
-                  >
-                    <Button
-                      variant="contained"
-                      color="secondary"
-                      size="small"
-                      onClick={() => store.socketService?.changePhase('creation')}
-                      disabled={store.phase === 'creation' || !canChange}
-                      sx={getPhaseButtonSx(store.phase === 'creation', { minWidth: 0, px: 1 })}
-                    >
-                      Создание
-                    </Button>
-                    <Button
-                      variant="contained"
-                      color="secondary"
-                      size="small"
-                      onClick={() => store.socketService?.changePhase('voting')}
-                      disabled={store.phase === 'voting' || !canChange}
-                      sx={getPhaseButtonSx(store.phase === 'voting', { minWidth: 0, px: 1 })}
-                    >
-                      Голосование
-                    </Button>
-                    <Button
-                      variant="contained"
-                      color="secondary"
-                      size="small"
-                      onClick={() => store.socketService?.changePhase('discussion')}
-                      disabled={store.phase === 'discussion' || !canChange}
-                      sx={getPhaseButtonSx(store.phase === 'discussion', { minWidth: 0, px: 1 })}
-                    >
-                      Обсуждение
-                    </Button>
-                    <Button
-                      variant="contained"
-                      color="secondary"
-                      size="small"
-                      onClick={() => store.socketService?.changePhase('rating')}
-                      disabled={store.phase === 'rating' || !canChange || !features.retroRatingEnabled}
-                      sx={getPhaseButtonSx(store.phase === 'rating', { minWidth: 0, px: 1 })}
-                    >
-                      Оценка
-                    </Button>
-                  </Box>
-                ) : (
-                  <ButtonGroup variant="contained" color="secondary" size="small" sx={{ mr: 2, overflow: 'visible' }}>
-                    <Button
-                      onClick={() => store.socketService?.changePhase('creation')}
-                      disabled={store.phase === 'creation' || !canChange}
-                      sx={getPhaseButtonSx(store.phase === 'creation')}
-                    >
-                      Создание
-                    </Button>
-                    <Button
-                      onClick={() => store.socketService?.changePhase('voting')}
-                      disabled={store.phase === 'voting' || !canChange}
-                      sx={getPhaseButtonSx(store.phase === 'voting')}
-                    >
-                      Голосование
-                    </Button>
-                    <Button
-                      onClick={() => store.socketService?.changePhase('discussion')}
-                      disabled={store.phase === 'discussion' || !canChange}
-                      sx={getPhaseButtonSx(store.phase === 'discussion')}
-                    >
-                      Обсуждение
-                    </Button>
-                    <Button
-                      onClick={() => store.socketService?.changePhase('rating')}
-                      disabled={store.phase === 'rating' || !canChange || !features.retroRatingEnabled}
-                      sx={getPhaseButtonSx(store.phase === 'rating')}
-                    >
-                      Оценка
-                    </Button>
-                  </ButtonGroup>
-                )}
+                <Box
+                  role="group"
+                  aria-label="Переключение этапа ретроспективы"
+                  sx={{
+                    display: isMobile ? 'grid' : 'flex',
+                    gridTemplateColumns: isMobile ? '1fr 1fr' : undefined,
+                    gap: isMobile ? 0.75 : 0.5,
+                    width: isMobile ? '100%' : 'auto',
+                    mr: isMobile ? 0 : 2,
+                    p: 0.5,
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    borderRadius: 3,
+                    bgcolor: themeMode === 'dark' ? 'rgba(255,255,255,0.045)' : 'rgba(20, 24, 40, 0.035)',
+                    boxShadow: themeMode === 'dark'
+                      ? 'inset 0 1px 0 rgba(255,255,255,0.04)'
+                      : 'inset 0 1px 0 rgba(255,255,255,0.9), 0 1px 3px rgba(20, 24, 40, 0.04)',
+                  }}
+                >
+                  {PHASE_OPTIONS.map(({ value, label, shortLabel, icon: PhaseIcon }) => {
+                    const isActive = store.phase === value;
+                    const isUnavailable = value === 'rating' && !features.retroRatingEnabled;
+
+                    return (
+                      <Button
+                        key={value}
+                        variant="text"
+                        size="small"
+                        startIcon={<PhaseIcon />}
+                        aria-pressed={isActive}
+                        onClick={() => store.socketService?.changePhase(value)}
+                        disabled={isActive || !canChange || isUnavailable}
+                        sx={getPhaseButtonSx(isActive, isUnavailable, isMobile, themeMode === 'dark')}
+                      >
+                        {isMobile ? shortLabel : label}
+                      </Button>
+                    );
+                  })}
+                </Box>
                 {!isCompactDesktop ? timerControls : null}
               </Box>
             ) : (
@@ -633,13 +637,12 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
               </Box>
               {readyEnabled && store.currentUser && (
                 <Button
-                  variant="outlined"
-                  color={store.currentUser.isReady ? 'success' : 'primary'}
+                  variant="contained"
                   fullWidth
                   size="small"
                   onClick={() => handleReadyStateChange(!store.currentUser!.isReady)}
                   startIcon={store.currentUser.isReady ? <CheckCircleIcon /> : <RadioButtonUncheckedIcon />}
-                  sx={{ mb: 0.5 }}
+                  sx={{ ...getReadyButtonSx(Boolean(store.currentUser.isReady)), mb: 0.5 }}
                 >
                   {store.currentUser.isReady ? 'Я готов(а)' : 'Отметить готовность'}
                 </Button>

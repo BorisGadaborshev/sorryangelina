@@ -3,12 +3,32 @@ import { pool } from '../config/database';
 import { Room, RoomDocument, User, Card, CardComment, CardReaction, RoomFeatures, COLUMN_COUNT, ColumnColorId, mergeCardTexts, normalizeColumnColors } from '../types';
 import { normalizeRoomFeatures } from '../utils/roomFeatures';
 
+type CommentRow = {
+  id: string;
+  card_id: string;
+  user_id: string;
+  user_name: string;
+  text: string;
+  created_at: string;
+  updated_at?: string | null;
+};
+
+const mapCommentRow = (row: CommentRow): CardComment => ({
+  id: row.id,
+  cardId: row.card_id,
+  userId: row.user_id,
+  userName: row.user_name,
+  text: row.text,
+  createdAt: row.created_at,
+  ...(row.updated_at ? { updatedAt: row.updated_at } : {})
+});
+
 const attachSocialDataToCards = async (cards: Card[]): Promise<Card[]> => {
   if (cards.length === 0) return cards;
 
   const cardIds = cards.map((card) => card.id);
   const commentsRes = await pool.query(
-    'select id, card_id, user_id, user_name, text, created_at from card_comments where card_id = any($1::text[]) order by created_at asc',
+    'select id, card_id, user_id, user_name, text, created_at, updated_at from card_comments where card_id = any($1::text[]) order by created_at asc',
     [cardIds]
   );
   const reactionsRes = await pool.query(
@@ -17,16 +37,9 @@ const attachSocialDataToCards = async (cards: Card[]): Promise<Card[]> => {
   );
 
   const commentsByCard = new Map<string, CardComment[]>();
-  for (const row of commentsRes.rows as Array<{ id: string; card_id: string; user_id: string; user_name: string; text: string; created_at: string }>) {
+  for (const row of commentsRes.rows as CommentRow[]) {
     const entry = commentsByCard.get(row.card_id) || [];
-    entry.push({
-      id: row.id,
-      cardId: row.card_id,
-      userId: row.user_id,
-      userName: row.user_name,
-      text: row.text,
-      createdAt: row.created_at
-    });
+    entry.push(mapCommentRow(row));
     commentsByCard.set(row.card_id, entry);
   }
 
@@ -215,18 +228,22 @@ export const RoomModel = {
       [comment.id, comment.cardId, comment.userId, comment.userName, comment.text]
     );
     const { rows } = await pool.query(
-      'select id, card_id, user_id, user_name, text, created_at from card_comments where id=$1',
+      'select id, card_id, user_id, user_name, text, created_at, updated_at from card_comments where id=$1',
       [comment.id]
     );
-    const row = rows[0] as { id: string; card_id: string; user_id: string; user_name: string; text: string; created_at: string };
-    return {
-      id: row.id,
-      cardId: row.card_id,
-      userId: row.user_id,
-      userName: row.user_name,
-      text: row.text,
-      createdAt: row.created_at
-    };
+    return mapCommentRow(rows[0] as CommentRow);
+  },
+
+  async updateCardComment(cardId: string, commentId: string, userId: string, text: string): Promise<CardComment | null> {
+    const { rows } = await pool.query(
+      `update card_comments
+       set text=$1, updated_at=now()
+       where id=$2 and card_id=$3 and user_id=$4
+       returning id, card_id, user_id, user_name, text, created_at, updated_at`,
+      [text, commentId, cardId, userId]
+    );
+    const row = rows[0] as CommentRow | undefined;
+    return row ? mapCommentRow(row) : null;
   },
 
   async getCardReactions(cardId: string): Promise<CardReaction[]> {
