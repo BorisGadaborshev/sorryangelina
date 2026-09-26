@@ -638,8 +638,8 @@ export class RetroStore {
 
   get sortedCards() {
     return [...this.cards].sort((a, b) => {
-      const scoreA = (a.likes?.length || 0) - (a.dislikes?.length || 0);
-      const scoreB = (b.likes?.length || 0) - (b.dislikes?.length || 0);
+      const scoreA = (a.likes?.length || 0) + (a.dislikes?.length || 0);
+      const scoreB = (b.likes?.length || 0) + (b.dislikes?.length || 0);
       return scoreB - scoreA;
     });
   }

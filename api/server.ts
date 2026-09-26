@@ -170,7 +170,7 @@ io.on('connection', (socket) => {
 
       let sortedCards: Card[] = updatedRoom.cards;
       if (phase === 'discussion') {
-        sortedCards = [...updatedRoom.cards].sort((a, b) => ((b.likes?.length || 0) - (b.dislikes?.length || 0)) - ((a.likes?.length || 0) - (a.dislikes?.length || 0)));
+        sortedCards = [...updatedRoom.cards].sort((a, b) => ((b.likes?.length || 0) + (b.dislikes?.length || 0)) - ((a.likes?.length || 0) + (a.dislikes?.length || 0)));
       }
 
       const roomWithReset = await RoomService.resetUsersReadyState(roomId);

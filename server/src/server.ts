@@ -504,7 +504,7 @@ io.engine.on("connection_error", (err) => {
 
 // Helper function to get sorted cards by votes
 const getSortedCards = (cards: Card[]): Card[] => {
-  return [...cards].sort((a, b) => ((b.likes?.length || 0) - (b.dislikes?.length || 0)) - ((a.likes?.length || 0) - (a.dislikes?.length || 0)));
+  return [...cards].sort((a, b) => ((b.likes?.length || 0) + (b.dislikes?.length || 0)) - ((a.likes?.length || 0) + (a.dislikes?.length || 0)));
 };
 
 const buildDiscussionNavigation = (cards: Card[]): DiscussionNavigationState => ({
