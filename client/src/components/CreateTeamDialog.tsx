@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
+  Alert,
   Box,
   Button,
   CircularProgress,
@@ -17,11 +18,12 @@ interface Props {
   open: boolean;
   currentUserName: string;
   isLoading: boolean;
+  error?: string | null;
   onClose: () => void;
   onCreate: (payload: { name: string; password: string; members: string[]; scrumMasterName?: string }) => void;
 }
 
-const CreateTeamDialog: React.FC<Props> = ({ open, currentUserName, isLoading, onClose, onCreate }) => {
+const CreateTeamDialog: React.FC<Props> = ({ open, currentUserName, isLoading, error, onClose, onCreate }) => {
   const [teamName, setTeamName] = useState('');
   const [teamPassword, setTeamPassword] = useState('');
   const [memberName, setMemberName] = useState('');
@@ -78,6 +80,11 @@ const CreateTeamDialog: React.FC<Props> = ({ open, currentUserName, isLoading, o
           У команды будет отдельное лобби комнат. Скрам-мастер станет админом команды; если не выбрать скрам-мастера,
           админом будет создатель.
         </DialogContentText>
+        {error && (
+          <Alert severity="error" sx={{ mb: 1 }}>
+            {error}
+          </Alert>
+        )}
         <TextField
           autoFocus
           fullWidth

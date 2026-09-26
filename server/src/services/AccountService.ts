@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { pool } from '../config/database';
 import { FIXED_AUTH_NAMES, isFixedAuthName, normalizeAuthName } from '../config/authNames';
+import { assertNoProfanity } from './ContentModeration';
 
 export type AuthProfileType = 'fixed' | 'registered' | 'guest';
 
@@ -95,6 +96,8 @@ export class AccountService {
       throw new Error('Password must contain at least 4 characters');
     }
 
+    await assertNoProfanity([{ kind: 'person', text: normalizedName }]);
+
     const existing = await this.getAccountByName(normalizedName);
     if (existing) {
       throw new Error('Account already exists');
@@ -129,6 +132,7 @@ export class AccountService {
         [passwordHash, normalizedName]
       );
     } else {
+      await assertNoProfanity([{ kind: 'person', text: normalizedName }]);
       const type: Exclude<AuthProfileType, 'guest'> = isFixedAuthName(normalizedName) ? 'fixed' : 'registered';
       await pool.query(
         `insert into accounts (name, password_hash, type) values ($1, $2, $3)`,
@@ -139,11 +143,13 @@ export class AccountService {
     return password;
   }
 
-  static guestLogin(name: string): AuthProfile {
+  static async guestLogin(name: string): Promise<AuthProfile> {
     const normalizedName = normalizeAuthName(name);
     if (!normalizedName) {
       throw new Error('Guest name is required');
     }
+
+    await assertNoProfanity([{ kind: 'person', text: normalizedName }]);
 
     return {
       name: normalizedName,

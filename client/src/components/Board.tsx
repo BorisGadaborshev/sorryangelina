@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { observer } from 'mobx-react-lite';
-import { Box, AppBar, Toolbar, Typography, Button, CircularProgress, IconButton, Tooltip, Tabs, Tab, useMediaQuery, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, FormControl, Select, MenuItem, Menu, Divider } from '@mui/material';
+import { Box, AppBar, Toolbar, Typography, Button, CircularProgress, IconButton, Tooltip, Tabs, Tab, useMediaQuery, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, FormControl, Select, MenuItem, Menu, Divider, Snackbar, Alert } from '@mui/material';
 import { DragDropContext, DropResult } from '@hello-pangea/dnd';
 import SettingsIcon from '@mui/icons-material/Settings';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
@@ -1055,6 +1055,17 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
           </Button>
         </DialogActions>
       </Dialog>
+
+      <Snackbar
+        open={Boolean(store.error)}
+        autoHideDuration={6000}
+        onClose={() => store.setError(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert severity="error" variant="filled" onClose={() => store.setError(null)} sx={{ width: '100%' }}>
+          {store.error}
+        </Alert>
+      </Snackbar>
 
       <Dialog open={isAllReadyModalOpen} onClose={handleCloseAllReadyModal} maxWidth="xs" fullWidth>
         <DialogTitle>Все готовы</DialogTitle>

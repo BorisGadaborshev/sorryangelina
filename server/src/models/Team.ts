@@ -1,8 +1,9 @@
 import { pool } from '../config/database';
 import { TeamDocument, TeamMember } from '../types';
+import { reserveCreationSlot } from '../services/UsageLimits';
 
 export const TeamModel = {
-  async create(doc: TeamDocument): Promise<TeamDocument> {
+  async create(doc: TeamDocument, options?: { enforceDailyLimit?: boolean }): Promise<TeamDocument> {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -18,6 +19,10 @@ export const TeamModel = {
            on conflict (team_id, name) do update set role = excluded.role`,
           [doc.id, member.name, member.role]
         );
+      }
+
+      if (options?.enforceDailyLimit) {
+        await reserveCreationSlot(client, doc.owner, 'team', doc.id);
       }
 
       await client.query('COMMIT');

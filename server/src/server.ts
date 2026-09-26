@@ -8,6 +8,8 @@ import bcrypt from 'bcryptjs';
 import { RoomService } from './services/RoomService';
 import { BUILTIN_TEAM_ID, TeamService } from './services/TeamService';
 import { AccountService } from './services/AccountService';
+import { assertNoProfanity, ContentModerationError } from './services/ContentModeration';
+import { assertCardSlotAvailable, assertCreationSlotAvailable, UsageLimitError } from './services/UsageLimits';
 import { signAuthToken, verifyAuthToken } from './config/jwt';
 import dotenv from 'dotenv';
 import path from 'path';
@@ -457,14 +459,14 @@ app.post('/api/auth/register', async (req, res) => {
   }
 });
 
-app.post('/api/auth/guest', (req, res) => {
+app.post('/api/auth/guest', async (req, res) => {
   const { name } = req.body as { name?: string };
   if (!name || !name.trim()) {
     res.status(400).json({ error: 'Name is required' });
     return;
   }
   try {
-    const profile = AccountService.guestLogin(name);
+    const profile = await AccountService.guestLogin(name);
     res.json(buildAuthResponse(profile));
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to login as guest' });
@@ -1209,6 +1211,14 @@ io.on('connection', (socket) => {
         return;
       }
 
+      if (typeof roomId !== 'string' || !roomId.trim()) {
+        socket.emit('error', 'Room name is required');
+        return;
+      }
+
+      await assertCreationSlotAvailable(effectiveUsername, 'room');
+      await assertNoProfanity([{ kind: 'room', text: roomId }]);
+
       const room = await RoomService.createRoom(roomId, password, socket.id, effectiveUsername, {
         teamId: normalizedTeamId,
         template: isRetroTemplateId(template) ? template : 'classic'
@@ -1241,8 +1251,13 @@ io.on('connection', (socket) => {
       emitRetroRatingStateToSocket(socket, room);
       emitSprintVipStateToSocket(socket, room);
     } catch (error) {
-      console.error('Error creating room:', error);
-      socket.emit('error', 'Failed to create room');
+      const limitMessage = error instanceof ContentModerationError || error instanceof UsageLimitError
+        ? error.message
+        : null;
+      if (!limitMessage) {
+        console.error('Error creating room:', error);
+      }
+      socket.emit('error', limitMessage ?? 'Failed to create room');
     }
   });
 
@@ -1370,6 +1385,7 @@ io.on('connection', (socket) => {
         const isAdmin = room.users.some((user) => user.name === actorName && user.role === 'admin');
         if (!isAdmin) return;
       }
+      await assertCardSlotAvailable(actorRoomId, actorName);
       const cardId = Date.now().toString();
       const safeImageUrl = features.mediaEnabled && imageUrl
         ? await replaceCardImage(actorRoomId, cardId, imageUrl)
@@ -1407,6 +1423,10 @@ io.on('connection', (socket) => {
         });
       }
     } catch (error) {
+      if (error instanceof UsageLimitError) {
+        socket.emit('error', error.message);
+        return;
+      }
       console.error('Error adding card:', error);
       socket.emit('error', 'Failed to add card');
     }

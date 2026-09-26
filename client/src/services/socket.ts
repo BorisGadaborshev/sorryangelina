@@ -490,7 +490,7 @@ export class SocketService {
           this.socket.off('room-joined', handleSuccess);
           this.socket.off('error', handleError);
           reject(new Error('Room creation timeout'));
-        }, 10000);
+        }, 20000);
 
         const handleError = (error: string) => {
           clearTimeout(timeout);
@@ -603,6 +603,10 @@ export class SocketService {
       return;
     }
     if (!this.store.canAddCards(column)) return;
+    if (this.store.isCardLimitReached) {
+      this.store.setError(this.store.cardLimitMessage);
+      return;
+    }
     console.log('Adding card with user:', currentUser);
     this.socket.emit('add-card', { text, type, column, imageUrl });
   }

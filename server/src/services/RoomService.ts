@@ -9,11 +9,13 @@ import {
   wipeAllUploads
 } from './ImageStore';
 import bcrypt from 'bcryptjs';
+import { assertCreationSlotAvailable } from './UsageLimits';
 
 const NO_ROOM_PASSWORD_MARKER = '__no_room_password__';
 
 export class RoomService {
   static async createRoom(roomId: string, password: string | undefined, owner: string, username: string, options: CreateRoomOptions = {}): Promise<Room> {
+    await assertCreationSlotAvailable(username, 'room');
     const normalizedPassword = password?.trim() || '';
     const hashSource = normalizedPassword || NO_ROOM_PASSWORD_MARKER;
     const hashedPassword = await bcrypt.hash(hashSource, 10);
@@ -266,13 +268,7 @@ export class RoomService {
   }
 
   static async addCard(roomId: string, card: Card): Promise<Room | null> {
-    const room = await RoomModel.findOneAndUpdate(
-      { id: roomId },
-      { 
-        $push: { cards: card }
-      },
-      { new: true }
-    );
+    const room = await RoomModel.insertCard(roomId, card);
     return room ? this.convertToRoom(room) : null;
   }
 

@@ -4,6 +4,8 @@ import { TeamModel } from '../models/Team';
 import { AvailableTeam, CreateTeamInput, Team, TeamDocument, TeamMember } from '../types';
 import { FIXED_AUTH_NAMES, normalizeAuthName } from '../config/authNames';
 import { AccountService } from './AccountService';
+import { assertNoProfanity } from './ContentModeration';
+import { assertCreationSlotAvailable } from './UsageLimits';
 
 export const BUILTIN_TEAM_ID = 'cards-partners';
 const BUILTIN_TEAM_NAME = 'Карты и Партнеры';
@@ -53,6 +55,16 @@ export class TeamService {
       throw new Error('Team name and password are required');
     }
 
+    const owner = normalizeAuthName(input.owner);
+    await assertCreationSlotAvailable(owner, 'team');
+    const memberNames = Array.from(
+      new Set([owner, ...(input.members || [])].map((memberName) => normalizeAuthName(memberName)).filter(Boolean))
+    );
+    await assertNoProfanity([
+      { kind: 'team', text: name },
+      ...memberNames.map((memberName) => ({ kind: 'person' as const, text: memberName }))
+    ]);
+
     await this.ensureBuiltinTeam();
 
     const baseId = slugifyTeamId(name);
@@ -64,7 +76,6 @@ export class TeamService {
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
-    const owner = normalizeAuthName(input.owner);
     const members = this.buildMembers(id, owner, input.members, input.scrumMasterName);
     const team = await TeamModel.create({
       id,
@@ -73,7 +84,7 @@ export class TeamService {
       passwordVersion: 1,
       owner,
       members
-    });
+    }, { enforceDailyLimit: true });
     await TeamModel.setMemberPasswordUnlock(id, owner, team.passwordVersion);
 
     return this.convertToTeam(team);

@@ -128,6 +128,29 @@ export const connectDB = async (): Promise<void> => {
     create unique index if not exists idx_accounts_name_ci on accounts ((lower(name)));
     create index if not exists idx_room_media_created on room_media(created_at);
     create index if not exists idx_room_media_room on room_media(room_id);
+
+    create table if not exists creation_events (
+      id bigserial primary key,
+      actor_name text not null,
+      kind text not null check (kind in ('team', 'room')),
+      subject_id text not null,
+      created_at timestamptz not null default now(),
+      unique (kind, subject_id)
+    );
+
+    create index if not exists idx_creation_events_daily
+      on creation_events (kind, actor_name, created_at);
+
+    insert into creation_events (actor_name, kind, subject_id, created_at)
+    select owner, 'team', id, created_at
+    from teams
+    where id <> 'cards-partners'
+    on conflict (kind, subject_id) do nothing;
+
+    insert into creation_events (actor_name, kind, subject_id, created_at)
+    select owner, 'room', id, created_at
+    from rooms
+    on conflict (kind, subject_id) do nothing;
   `);
 
   await pool.query(`

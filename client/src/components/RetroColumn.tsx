@@ -99,6 +99,8 @@ const RetroColumn: React.FC<Props> = observer(({ columnIndex, store, enableDragD
   const showHeaderActions = canEditTitle;
   const canCompose = store.canComposeInColumn(columnIndex);
   const canAddCards = store.canAddCards(columnIndex);
+  const cardLimitReached = store.isCardLimitReached;
+  const canCreateCard = canAddCards && !cardLimitReached;
   const roadmapColumns = store.templateConfig.roadmapColumns;
   const resultColumnIndex = roadmapColumns
     ? store.templateConfig.columns.length + roadmapColumns.length - 1
@@ -310,6 +312,10 @@ const RetroColumn: React.FC<Props> = observer(({ columnIndex, store, enableDragD
     const trimmed = newCardText.trim();
     const imageUrl = newCardImageUrl.trim();
     if ((!trimmed && !imageUrl) || !store.socket || !canAddCards) return;
+    if (store.isCardLimitReached) {
+      store.setError(store.cardLimitMessage);
+      return;
+    }
     const text = selectedEmoji && trimmed ? `${selectedEmoji} ${trimmed}` : trimmed;
     store.socketService?.addCard(text, cardType, columnIndex, imageUrl || undefined);
     resetComposerInput();
@@ -595,17 +601,19 @@ const RetroColumn: React.FC<Props> = observer(({ columnIndex, store, enableDragD
           <Box sx={{ display: 'flex', justifyContent: 'center', mb: 0.5 }}>
             <Tooltip
               title={
-                canAddCards
-                  ? 'Добавить карточку'
-                  : 'Только администратор может добавлять карточки в эту колонку'
+                !canAddCards
+                  ? 'Только администратор может добавлять карточки в эту колонку'
+                  : cardLimitReached
+                    ? store.cardLimitMessage
+                    : 'Добавить карточку'
               }
             >
               <span>
                 <IconButton
                   aria-label="Добавить карточку"
-                  disabled={!canAddCards}
+                  disabled={!canCreateCard}
                   onClick={() => {
-                    if (!canAddCards) return;
+                    if (!canCreateCard) return;
                     onAddCardStart?.();
                     setIsComposerOpen((open) => !open);
                   }}
@@ -614,7 +622,7 @@ const RetroColumn: React.FC<Props> = observer(({ columnIndex, store, enableDragD
                     zIndex: 4,
                     color: columnThemeColors.accent,
                     border: '1px solid',
-                    borderColor: canAddCards ? columnThemeColors.accent : 'action.disabled',
+                    borderColor: canCreateCard ? columnThemeColors.accent : 'action.disabled',
                     '&:hover': {
                       borderColor: columnThemeColors.accent,
                       backgroundColor: columnThemeColors.fill ?? 'action.hover'

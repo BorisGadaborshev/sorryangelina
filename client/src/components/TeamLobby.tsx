@@ -133,9 +133,11 @@ const TeamLobby: React.FC<Props> = ({
                     <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
                       Создана: {formatDate(team.createdAt)}
                     </Typography>
-                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                      Владелец: {team.owner}
-                    </Typography>
+                    {!isEmbedded && (
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                        Владелец: {team.owner}
+                      </Typography>
+                    )}
                   </Box>
                 </CardContent>
               </CardActionArea>

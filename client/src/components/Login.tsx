@@ -315,6 +315,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
     setCreateRoomId('');
     setCreateRoomPassword('');
     setCreateTemplate('classic');
+    store.setError(null);
     setIsCreateDialogOpen(true);
   };
 
@@ -973,6 +974,11 @@ const Login: React.FC<Props> = observer(({ store }) => {
           <DialogContentText sx={{ mb: 1 }}>
             Комната будет создана внутри команды <b>{store.selectedTeam?.name}</b>.
           </DialogContentText>
+          {store.error && (
+            <Alert severity="error" sx={{ mb: 1 }}>
+              {store.error}
+            </Alert>
+          )}
           <TextField
             autoFocus
             fullWidth
@@ -1350,13 +1356,17 @@ const Login: React.FC<Props> = observer(({ store }) => {
           isLoading={isTeamsLoading}
           onRefresh={fetchAvailableTeams}
           onTeamClick={handleSelectTeam}
-          onCreateClick={() => setIsCreateTeamDialogOpen(true)}
+          onCreateClick={() => {
+            store.setError(null);
+            setIsCreateTeamDialogOpen(true);
+          }}
           onLogout={() => store.clearAuthProfile()}
         />
         <CreateTeamDialog
           open={isCreateTeamDialogOpen}
           currentUserName={store.authProfile.name}
           isLoading={isLoading}
+          error={store.error}
           onClose={() => setIsCreateTeamDialogOpen(false)}
           onCreate={handleCreateTeam}
         />

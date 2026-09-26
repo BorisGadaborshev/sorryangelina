@@ -685,6 +685,15 @@ export class RetroStore {
     return false;
   }
 
+  readonly cardsPerPersonPerRoom = 100;
+  readonly cardLimitMessage = 'В одной комнате можно добавить не больше 100 карточек';
+
+  get isCardLimitReached(): boolean {
+    const name = this.currentUser?.name;
+    if (!name) return false;
+    return this.cards.filter((card) => card.createdBy === name).length >= this.cardsPerPersonPerRoom;
+  }
+
   canAddCards(columnIndex: number): boolean {
     if (!this.canComposeInColumn(columnIndex)) return false;
     if (this.currentUser?.role === 'admin') return true;

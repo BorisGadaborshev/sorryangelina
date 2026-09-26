@@ -2,6 +2,7 @@
 import { pool } from '../config/database';
 import { Room, RoomDocument, User, Card, CardComment, CardReaction, RoomFeatures, ColumnColorId, mergeCardTexts, getColumnCount, getRetroTemplate, normalizeColumnColors } from '../types';
 import { normalizeRoomFeatures } from '../utils/roomFeatures';
+import { lockAndAssertCardSlot, reserveCreationSlot } from '../services/UsageLimits';
 
 type CommentRow = {
   id: string;
@@ -66,11 +67,15 @@ export const RoomModel = {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      await client.query(
+      const insertedRoom = await client.query(
         `insert into rooms (id, password, team_id, owner, phase, template) values ($1,$2,$3,$4,$5,$6)
-         on conflict (id) do nothing`,
+         on conflict (id) do nothing
+         returning id`,
         [doc.id, doc.password, doc.teamId ?? null, doc.owner, doc.phase, doc.template ?? 'classic']
       );
+      if (insertedRoom.rows.length > 0) {
+        await reserveCreationSlot(client, doc.owner, 'room', doc.id);
+      }
       for (const user of doc.users || []) {
         await client.query(
           `insert into room_users (id, name, room_id, role, is_ready, mood, joined_at) values ($1,$2,$3,$4,$5,$6, now())
@@ -455,6 +460,32 @@ export const RoomModel = {
     } finally {
       client.release();
     }
+  },
+
+  async insertCard(roomId: string, card: Card): Promise<RoomDocument | null> {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const roomExists = await client.query('select 1 from rooms where id = $1', [roomId]);
+      if (roomExists.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return null;
+      }
+      await lockAndAssertCardSlot(client, roomId, card.createdBy);
+      await client.query(
+        `insert into cards (id, room_id, text, type, created_by, column_index, image_url, origin_column)
+         values ($1,$2,$3,$4,$5,$6,$7,$8)
+         on conflict (id) do nothing`,
+        [card.id, roomId, card.text, card.type, card.createdBy, card.column, card.imageUrl || null, card.originColumn ?? null]
+      );
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+    return this.findOne({ id: roomId });
   },
 
   async deleteOne(where: { id: string }): Promise<void> {
