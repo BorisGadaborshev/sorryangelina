@@ -301,6 +301,10 @@ export const RoomModel = {
             const role = update.$set['users.$.role'];
             const isReady = typeof update.$set['users.$.isReady'] !== 'undefined' ? update.$set['users.$.isReady'] : update.$set['users.$.is_ready'];
             const mood = update.$set['users.$.mood'];
+            const previousUser = filter['users.id']
+              ? await client.query('select id from room_users where room_id=$1 and id=$2', [roomId, filter['users.id']])
+              : await client.query('select id from room_users where room_id=$1 and name=$2', [roomId, filter['users.name']]);
+            const previousId = previousUser.rows[0]?.id as string | undefined;
             const result = filter['users.id']
               ? await client.query(
                   'update room_users set id = coalesce($1, id), role = coalesce($2, role), is_ready = coalesce($3, is_ready), mood = coalesce($4, mood) where room_id=$5 and id=$6',
@@ -310,6 +314,36 @@ export const RoomModel = {
                   'update room_users set id = coalesce($1, id), role = coalesce($2, role), is_ready = coalesce($3, is_ready), mood = coalesce($4, mood) where room_id=$5 and name=$6',
                   [newId ?? null, role ?? null, typeof isReady === 'boolean' ? isReady : null, mood ?? null, roomId, filter['users.name']]
                 );
+            if (typeof newId === 'string' && previousId && previousId !== newId) {
+              await client.query(
+                `update card_votes as target
+                 set user_id = $1
+                 where target.user_id = $2
+                   and target.card_id in (select id from cards where room_id = $3)
+                   and not exists (
+                     select 1 from card_votes existing
+                     where existing.card_id = target.card_id and existing.user_id = $1
+                   )`,
+                [newId, previousId, roomId]
+              );
+              await client.query(
+                'update card_comments set user_id = $1 where user_id = $2 and card_id in (select id from cards where room_id = $3)',
+                [newId, previousId, roomId]
+              );
+              await client.query(
+                `update card_reactions as target
+                 set user_id = $1
+                 where target.user_id = $2
+                   and target.card_id in (select id from cards where room_id = $3)
+                   and not exists (
+                     select 1 from card_reactions existing
+                     where existing.card_id = target.card_id
+                       and existing.user_id = $1
+                       and existing.emoji = target.emoji
+                   )`,
+                [newId, previousId, roomId]
+              );
+            }
             if ((result.rowCount ?? 0) === 0) {
               await client.query('ROLLBACK');
               return null;
