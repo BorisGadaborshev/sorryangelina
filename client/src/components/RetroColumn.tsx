@@ -5,7 +5,7 @@ import { useTheme } from '@mui/material/styles';
 import { Droppable, Draggable } from '@hello-pangea/dnd';
 import { RetroStore } from '../store/RetroStore';
 import RetroCard from './RetroCard';
-import { Card, COLUMN_COLOR_IDS, COLUMN_COLOR_PRESETS, DEFAULT_COLUMN_TITLES, LETS_DO_COLUMN_INDEX, buildColumnMarkdown, getColumnColorStyles } from '../types';
+import { Card, COLUMN_COLOR_IDS, COLUMN_COLOR_PRESETS, buildColumnMarkdown, getCardTypeByColumn, getColumnColorStyles } from '../types';
 import EmojiEmotionsIcon from '@mui/icons-material/EmojiEmotions';
 import ImageIcon from '@mui/icons-material/Image';
 import MicIcon from '@mui/icons-material/Mic';
@@ -31,7 +31,6 @@ const extractPastedImageUrl = (pasted: string): { url: string; leftover: string 
 };
 
 interface Props {
-  type: 'liked' | 'disliked' | 'suggestion';
   columnIndex: number;
   store: RetroStore;
   enableDragDrop?: boolean;
@@ -56,7 +55,7 @@ const EMOJI_GROUPS = {
   ]
 };
 
-const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enableDragDrop = false, onAddCardStart }) => {
+const RetroColumn: React.FC<Props> = observer(({ columnIndex, store, enableDragDrop = false, onAddCardStart }) => {
   const [newCardText, setNewCardText] = useState('');
   const [newCardImageUrl, setNewCardImageUrl] = useState('');
   const [imagePickError, setImagePickError] = useState('');
@@ -90,13 +89,21 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
   }, [cursorPosition]);
   const isMobile = useMediaQuery('(max-width:600px)');
   const theme = useTheme();
+  const cardType = getCardTypeByColumn(store.templateConfig, columnIndex);
   const displayTitle = store.getColumnTitle(columnIndex);
-  const canEditTitle = store.canEditColumnTitles();
+  const columnHint = store.getColumnHint(columnIndex);
+  const isStoredColumn = columnIndex < store.templateConfig.columns.length;
+  const canEditTitle = store.canEditColumnTitles() && isStoredColumn;
   const columnColorId = store.getColumnColor(columnIndex);
   const columnThemeColors = getColumnColorStyles(columnColorId, theme.palette.mode);
   const showHeaderActions = canEditTitle;
+  const canCompose = store.canComposeInColumn(columnIndex);
   const canAddCards = store.canAddCards(columnIndex);
-  const canCopyMarkdown = columnIndex === LETS_DO_COLUMN_INDEX;
+  const roadmapColumns = store.templateConfig.roadmapColumns;
+  const resultColumnIndex = roadmapColumns
+    ? store.templateConfig.columns.length + roadmapColumns.length - 1
+    : -1;
+  const canCopyMarkdown = columnIndex === store.templateConfig.actionColumnIndex || columnIndex === resultColumnIndex;
 
   const startEditingTitle = () => {
     if (!canEditTitle) return;
@@ -115,7 +122,7 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
   };
 
   const resetTitleEdit = () => {
-    const originalTitle = titleAtEditStart || DEFAULT_COLUMN_TITLES[columnIndex];
+    const originalTitle = titleAtEditStart || store.templateConfig.columns[columnIndex]?.title || displayTitle;
     setDraftTitle(originalTitle);
     setIsEditingTitle(false);
   };
@@ -302,9 +309,9 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
   const handleAddCard = () => {
     const trimmed = newCardText.trim();
     const imageUrl = newCardImageUrl.trim();
-    if ((!trimmed && !imageUrl) || !store.socket || store.phase !== 'creation' || !canAddCards) return;
+    if ((!trimmed && !imageUrl) || !store.socket || !canAddCards) return;
     const text = selectedEmoji && trimmed ? `${selectedEmoji} ${trimmed}` : trimmed;
-    store.socketService?.addCard(text, type, columnIndex, imageUrl || undefined);
+    store.socketService?.addCard(text, cardType, columnIndex, imageUrl || undefined);
     resetComposerInput();
     setIsComposerOpen(false);
   };
@@ -384,8 +391,8 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
       sx={{
         width: '100%',
         maxWidth: '100%',
-        flex: isMobile ? '0 0 auto' : '1 1 0',
-        minWidth: isMobile ? '100%' : 0,
+        flex: isMobile ? '0 0 auto' : '1 0 220px',
+        minWidth: isMobile ? '100%' : 220,
         minHeight: isMobile ? 'auto' : '100%',
         height: 'auto',
         maxHeight: 'none',
@@ -583,7 +590,7 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
       </Box>
       <Box sx={{ height: 4, borderRadius: 999, backgroundColor: columnThemeColors.accent, mb: 0.5 }} />
 
-      {store.phase === 'creation' && (
+      {canCompose && (
         <Box sx={{ mb: 0.5 }}>
           <Box sx={{ display: 'flex', justifyContent: 'center', mb: 0.5 }}>
             <Tooltip
@@ -646,7 +653,7 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
                 multiline
                 minRows={2}
                 variant="standard"
-                placeholder="Напишите что-нибудь..."
+                placeholder={columnHint || 'Напишите что-нибудь...'}
                 value={displayedCardText}
                 onChange={(e) => {
                   if (isListening) {
@@ -852,7 +859,7 @@ const RetroColumn: React.FC<Props> = observer(({ type, columnIndex, store, enabl
             transformOrigin={{ vertical: 'top', horizontal: 'left' }}
           >
             <Box sx={{ p: 1.5, display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 0.5, maxWidth: '400px' }}>
-              {EMOJI_GROUPS[type].map((emoji) => (
+              {EMOJI_GROUPS[cardType].map((emoji) => (
                 <IconButton
                   key={emoji}
                   onClick={() => handleEmojiClick(emoji)}

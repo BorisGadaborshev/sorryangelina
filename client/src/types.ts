@@ -7,11 +7,7 @@ export interface User {
   mood?: Mood;
 }
 
-export type Phase = 'creation' | 'voting' | 'discussion' | 'rating';
-
-export const DEFAULT_COLUMN_TITLES = ['Было хорошо', 'Было не очень', 'А, давайте'] as const;
-export const COLUMN_COUNT = DEFAULT_COLUMN_TITLES.length;
-export const LETS_DO_COLUMN_INDEX = 2;
+export type Phase = 'creation' | 'voting' | 'discussion' | 'roadmap' | 'rating';
 
 export const COLUMN_COLOR_IDS = [
   'none',
@@ -28,8 +24,6 @@ export const COLUMN_COLOR_IDS = [
 ] as const;
 
 export type ColumnColorId = typeof COLUMN_COLOR_IDS[number];
-
-export const DEFAULT_COLUMN_COLORS: ColumnColorId[] = ['teal', 'pink', 'blue'];
 
 export const COLUMN_COLOR_PRESETS: Record<ColumnColorId, {
   label: string;
@@ -52,9 +46,132 @@ export const COLUMN_COLOR_PRESETS: Record<ColumnColorId, {
 export const isColumnColorId = (value: unknown): value is ColumnColorId =>
   typeof value === 'string' && (COLUMN_COLOR_IDS as readonly string[]).includes(value);
 
-export const normalizeColumnColors = (colors?: string[] | null): ColumnColorId[] => {
-  if (!Array.isArray(colors) || colors.length !== COLUMN_COUNT || !colors.every(isColumnColorId)) {
-    return [...DEFAULT_COLUMN_COLORS];
+export type RetroTemplateId = 'classic' | 'start-stop-continue' | 'sailboat' | 'four-ls' | 'traffic-light';
+export type ColumnKind = 'positive' | 'negative' | 'suggestion';
+export type CardType = 'liked' | 'disliked' | 'suggestion';
+
+export interface RetroTemplateColumn {
+  title: string;
+  hint?: string;
+  color: ColumnColorId;
+  kind: ColumnKind;
+}
+
+export interface RetroTemplate {
+  id: RetroTemplateId;
+  name: string;
+  description: string;
+  columns: RetroTemplateColumn[];
+  actionColumnIndex: number | null;
+  roadmapColumns?: RetroTemplateColumn[];
+}
+
+export const RETRO_TEMPLATES: Record<RetroTemplateId, RetroTemplate> = {
+  classic: {
+    id: 'classic',
+    name: 'Классика',
+    description: 'Что получилось, что мешало и какие действия берём',
+    actionColumnIndex: 2,
+    columns: [
+      { title: 'Было хорошо', hint: 'Что получилось хорошо и стоит повторить?', color: 'teal', kind: 'positive' },
+      { title: 'Было не очень', hint: 'Что мешало и что хочется изменить?', color: 'pink', kind: 'negative' },
+      { title: 'А, давайте', hint: 'Какие конкретные действия сделаем дальше?', color: 'blue', kind: 'suggestion' }
+    ]
+  },
+  'start-stop-continue': {
+    id: 'start-stop-continue',
+    name: 'Start / Stop / Continue',
+    description: 'Что начать, что прекратить и что продолжить',
+    actionColumnIndex: 0,
+    columns: [
+      { title: 'Start', hint: 'Какие новые практики помогут работать эффективнее?', color: 'green', kind: 'suggestion' },
+      { title: 'Stop', hint: 'От чего стоит отказаться?', color: 'pink', kind: 'negative' },
+      { title: 'Continue', hint: 'Что уже работает и нужно продолжать?', color: 'teal', kind: 'positive' }
+    ]
+  },
+  sailboat: {
+    id: 'sailboat',
+    name: 'Парусник',
+    description: 'Что двигает вперёд, что тормозит, какие риски и куда плывём',
+    actionColumnIndex: 3,
+    columns: [
+      { title: 'Паруса', hint: 'Что помогает нам двигаться вперёд?', color: 'teal', kind: 'positive' },
+      { title: 'Якоря', hint: 'Что нас тормозит?', color: 'slate', kind: 'negative' },
+      { title: 'Рифы', hint: 'Какие риски могут помешать?', color: 'orange', kind: 'negative' },
+      { title: 'Земля', hint: 'К какому результату мы идём?', color: 'blue', kind: 'suggestion' }
+    ]
+  },
+  'four-ls': {
+    id: 'four-ls',
+    name: '4L',
+    description: 'Что понравилось, чему научились, чего не хватило и чего хотим',
+    actionColumnIndex: 3,
+    columns: [
+      { title: 'Liked', hint: 'Что понравилось в этом спринте?', color: 'teal', kind: 'positive' },
+      { title: 'Learned', hint: 'Чему мы научились?', color: 'cyan', kind: 'positive' },
+      { title: 'Lacked', hint: 'Чего нам не хватало?', color: 'pink', kind: 'negative' },
+      { title: 'Longed For', hint: 'Чего хотим в следующий раз?', color: 'purple', kind: 'suggestion' }
+    ]
+  },
+  'traffic-light': {
+    id: 'traffic-light',
+    name: 'Светофор',
+    description: 'Зелёный, жёлтый и красный, затем дорожная карта',
+    actionColumnIndex: null,
+    columns: [
+      { title: 'Зелёный', hint: 'Что продолжаем делать?', color: 'green', kind: 'positive' },
+      { title: 'Жёлтый', hint: 'Что нужно изменить?', color: 'amber', kind: 'negative' },
+      { title: 'Красный', hint: 'Что нужно прекратить?', color: 'pink', kind: 'negative' }
+    ],
+    roadmapColumns: [
+      { title: 'Анализ', hint: 'Почему это происходит?', color: 'indigo', kind: 'suggestion' },
+      { title: 'Эксперимент', hint: 'Какой эксперимент проведём?', color: 'purple', kind: 'suggestion' },
+      { title: 'Результат', hint: 'Какой результат хотим получить?', color: 'green', kind: 'suggestion' }
+    ]
+  }
+};
+
+export const RETRO_TEMPLATE_LIST: RetroTemplate[] = [
+  RETRO_TEMPLATES.classic,
+  RETRO_TEMPLATES['start-stop-continue'],
+  RETRO_TEMPLATES.sailboat,
+  RETRO_TEMPLATES['four-ls'],
+  RETRO_TEMPLATES['traffic-light']
+];
+
+export const isRetroTemplateId = (value: unknown): value is RetroTemplateId =>
+  typeof value === 'string' && Object.prototype.hasOwnProperty.call(RETRO_TEMPLATES, value);
+
+export const getRetroTemplate = (id?: string | null): RetroTemplate =>
+  isRetroTemplateId(id) ? RETRO_TEMPLATES[id] : RETRO_TEMPLATES.classic;
+
+export const getColumnCount = (template: RetroTemplate): number => template.columns.length;
+
+export const getTemplateColumn = (template: RetroTemplate, column: number): RetroTemplateColumn | undefined => {
+  if (column >= 0 && column < template.columns.length) return template.columns[column];
+  const roadmapIndex = column - template.columns.length;
+  return template.roadmapColumns?.[roadmapIndex];
+};
+
+export const getCardTypeByColumn = (template: RetroTemplate, column: number): CardType => {
+  const kind = getTemplateColumn(template, column)?.kind ?? 'positive';
+  if (kind === 'negative') return 'disliked';
+  if (kind === 'suggestion') return 'suggestion';
+  return 'liked';
+};
+
+export const DEFAULT_COLUMN_TITLES = RETRO_TEMPLATES.classic.columns.map((column) => column.title);
+export const COLUMN_COUNT = DEFAULT_COLUMN_TITLES.length;
+export const LETS_DO_COLUMN_INDEX = RETRO_TEMPLATES.classic.actionColumnIndex ?? 2;
+export const DEFAULT_COLUMN_COLORS: ColumnColorId[] = RETRO_TEMPLATES.classic.columns.map((column) => column.color);
+
+export const normalizeColumnColors = (
+  colors?: string[] | null,
+  template: RetroTemplate = RETRO_TEMPLATES.classic
+): ColumnColorId[] => {
+  const defaults = template.columns.map((column) => column.color);
+  if (!Array.isArray(colors) || colors.length !== defaults.length || !colors.every(isColumnColorId)) {
+    return defaults;
   }
   return [...colors];
 };
@@ -137,6 +254,7 @@ export interface Room {
   teamId?: string;
   owner: string;
   phase: Phase;
+  template?: RetroTemplateId;
   columnTitles?: string[];
   columnColors?: ColumnColorId[];
   features?: RoomFeatures;
@@ -186,11 +304,12 @@ export const editorValueToCardText = (value: string): string =>
 export interface Card {
   id: string;
   text: string;
-  type: 'liked' | 'disliked' | 'suggestion';
+  type: CardType;
   createdBy: string;
   likes: string[];
   dislikes: string[];
   column: number;
+  originColumn?: number;
   imageUrl?: string;
   comments?: CardComment[];
   reactions?: CardReaction[];
@@ -230,6 +349,7 @@ export interface RoomState {
 
 export interface CreateRoomOptions {
   teamId?: string;
+  template?: RetroTemplateId;
 }
 
 export interface PhaseTimerState {

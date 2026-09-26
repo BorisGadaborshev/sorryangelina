@@ -19,6 +19,7 @@ const phaseLabel: Record<string, string> = {
   creation: 'Создание',
   voting: 'Голосование',
   discussion: 'Обсуждение',
+  roadmap: 'Дорожная карта',
   rating: 'Оценка ретро'
 };
 
@@ -110,6 +111,7 @@ const RoomTiles: React.FC<Props> = ({ rooms, currentUserName, onRoomClick, onCre
           <MenuItem value="creation">Создание</MenuItem>
           <MenuItem value="voting">Голосование</MenuItem>
           <MenuItem value="discussion">Обсуждение</MenuItem>
+          <MenuItem value="roadmap">Дорожная карта</MenuItem>
           <MenuItem value="rating">Оценка ретро</MenuItem>
         </TextField>
         <TextField

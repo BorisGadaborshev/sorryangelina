@@ -1,5 +1,5 @@
 import { makeAutoObservable, runInAction } from 'mobx';
-import { AuthProfile, Card, CardComment, CardReaction, ChatMessage, ColumnColorId, DEFAULT_COLUMN_COLORS, DEFAULT_COLUMN_TITLES, DEFAULT_ROOM_FEATURES, DiscussionNavigationState, FacilitatorAnnouncement, LETS_DO_COLUMN_INDEX, Mood, Phase, PhaseTimerState, RetroRatingState, Room, RoomFeatures, RoomState, SprintVipState, Team, User, WhiteboardStroke, normalizeColumnColors } from '../types';
+import { AuthProfile, Card, CardComment, CardReaction, ChatMessage, ColumnColorId, ColumnKind, DEFAULT_COLUMN_COLORS, DEFAULT_COLUMN_TITLES, DEFAULT_ROOM_FEATURES, DiscussionNavigationState, FacilitatorAnnouncement, Mood, Phase, PhaseTimerState, RetroRatingState, RetroTemplate, RetroTemplateId, Room, RoomFeatures, RoomState, SprintVipState, Team, User, WhiteboardStroke, getCardTypeByColumn, getColumnCount, getRetroTemplate, getTemplateColumn, normalizeColumnColors } from '../types';
 import { Socket } from 'socket.io-client';
 import { SocketService } from '../services/socket';
 
@@ -16,6 +16,7 @@ interface PersistedBoardState {
   users: User[];
   columnTitles: string[];
   columnColors: ColumnColorId[];
+  template?: RetroTemplateId;
   roomFeatures: RoomFeatures;
   currentUser: User | null;
 }
@@ -39,6 +40,7 @@ export class RetroStore {
   facilitatorAnnouncement: FacilitatorAnnouncement | null = null;
   isFacilitatorDialogOpen = false;
   discussionNavigation: DiscussionNavigationState | null = null;
+  template: RetroTemplateId = 'classic';
   columnTitles: string[] = [...DEFAULT_COLUMN_TITLES];
   columnColors: ColumnColorId[] = [...DEFAULT_COLUMN_COLORS];
   roomFeatures: RoomFeatures = { ...DEFAULT_ROOM_FEATURES };
@@ -100,6 +102,7 @@ export class RetroStore {
       users: this.users,
       columnTitles: this.columnTitles,
       columnColors: this.columnColors,
+      template: this.template,
       roomFeatures: this.roomFeatures,
       currentUser: this.currentUser,
     };
@@ -134,10 +137,7 @@ export class RetroStore {
         this.phase = parsed.phase ?? 'creation';
         this.cards = parsed.cards ?? [];
         this.users = this.normalizeUsers(parsed.users ?? []);
-        this.columnTitles = parsed.columnTitles?.length === DEFAULT_COLUMN_TITLES.length
-          ? [...parsed.columnTitles]
-          : [...DEFAULT_COLUMN_TITLES];
-        this.columnColors = normalizeColumnColors(parsed.columnColors);
+        this.applyBoardColumns(parsed.template ?? parsed.room.template, parsed.columnTitles, parsed.columnColors);
         this.roomFeatures = parsed.roomFeatures
           ? { ...DEFAULT_ROOM_FEATURES, ...parsed.roomFeatures }
           : { ...DEFAULT_ROOM_FEATURES };
@@ -415,12 +415,10 @@ export class RetroStore {
     runInAction(() => {
       this.room = room;
       if (room) {
-        if (room.columnTitles?.length === DEFAULT_COLUMN_TITLES.length) {
-          this.columnTitles = [...room.columnTitles];
-        } else {
-          this.columnTitles = [...DEFAULT_COLUMN_TITLES];
+        this.applyBoardColumns(room.template, room.columnTitles, room.columnColors);
+        if (this.room) {
+          this.room = { ...this.room, template: this.template };
         }
-        this.columnColors = normalizeColumnColors(room.columnColors);
         this.roomFeatures = room.features
           ? { ...DEFAULT_ROOM_FEATURES, ...room.features }
           : { ...DEFAULT_ROOM_FEATURES };
@@ -460,6 +458,7 @@ export class RetroStore {
         this.facilitatorAnnouncement = null;
         this.isFacilitatorDialogOpen = false;
         this.discussionNavigation = null;
+        this.template = 'classic';
         this.columnTitles = [...DEFAULT_COLUMN_TITLES];
         this.columnColors = [...DEFAULT_COLUMN_COLORS];
         this.roomFeatures = { ...DEFAULT_ROOM_FEATURES };
@@ -588,14 +587,20 @@ export class RetroStore {
     this.persistBoardState();
   }
 
-  moveCard(cardId: string, column: number) {
+  moveCard(cardId: string, column: number, originColumn?: number) {
     console.log('Moving card:', cardId, 'to column:', column);
     runInAction(() => {
       const card = this.cards.find(c => c.id === cardId);
-      if (card) {
-        card.column = column;
-        card.type = column === 1 ? 'disliked' : column === 2 ? 'suggestion' : 'liked';
+      if (!card) return;
+      const template = this.templateConfig;
+      const movingIntoRoadmap = column >= template.columns.length && card.column < template.columns.length;
+      if (originColumn != null) {
+        card.originColumn = originColumn;
+      } else if (movingIntoRoadmap && card.originColumn == null) {
+        card.originColumn = card.column;
       }
+      card.column = column;
+      card.type = getCardTypeByColumn(template, column);
     });
   }
 
@@ -659,9 +664,32 @@ export class RetroStore {
     return this.currentUser?.role === 'admin' || this.currentUser?.name === card.createdBy;
   }
 
+  get templateConfig(): RetroTemplate {
+    return getRetroTemplate(this.template);
+  }
+
+  private applyBoardColumns(templateId: RetroTemplateId | undefined, titles?: string[] | null, colors?: string[] | null) {
+    const template = getRetroTemplate(templateId);
+    this.template = template.id;
+    const count = getColumnCount(template);
+    this.columnTitles = titles?.length === count
+      ? [...titles]
+      : template.columns.map((column) => column.title);
+    this.columnColors = normalizeColumnColors(colors, template);
+  }
+
+  canComposeInColumn(columnIndex: number): boolean {
+    const template = this.templateConfig;
+    if (this.phase === 'creation') return columnIndex >= 0 && columnIndex < template.columns.length;
+    if (this.phase === 'roadmap') return columnIndex === template.columns.length;
+    return false;
+  }
+
   canAddCards(columnIndex: number): boolean {
+    if (!this.canComposeInColumn(columnIndex)) return false;
     if (this.currentUser?.role === 'admin') return true;
-    if (columnIndex !== LETS_DO_COLUMN_INDEX) return true;
+    const actionColumn = this.templateConfig.actionColumnIndex;
+    if (actionColumn == null || columnIndex !== actionColumn) return true;
     return this.roomFeatures.membersCanAddCards;
   }
 
@@ -670,7 +698,8 @@ export class RetroStore {
     if (this.phase !== 'creation') return false;
     if (this.currentUser?.role === 'admin') return false;
     if (this.currentUser?.name === card.createdBy) return false;
-    if (card.column === LETS_DO_COLUMN_INDEX && !this.roomFeatures.membersCanAddCards) return false;
+    const actionColumn = this.templateConfig.actionColumnIndex;
+    if (actionColumn != null && card.column === actionColumn && !this.roomFeatures.membersCanAddCards) return false;
     return true;
   }
 
@@ -681,6 +710,7 @@ export class RetroStore {
   }
 
   canMoveCard(card: Card): boolean {
+    if (this.phase === 'roadmap') return true;
     if (this.currentUser?.role === 'admin') return true;
     if (!this.roomFeatures.moveCardsEnabled) return false;
     return this.currentUser?.name === card.createdBy;
@@ -721,7 +751,15 @@ export class RetroStore {
   }
 
   getColumnTitle(index: number): string {
-    return this.columnTitles[index] ?? DEFAULT_COLUMN_TITLES[index];
+    return this.columnTitles[index] ?? getTemplateColumn(this.templateConfig, index)?.title ?? '';
+  }
+
+  getColumnHint(index: number): string | undefined {
+    return getTemplateColumn(this.templateConfig, index)?.hint;
+  }
+
+  getColumnKind(index: number): ColumnKind {
+    return getTemplateColumn(this.templateConfig, index)?.kind ?? 'positive';
   }
 
   setColumnTitles(titles: string[]) {
@@ -739,12 +777,15 @@ export class RetroStore {
   }
 
   getColumnColor(index: number): ColumnColorId {
-    return this.columnColors[index] ?? DEFAULT_COLUMN_COLORS[index];
+    if (index < this.templateConfig.columns.length) {
+      return this.columnColors[index] ?? this.templateConfig.columns[index].color;
+    }
+    return getTemplateColumn(this.templateConfig, index)?.color ?? 'none';
   }
 
   setColumnColors(colors: ColumnColorId[]) {
     runInAction(() => {
-      this.columnColors = normalizeColumnColors(colors);
+      this.columnColors = normalizeColumnColors(colors, this.templateConfig);
       if (this.room) {
         this.room = { ...this.room, columnColors: [...this.columnColors] };
       }

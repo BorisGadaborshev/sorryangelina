@@ -37,7 +37,7 @@ exports.TeamModel = {
     },
     findOne(where) {
         return __awaiter(this, void 0, void 0, function* () {
-            const { rows } = yield database_1.pool.query('select id, name, password_hash, owner, created_at from teams where id=$1', [where.id]);
+            const { rows } = yield database_1.pool.query('select id, name, password_hash, password_version, owner, created_at from teams where id=$1', [where.id]);
             if (rows.length === 0)
                 return null;
             const teamRow = rows[0];
@@ -51,6 +51,7 @@ exports.TeamModel = {
                 id: teamRow.id,
                 name: teamRow.name,
                 passwordHash: teamRow.password_hash,
+                passwordVersion: Number(teamRow.password_version) || 1,
                 owner: teamRow.owner,
                 createdAt: teamRow.created_at,
                 members
@@ -73,6 +74,36 @@ exports.TeamModel = {
         return __awaiter(this, void 0, void 0, function* () {
             yield database_1.pool.query(`insert into team_members (team_id, name, role) values ($1,$2,$3)
        on conflict (team_id, name) do nothing`, [teamId, name, role]);
+            return this.findOne({ id: teamId });
+        });
+    },
+    removeMember(teamId, name) {
+        return __awaiter(this, void 0, void 0, function* () {
+            yield database_1.pool.query('delete from team_members where team_id=$1 and name=$2', [teamId, name]);
+            return this.findOne({ id: teamId });
+        });
+    },
+    setMemberPasswordUnlock(teamId, name, passwordVersion) {
+        return __awaiter(this, void 0, void 0, function* () {
+            yield database_1.pool.query('update team_members set unlocked_password_version = $1 where team_id=$2 and name=$3', [passwordVersion, teamId, name]);
+        });
+    },
+    getMemberPasswordUnlock(teamId, name) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const { rows } = yield database_1.pool.query('select unlocked_password_version from team_members where team_id=$1 and name=$2', [teamId, name]);
+            if (rows.length === 0)
+                return null;
+            const value = rows[0].unlocked_password_version;
+            return value == null ? null : Number(value);
+        });
+    },
+    updatePassword(teamId, passwordHash) {
+        return __awaiter(this, void 0, void 0, function* () {
+            yield database_1.pool.query(`update teams
+       set password_hash = $1,
+           password_version = coalesce(password_version, 1) + 1,
+           updated_at = now()
+       where id = $2`, [passwordHash, teamId]);
             return this.findOne({ id: teamId });
         });
     }

@@ -2,7 +2,7 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server, Socket } from 'socket.io';
 import cors from 'cors';
-import { Room, User, Card, RoomState, Mood, Phase, RoomFeatures, LETS_DO_COLUMN_INDEX } from './types';
+import { Room, User, Card, RoomState, Mood, Phase, RoomFeatures, RetroTemplate, getCardTypeByColumn, getRetroTemplate, isRetroTemplateId } from './types';
 import { normalizeRoomFeatures } from './utils/roomFeatures';
 import bcrypt from 'bcryptjs';
 import { RoomService } from './services/RoomService';
@@ -593,14 +593,16 @@ const normalizeDiscussionNavigation = (
 };
 
 const canInteractWithCardSocial = (phase: Phase): boolean =>
-  phase === 'creation' || phase === 'voting' || phase === 'discussion';
+  phase === 'creation' || phase === 'voting' || phase === 'discussion' || phase === 'roadmap';
 
 const getRoomFeatures = (room: Room) => normalizeRoomFeatures(room.features);
 
-const getCardTypeByColumn = (column: number): Card['type'] => {
-  if (column === 1) return 'disliked';
-  if (column === 2) return 'suggestion';
-  return 'liked';
+const isNegativeColumn = (template: RetroTemplate, column: number): boolean =>
+  template.columns[column]?.kind === 'negative';
+
+const isRoadmapColumn = (template: RetroTemplate, column: number): boolean => {
+  const roadmapLength = template.roadmapColumns?.length ?? 0;
+  return column >= template.columns.length && column < template.columns.length + roadmapLength;
 };
 
 const normalizeMood = (value: unknown): Mood | undefined => {
@@ -1170,7 +1172,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('create-room', async ({ roomId, password, username, token, teamId }) => {
+  socket.on('create-room', async ({ roomId, password, username, token, teamId, template }) => {
     const auth = verifyAuthToken(token);
     if (!auth) {
       socket.emit('error', 'Unauthorized: token is invalid or expired');
@@ -1202,8 +1204,14 @@ io.on('connection', (socket) => {
         return;
       }
 
+      if (typeof template !== 'undefined' && !isRetroTemplateId(template)) {
+        socket.emit('error', 'Unknown retro template');
+        return;
+      }
+
       const room = await RoomService.createRoom(roomId, password, socket.id, effectiveUsername, {
-        teamId: normalizedTeamId
+        teamId: normalizedTeamId,
+        template: isRetroTemplateId(template) ? template : 'classic'
       });
       socket.join(roomId);
       socket.data.userId = socket.id;
@@ -1348,11 +1356,17 @@ io.on('connection', (socket) => {
     try {
       console.log('Received add-card event:', { text, type, column, imageUrl, userId: actorId });
       const room = await RoomService.getRoom(actorRoomId);
-      if (!room || room.phase !== 'creation') return;
+      const template = getRetroTemplate(room?.template);
+      const targetColumn = Number(column);
+      const analysisColumn = template.columns.length;
+      const canAddInPhase = room?.phase === 'creation'
+        || (room?.phase === 'roadmap' && template.roadmapColumns && targetColumn === analysisColumn);
+      if (!room || !canAddInPhase || !Number.isInteger(targetColumn)) return;
+      if (room.phase === 'creation' && (targetColumn < 0 || targetColumn >= template.columns.length)) return;
 
       const features = getRoomFeatures(room);
-      const targetColumn = Number(column);
-      if (!features.membersCanAddCards && targetColumn === LETS_DO_COLUMN_INDEX) {
+      const actionColumn = template.actionColumnIndex;
+      if (actionColumn != null && !features.membersCanAddCards && targetColumn === actionColumn) {
         const isAdmin = room.users.some((user) => user.name === actorName && user.role === 'admin');
         if (!isAdmin) return;
       }
@@ -1364,11 +1378,11 @@ io.on('connection', (socket) => {
       const card: Card = {
         id: cardId,
         text,
-        type,
+        type: getCardTypeByColumn(template, targetColumn),
         createdBy: actorName,
         likes: [],
         dislikes: [],
-        column,
+        column: targetColumn,
         imageUrl: safeImageUrl,
         comments: [],
         reactions: []
@@ -1404,7 +1418,7 @@ io.on('connection', (socket) => {
 
     try {
       const room = await RoomService.getRoom(currentUser.roomId);
-      if (!room || (room.phase !== 'creation' && room.phase !== 'discussion')) return;
+      if (!room || (room.phase !== 'creation' && room.phase !== 'discussion' && room.phase !== 'roadmap')) return;
 
       const features = getRoomFeatures(room);
       if (!features.cardEditingEnabled) return;
@@ -1449,7 +1463,7 @@ io.on('connection', (socket) => {
 
     try {
       const room = await RoomService.getRoom(currentUser.roomId);
-      if (!room || (room.phase !== 'creation' && room.phase !== 'discussion')) return;
+      if (!room || (room.phase !== 'creation' && room.phase !== 'discussion' && room.phase !== 'roadmap')) return;
       if (!getRoomFeatures(room).cardEditingEnabled) return;
 
       const card = room.cards.find(c => c.id === cardId);
@@ -1624,22 +1638,43 @@ io.on('connection', (socket) => {
 
     try {
       const room = await RoomService.getRoom(currentUser.roomId);
-      if (!room || room.phase !== 'creation') return;
+      const template = getRetroTemplate(room?.template);
+      const targetColumn = Number(column);
+      const roadmapMove = room?.phase === 'roadmap'
+        && Boolean(template.roadmapColumns)
+        && Number.isInteger(targetColumn)
+        && (isNegativeColumn(template, targetColumn) || isRoadmapColumn(template, targetColumn));
+      const creationMove = room?.phase === 'creation'
+        && Number.isInteger(targetColumn)
+        && targetColumn >= 0
+        && targetColumn < template.columns.length;
+      if (!room || (!creationMove && !roadmapMove)) return;
 
       const card = room.cards.find((currentCard) => currentCard.id === cardId);
       if (!card) return;
 
-      const isAdmin = room.users.some((user) => user.name === currentUserName && user.role === 'admin');
-      if (!isAdmin) {
-        if (!getRoomFeatures(room).moveCardsEnabled) return;
-        if (card.createdBy !== currentUserName) return;
+      if (creationMove) {
+        const isAdmin = room.users.some((user) => user.name === currentUserName && user.role === 'admin');
+        if (!isAdmin) {
+          if (!getRoomFeatures(room).moveCardsEnabled) return;
+          if (card.createdBy !== currentUserName) return;
+        }
       }
 
-      const nextType = getCardTypeByColumn(column);
-      const updatedRoom = await RoomService.updateCard(currentUser.roomId, cardId, { column, type: nextType });
+      const nextType = getCardTypeByColumn(template, targetColumn);
+      const updates: Partial<Card> = { column: targetColumn, type: nextType };
+      if (
+        roadmapMove
+        && isRoadmapColumn(template, targetColumn)
+        && card.originColumn == null
+        && card.column < template.columns.length
+      ) {
+        updates.originColumn = card.column;
+      }
+      const updatedRoom = await RoomService.updateCard(currentUser.roomId, cardId, updates);
       if (!updatedRoom) return;
 
-      io.to(currentUser.roomId).emit('card-moved', { cardId, column });
+      io.to(currentUser.roomId).emit('card-moved', { cardId, column: targetColumn, originColumn: updates.originColumn ?? card.originColumn });
       io.to(currentUser.roomId).emit('state-updated', {
         cards: updatedRoom.cards,
         phase: updatedRoom.phase,
@@ -1810,7 +1845,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('change-phase', async ({ phase }) => {
-    const allowedPhases: Phase[] = ['creation', 'voting', 'discussion', 'rating'];
+    const allowedPhases: Phase[] = ['creation', 'voting', 'discussion', 'roadmap', 'rating'];
     if (!allowedPhases.includes(phase)) {
       socket.emit('error', 'Invalid phase');
       return;
@@ -1836,9 +1871,13 @@ io.on('connection', (socket) => {
       return;
     }
 
+    const roomForPhase = await RoomService.getRoom(actor.roomId);
+    if (phase === 'roadmap' && getRetroTemplate(roomForPhase?.template).id !== 'traffic-light') {
+      socket.emit('error', 'Дорожная карта доступна только для шаблона «Светофор»');
+      return;
+    }
     if (phase === 'rating') {
-      const roomForFeatures = await RoomService.getRoom(actor.roomId);
-      if (roomForFeatures && !getRoomFeatures(roomForFeatures).retroRatingEnabled) {
+      if (roomForPhase && !getRoomFeatures(roomForPhase).retroRatingEnabled) {
         socket.emit('error', 'Оценка ретро отключена в настройках комнаты');
         return;
       }

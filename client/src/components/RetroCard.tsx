@@ -84,7 +84,7 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store, isMergeDropTa
   }, [card.imageUrl]);
 
   const handleEdit = () => {
-    if (store.canEditCard(card) && (store.phase === 'creation' || store.phase === 'discussion')) {
+    if (store.canEditCard(card) && (store.phase === 'creation' || store.phase === 'discussion' || store.phase === 'roadmap')) {
       setText(cardTextToEditorValue(card.text));
       setImageUrl(card.imageUrl || '');
       setImagePickError('');
@@ -94,14 +94,14 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store, isMergeDropTa
 
   const handleSave = () => {
     const nextText = editorValueToCardText(text);
-    if (nextText && store.socket && (store.phase === 'creation' || store.phase === 'discussion') && store.canEditCard(card)) {
+    if (nextText && store.socket && (store.phase === 'creation' || store.phase === 'discussion' || store.phase === 'roadmap') && store.canEditCard(card)) {
       store.socketService?.updateCard(card.id, nextText, imageUrl.trim() || undefined);
       setIsEditing(false);
     }
   };
 
   const handleDelete = () => {
-    if (store.canEditCard(card) && store.socket && (store.phase === 'creation' || store.phase === 'discussion')) {
+    if (store.canEditCard(card) && store.socket && (store.phase === 'creation' || store.phase === 'discussion' || store.phase === 'roadmap')) {
       store.socket.emit('delete-card', { cardId: card.id });
     }
   };
@@ -177,7 +177,17 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store, isMergeDropTa
   const cardColor = getColumnColorStyles(store.getColumnColor(card.column), theme.palette.mode).fill;
 
   const features = store.roomFeatures;
-  const isEditingAllowed = (store.phase === 'creation' || (store.phase === 'discussion' && store.canEditCard(card)));
+  const isEditingAllowed = (
+    store.phase === 'creation'
+    || store.phase === 'roadmap'
+    || (store.phase === 'discussion' && store.canEditCard(card))
+  );
+  const originColumn = card.originColumn;
+  const originDefinition = originColumn != null ? store.templateConfig.columns[originColumn] : undefined;
+  const showOriginBadge = originDefinition != null && card.column >= store.templateConfig.columns.length;
+  const originAccent = showOriginBadge
+    ? getColumnColorStyles(store.getColumnColor(originColumn as number), theme.palette.mode).accent
+    : undefined;
   const currentUserId = store.currentUser?.id || '';
   const isTextHidden = store.isCardTextHidden(card);
   const hasLiked = card.likes?.includes(currentUserId) || false;
@@ -217,6 +227,29 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store, isMergeDropTa
       }}
     >
       <CardContent sx={{ pb: '4px !important', '&:last-child': { pb: '4px' } }}>
+        {showOriginBadge && originDefinition && (
+          <Box
+            sx={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 0.5,
+              mb: 0.75,
+              px: 0.75,
+              py: 0.15,
+              borderRadius: 999,
+              bgcolor: 'background.paper',
+              border: '1px solid',
+              borderColor: originAccent,
+              color: originAccent,
+              fontSize: '0.7rem',
+              fontWeight: 700,
+              lineHeight: 1.4
+            }}
+          >
+            <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: originAccent }} />
+            {originDefinition.title}
+          </Box>
+        )}
         {isEditing ? (
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
             <TextField

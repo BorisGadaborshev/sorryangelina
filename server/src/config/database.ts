@@ -44,7 +44,8 @@ export const connectDB = async (): Promise<void> => {
       password text not null,
       team_id text references teams(id) on delete set null,
       owner text not null,
-      phase text not null check (phase in ('creation','voting','discussion','rating')),
+      template text not null default 'classic',
+      phase text not null check (phase in ('creation','voting','discussion','roadmap','rating')),
       created_at timestamptz default now(),
       updated_at timestamptz default now()
     );
@@ -66,6 +67,7 @@ export const connectDB = async (): Promise<void> => {
       type text not null check (type in ('liked','disliked','suggestion')),
       created_by text not null,
       column_index integer not null,
+      origin_column integer,
       image_url text
     );
 
@@ -104,8 +106,10 @@ export const connectDB = async (): Promise<void> => {
     alter table rooms add column if not exists column_titles jsonb;
     alter table rooms add column if not exists column_colors jsonb;
     alter table rooms add column if not exists features jsonb;
+    alter table rooms add column if not exists template text not null default 'classic';
+    alter table cards add column if not exists origin_column integer;
     alter table rooms drop constraint if exists rooms_phase_check;
-    alter table rooms add constraint rooms_phase_check check (phase in ('creation','voting','discussion','rating'));
+    alter table rooms add constraint rooms_phase_check check (phase in ('creation','voting','discussion','roadmap','rating'));
 
     create table if not exists room_media (
       id text primary key,

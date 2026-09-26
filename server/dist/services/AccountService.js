@@ -13,6 +13,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AccountService = void 0;
+const crypto_1 = __importDefault(require("crypto"));
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const database_1 = require("../config/database");
 const authNames_1 = require("../config/authNames");
@@ -99,6 +100,25 @@ class AccountService {
             };
         });
     }
+    static resetPassword(name) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const normalizedName = (0, authNames_1.normalizeAuthName)(name);
+            if (!normalizedName) {
+                throw new Error('Name is required');
+            }
+            const password = this.generateTemporaryPassword();
+            const passwordHash = yield bcryptjs_1.default.hash(password, 10);
+            const existing = yield this.getAccountByName(normalizedName);
+            if (existing) {
+                yield database_1.pool.query(`update accounts set password_hash = $1, updated_at = now() where lower(name) = lower($2)`, [passwordHash, normalizedName]);
+            }
+            else {
+                const type = (0, authNames_1.isFixedAuthName)(normalizedName) ? 'fixed' : 'registered';
+                yield database_1.pool.query(`insert into accounts (name, password_hash, type) values ($1, $2, $3)`, [normalizedName, passwordHash, type]);
+            }
+            return password;
+        });
+    }
     static guestLogin(name) {
         const normalizedName = (0, authNames_1.normalizeAuthName)(name);
         if (!normalizedName) {
@@ -108,6 +128,11 @@ class AccountService {
             name: normalizedName,
             type: 'guest'
         };
+    }
+    static generateTemporaryPassword() {
+        const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+        const bytes = crypto_1.default.randomBytes(10);
+        return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join('');
     }
     static getAccountByName(name) {
         return __awaiter(this, void 0, void 0, function* () {

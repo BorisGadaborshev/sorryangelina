@@ -8,6 +8,17 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __rest = (this && this.__rest) || function (s, e) {
+    var t = {};
+    for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p) && e.indexOf(p) < 0)
+        t[p] = s[p];
+    if (s != null && typeof Object.getOwnPropertySymbols === "function")
+        for (var i = 0, p = Object.getOwnPropertySymbols(s); i < p.length; i++) {
+            if (e.indexOf(p[i]) < 0 && Object.prototype.propertyIsEnumerable.call(s, p[i]))
+                t[p[i]] = s[p[i]];
+        }
+    return t;
+};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -16,6 +27,7 @@ const express_1 = __importDefault(require("express"));
 const http_1 = require("http");
 const socket_io_1 = require("socket.io");
 const cors_1 = __importDefault(require("cors"));
+const types_1 = require("./types");
 const roomFeatures_1 = require("./utils/roomFeatures");
 const RoomService_1 = require("./services/RoomService");
 const TeamService_1 = require("./services/TeamService");
@@ -24,6 +36,8 @@ const jwt_1 = require("./config/jwt");
 const dotenv_1 = __importDefault(require("dotenv"));
 const path_1 = __importDefault(require("path"));
 const database_1 = require("./config/database");
+const ImageStore_1 = require("./services/ImageStore");
+const RadioBrowser_1 = require("./services/RadioBrowser");
 dotenv_1.default.config();
 // Connect to Postgres
 (0, database_1.connectDB)().catch((err) => {
@@ -55,6 +69,8 @@ app.use((0, cors_1.default)({
     credentials: true
 }));
 app.use(express_1.default.json());
+app.use('/uploads', express_1.default.static((0, ImageStore_1.getUploadDir)(), { index: false, fallthrough: false }));
+app.use('/api/uploads', express_1.default.static((0, ImageStore_1.getUploadDir)(), { index: false, fallthrough: false }));
 // Serve static files from the React app
 const clientBuildPath = path_1.default.join(__dirname, '../../../client/build');
 console.log('Client build path:', clientBuildPath);
@@ -129,6 +145,21 @@ app.post('/api/teams', (req, res) => __awaiter(void 0, void 0, void 0, function*
         res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to create team' });
     }
 }));
+app.post('/api/teams/:teamId/unlock', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const { password } = req.body;
+    try {
+        const members = yield TeamService_1.TeamService.unlockTeamRoster(req.params.teamId, password);
+        res.json({ members });
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to unlock team';
+        if (message !== 'Team password is required' && message !== 'Invalid team password') {
+            console.error('Error unlocking team:', error);
+        }
+        const status = message === 'Team not found' ? 404 : 400;
+        res.status(status).json({ error: message });
+    }
+}));
 app.post('/api/teams/:teamId/join', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const authHeader = req.headers.authorization;
     const token = (authHeader === null || authHeader === void 0 ? void 0 : authHeader.startsWith('Bearer ')) ? authHeader.slice(7) : undefined;
@@ -139,10 +170,6 @@ app.post('/api/teams/:teamId/join', (req, res) => __awaiter(void 0, void 0, void
     }
     const { password } = req.body;
     const isFixedBuiltinJoin = req.params.teamId === TeamService_1.BUILTIN_TEAM_ID && auth.type === 'fixed';
-    if (!isFixedBuiltinJoin && !(password === null || password === void 0 ? void 0 : password.trim())) {
-        res.status(400).json({ error: 'Team password is required' });
-        return;
-    }
     try {
         const team = isFixedBuiltinJoin
             ? yield TeamService_1.TeamService.joinBuiltinTeamForFixedUser(auth.name)
@@ -150,8 +177,112 @@ app.post('/api/teams/:teamId/join', (req, res) => __awaiter(void 0, void 0, void
         res.json(team);
     }
     catch (error) {
-        console.error('Error joining team:', error);
-        res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to join team' });
+        const message = error instanceof Error ? error.message : 'Failed to join team';
+        if (message !== 'Team password is required') {
+            console.error('Error joining team:', error);
+        }
+        res.status(400).json({ error: message });
+    }
+}));
+app.get('/api/teams/:teamId', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const authHeader = req.headers.authorization;
+    const token = (authHeader === null || authHeader === void 0 ? void 0 : authHeader.startsWith('Bearer ')) ? authHeader.slice(7) : undefined;
+    const auth = (0, jwt_1.verifyAuthToken)(token);
+    if (!auth) {
+        res.status(401).json({ error: 'Unauthorized: token is invalid or expired' });
+        return;
+    }
+    try {
+        const team = yield TeamService_1.TeamService.getTeam(req.params.teamId);
+        if (!team) {
+            res.status(404).json({ error: 'Team not found' });
+            return;
+        }
+        if (!TeamService_1.TeamService.isTeamMember(team, auth.name)) {
+            res.status(403).json({ error: 'Only team members can view this team' });
+            return;
+        }
+        if (!(yield TeamService_1.TeamService.hasUnlockedTeamPassword(team, auth.name))) {
+            res.status(403).json({ error: 'Team password is required' });
+            return;
+        }
+        res.json(team);
+    }
+    catch (error) {
+        console.error('Error getting team:', error);
+        res.status(500).json({ error: 'Failed to get team' });
+    }
+}));
+app.delete('/api/teams/:teamId/members', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const authHeader = req.headers.authorization;
+    const token = (authHeader === null || authHeader === void 0 ? void 0 : authHeader.startsWith('Bearer ')) ? authHeader.slice(7) : undefined;
+    const auth = (0, jwt_1.verifyAuthToken)(token);
+    if (!auth) {
+        res.status(401).json({ error: 'Unauthorized: token is invalid or expired' });
+        return;
+    }
+    const { name } = req.body;
+    if (!(name === null || name === void 0 ? void 0 : name.trim())) {
+        res.status(400).json({ error: 'Member name is required' });
+        return;
+    }
+    try {
+        const team = yield TeamService_1.TeamService.removeMember(req.params.teamId, auth.name, name);
+        res.json(team);
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to remove member';
+        const status = message === 'Team not found' ? 404 : message.includes('Только админ команды') ? 403 : 400;
+        console.error('Error removing team member:', error);
+        res.status(status).json({ error: message });
+    }
+}));
+app.post('/api/teams/:teamId/members/reset-password', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const authHeader = req.headers.authorization;
+    const token = (authHeader === null || authHeader === void 0 ? void 0 : authHeader.startsWith('Bearer ')) ? authHeader.slice(7) : undefined;
+    const auth = (0, jwt_1.verifyAuthToken)(token);
+    if (!auth) {
+        res.status(401).json({ error: 'Unauthorized: token is invalid or expired' });
+        return;
+    }
+    const { name } = req.body;
+    if (!(name === null || name === void 0 ? void 0 : name.trim())) {
+        res.status(400).json({ error: 'Member name is required' });
+        return;
+    }
+    try {
+        const result = yield TeamService_1.TeamService.resetMemberPassword(req.params.teamId, auth.name, name);
+        res.json(result);
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to reset password';
+        const status = message === 'Team not found' ? 404 : message.includes('Только админ команды') ? 403 : 400;
+        console.error('Error resetting member password:', error);
+        res.status(status).json({ error: message });
+    }
+}));
+app.post('/api/teams/:teamId/password', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const authHeader = req.headers.authorization;
+    const token = (authHeader === null || authHeader === void 0 ? void 0 : authHeader.startsWith('Bearer ')) ? authHeader.slice(7) : undefined;
+    const auth = (0, jwt_1.verifyAuthToken)(token);
+    if (!auth) {
+        res.status(401).json({ error: 'Unauthorized: token is invalid or expired' });
+        return;
+    }
+    const { password } = req.body;
+    if (!(password === null || password === void 0 ? void 0 : password.trim())) {
+        res.status(400).json({ error: 'Team password is required' });
+        return;
+    }
+    try {
+        const team = yield TeamService_1.TeamService.changeTeamPassword(req.params.teamId, auth.name, password);
+        res.json(team);
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to update team password';
+        const status = message === 'Team not found' ? 404 : message.includes('Только админ команды') ? 403 : 400;
+        console.error('Error updating team password:', error);
+        res.status(status).json({ error: message });
     }
 }));
 app.get('/api/teams/:teamId/members', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
@@ -220,6 +351,7 @@ app.delete('/api/rooms/:roomId', (req, res) => __awaiter(void 0, void 0, void 0,
         roomFacilitators.delete(roomId);
         roomDiscussionNavigation.delete(roomId);
         roomSprintVipVotes.delete(roomId);
+        cancelPendingDeparturesForRoom(roomId);
         res.json({ message: 'Room deleted successfully' });
     }
     catch (error) {
@@ -320,7 +452,7 @@ const io = new socket_io_1.Server(httpServer, {
     pingTimeout: 60000,
     pingInterval: 25000,
     connectTimeout: 45000,
-    maxHttpBufferSize: 1e6,
+    maxHttpBufferSize: 5e6,
     transports: ['websocket', 'polling'],
     allowUpgrades: true,
     upgradeTimeout: 10000,
@@ -332,7 +464,7 @@ io.engine.on("connection_error", (err) => {
 });
 // Helper function to get sorted cards by votes
 const getSortedCards = (cards) => {
-    return [...cards].sort((a, b) => { var _a, _b, _c, _d; return ((((_a = b.likes) === null || _a === void 0 ? void 0 : _a.length) || 0) - (((_b = b.dislikes) === null || _b === void 0 ? void 0 : _b.length) || 0)) - ((((_c = a.likes) === null || _c === void 0 ? void 0 : _c.length) || 0) - (((_d = a.dislikes) === null || _d === void 0 ? void 0 : _d.length) || 0)); });
+    return [...cards].sort((a, b) => { var _a, _b, _c, _d; return ((((_a = b.likes) === null || _a === void 0 ? void 0 : _a.length) || 0) + (((_b = b.dislikes) === null || _b === void 0 ? void 0 : _b.length) || 0)) - ((((_c = a.likes) === null || _c === void 0 ? void 0 : _c.length) || 0) + (((_d = a.dislikes) === null || _d === void 0 ? void 0 : _d.length) || 0)); });
 };
 const buildDiscussionNavigation = (cards) => ({
     unviewedCardIds: getSortedCards(cards).map((card) => card.id),
@@ -365,7 +497,7 @@ const refreshFacilitatorSocketId = (roomId, userName, socketId) => {
     return updated;
 };
 const emitFacilitatorToSocket = (socket, roomId, room) => {
-    if (room && room.phase !== 'discussion')
+    if (room && (room.phase !== 'discussion' || !getRoomFeatures(room).facilitatorEnabled))
         return;
     const userName = typeof socket.data.userName === 'string' ? socket.data.userName : undefined;
     const facilitator = userName
@@ -398,26 +530,13 @@ const normalizeDiscussionNavigation = (room, state) => {
         viewedCardIds
     };
 };
-const canInteractWithCardSocial = (phase) => phase === 'creation' || phase === 'voting' || phase === 'discussion';
+const canInteractWithCardSocial = (phase) => phase === 'creation' || phase === 'voting' || phase === 'discussion' || phase === 'roadmap';
 const getRoomFeatures = (room) => (0, roomFeatures_1.normalizeRoomFeatures)(room.features);
-const getCardTypeByColumn = (column) => {
-    if (column === 1)
-        return 'disliked';
-    if (column === 2)
-        return 'suggestion';
-    return 'liked';
-};
-const normalizeImageUrl = (value) => {
-    if (typeof value !== 'string')
-        return undefined;
-    const trimmed = value.trim();
-    if (!trimmed)
-        return undefined;
-    if (/^https?:\/\//i.test(trimmed))
-        return trimmed;
-    if (/^data:image\/[a-zA-Z0-9.+-]+;base64,/i.test(trimmed))
-        return trimmed;
-    return undefined;
+const isNegativeColumn = (template, column) => { var _a; return ((_a = template.columns[column]) === null || _a === void 0 ? void 0 : _a.kind) === 'negative'; };
+const isRoadmapColumn = (template, column) => {
+    var _a, _b;
+    const roadmapLength = (_b = (_a = template.roadmapColumns) === null || _a === void 0 ? void 0 : _a.length) !== null && _b !== void 0 ? _b : 0;
+    return column >= template.columns.length && column < template.columns.length + roadmapLength;
 };
 const normalizeMood = (value) => {
     if (typeof value !== 'string')
@@ -443,7 +562,40 @@ const roomFacilitators = new Map();
 const roomDiscussionNavigation = new Map();
 const roomSprintVipVotes = new Map();
 const roomUserSocketPresence = new Map();
+const pendingUserDepartures = new Map();
+const USER_DISCONNECT_GRACE_MS = Math.max(0, Number(process.env.USER_DISCONNECT_GRACE_MS) || 5 * 60 * 1000);
+const userPresenceKey = (roomId, userName) => `${roomId}:${userName}`;
+const hasRoomPresence = (roomId, userName) => {
+    var _a, _b, _c;
+    return ((_c = (_b = (_a = roomUserSocketPresence.get(roomId)) === null || _a === void 0 ? void 0 : _a.get(userName)) === null || _b === void 0 ? void 0 : _b.size) !== null && _c !== void 0 ? _c : 0) > 0;
+};
+const getPresentUserNames = (roomId) => {
+    const roomMap = roomUserSocketPresence.get(roomId);
+    if (!roomMap)
+        return [];
+    return [...roomMap.entries()]
+        .filter(([, sockets]) => sockets.size > 0)
+        .map(([name]) => name);
+};
+const cancelPendingUserDeparture = (roomId, userName) => {
+    const key = userPresenceKey(roomId, userName);
+    const timeout = pendingUserDepartures.get(key);
+    if (!timeout)
+        return;
+    clearTimeout(timeout);
+    pendingUserDepartures.delete(key);
+};
+const cancelPendingDeparturesForRoom = (roomId) => {
+    const prefix = `${roomId}:`;
+    for (const [key, timeout] of pendingUserDepartures) {
+        if (!key.startsWith(prefix))
+            continue;
+        clearTimeout(timeout);
+        pendingUserDepartures.delete(key);
+    }
+};
 const addRoomPresence = (roomId, userName, socketId) => {
+    cancelPendingUserDeparture(roomId, userName);
     let roomMap = roomUserSocketPresence.get(roomId);
     if (!roomMap) {
         roomMap = new Map();
@@ -666,24 +818,19 @@ const emitSprintVipStateToSocket = (socket, room) => {
     const voterName = resolveVoterNameForSocket(room, socket);
     socket.emit('sprint-vip-state', buildPersonalSprintVipState(room, voterName));
 };
-const handleUserLeavingRoom = (socket, user) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
-    const roomId = user.roomId || (typeof socket.data.roomId === 'string' ? socket.data.roomId : '');
-    if (!roomId)
-        return null;
-    const shouldRemoveFromRoom = removeRoomPresence(roomId, user.name, socket.id);
-    socket.leave(roomId);
-    delete socket.data.userId;
-    delete socket.data.userName;
-    if (!shouldRemoveFromRoom) {
+const persistUserLeave = (user, roomId, options = {}) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    if (options.requireAbsent && hasRoomPresence(roomId, user.name)) {
         return null;
     }
     const room = yield RoomService_1.RoomService.getRoom(roomId);
     if (!room)
         return null;
     const userInRoom = (_a = room.users.find((roomUser) => roomUser.name === user.name)) !== null && _a !== void 0 ? _a : room.users.find((roomUser) => roomUser.id === user.id);
-    const userIdForCleanup = (_b = userInRoom === null || userInRoom === void 0 ? void 0 : userInRoom.id) !== null && _b !== void 0 ? _b : user.id;
-    const updatedRoom = yield RoomService_1.RoomService.removeUser(roomId, userIdForCleanup, user.name);
+    if (!userInRoom)
+        return room;
+    const userIdForCleanup = userInRoom.id;
+    const updatedRoom = yield RoomService_1.RoomService.removeUser(roomId, userIdForCleanup, user.name, getPresentUserNames(roomId));
     if (!updatedRoom)
         return null;
     getRetroRatingState(roomId).votes.delete(userIdForCleanup);
@@ -699,6 +846,7 @@ const handleUserLeavingRoom = (socket, user) => __awaiter(void 0, void 0, void 0
     if (updatedRoom.users.length === 0) {
         roomSprintVipVotes.delete(roomId);
         roomUserSocketPresence.delete(roomId);
+        cancelPendingDeparturesForRoom(roomId);
         console.log('Room is empty:', roomId);
     }
     else {
@@ -713,14 +861,49 @@ const handleUserLeavingRoom = (socket, user) => __awaiter(void 0, void 0, void 0
     }
     return updatedRoom;
 });
+const handleUserLeavingRoom = (socket, user) => __awaiter(void 0, void 0, void 0, function* () {
+    const roomId = user.roomId || (typeof socket.data.roomId === 'string' ? socket.data.roomId : '');
+    if (!roomId)
+        return null;
+    cancelPendingUserDeparture(roomId, user.name);
+    const shouldRemoveFromRoom = removeRoomPresence(roomId, user.name, socket.id);
+    socket.leave(roomId);
+    delete socket.data.userId;
+    delete socket.data.userName;
+    if (!shouldRemoveFromRoom) {
+        return null;
+    }
+    return persistUserLeave(user, roomId);
+});
+const schedulePendingUserDeparture = (user, roomId) => {
+    cancelPendingUserDeparture(roomId, user.name);
+    const key = userPresenceKey(roomId, user.name);
+    const timeout = setTimeout(() => {
+        pendingUserDepartures.delete(key);
+        if (hasRoomPresence(roomId, user.name)) {
+            return;
+        }
+        console.log('Disconnect grace elapsed, removing user from room:', {
+            roomId,
+            userName: user.name,
+            graceMs: USER_DISCONNECT_GRACE_MS
+        });
+        void persistUserLeave(user, roomId, { requireAbsent: true });
+    }, USER_DISCONNECT_GRACE_MS);
+    pendingUserDepartures.set(key, timeout);
+};
 const handleUserDisconnect = (socket, user) => {
     const roomId = user.roomId || (typeof socket.data.roomId === 'string' ? socket.data.roomId : '');
     if (!roomId)
         return;
     removeRoomPresence(roomId, user.name, socket.id);
-    // A transport disconnect is temporary: browsers can suspend background tabs.
-    // Keep the persisted room membership and role so restore-session can reconnect
-    // the same logical user without transferring administrator rights.
+    // Browsers often drop the socket when a tab is backgrounded. Keep membership
+    // and admin role for a grace period so the same person can come back.
+    if (hasRoomPresence(roomId, user.name)) {
+        cancelPendingUserDeparture(roomId, user.name);
+        return;
+    }
+    schedulePendingUserDeparture(Object.assign(Object.assign({}, user), { roomId }), roomId);
 };
 const resolveSocketActor = (socket, currentUser) => __awaiter(void 0, void 0, void 0, function* () {
     if ((currentUser === null || currentUser === void 0 ? void 0 : currentUser.roomId) && currentUser.name) {
@@ -801,7 +984,7 @@ io.on('connection', (socket) => {
             socket.emit('session-expired');
         }
     }));
-    socket.on('create-room', ({ roomId, password, username, token, teamId }) => __awaiter(void 0, void 0, void 0, function* () {
+    socket.on('create-room', ({ roomId, password, username, token, teamId, template }) => __awaiter(void 0, void 0, void 0, function* () {
         const auth = (0, jwt_1.verifyAuthToken)(token);
         if (!auth) {
             socket.emit('error', 'Unauthorized: token is invalid or expired');
@@ -830,8 +1013,13 @@ io.on('connection', (socket) => {
                 socket.emit('error', 'Room already exists');
                 return;
             }
+            if (typeof template !== 'undefined' && !(0, types_1.isRetroTemplateId)(template)) {
+                socket.emit('error', 'Unknown retro template');
+                return;
+            }
             const room = yield RoomService_1.RoomService.createRoom(roomId, password, socket.id, effectiveUsername, {
-                teamId: normalizedTeamId
+                teamId: normalizedTeamId,
+                template: (0, types_1.isRetroTemplateId)(template) ? template : 'classic'
             });
             socket.join(roomId);
             socket.data.userId = socket.id;
@@ -960,37 +1148,56 @@ io.on('connection', (socket) => {
     socket.on('add-card', ({ text, type, column, imageUrl }) => __awaiter(void 0, void 0, void 0, function* () {
         if (!currentUser)
             return;
+        const actorName = currentUser.name;
+        const actorRoomId = currentUser.roomId;
+        const actorId = currentUser.id;
         try {
-            console.log('Received add-card event:', { text, type, column, imageUrl, userId: currentUser.id });
-            const room = yield RoomService_1.RoomService.getRoom(currentUser.roomId);
-            if (!room || room.phase !== 'creation')
+            console.log('Received add-card event:', { text, type, column, imageUrl, userId: actorId });
+            const room = yield RoomService_1.RoomService.getRoom(actorRoomId);
+            const template = (0, types_1.getRetroTemplate)(room === null || room === void 0 ? void 0 : room.template);
+            const targetColumn = Number(column);
+            const analysisColumn = template.columns.length;
+            const canAddInPhase = (room === null || room === void 0 ? void 0 : room.phase) === 'creation'
+                || ((room === null || room === void 0 ? void 0 : room.phase) === 'roadmap' && template.roadmapColumns && targetColumn === analysisColumn);
+            if (!room || !canAddInPhase || !Number.isInteger(targetColumn))
+                return;
+            if (room.phase === 'creation' && (targetColumn < 0 || targetColumn >= template.columns.length))
                 return;
             const features = getRoomFeatures(room);
-            const safeImageUrl = features.mediaEnabled ? normalizeImageUrl(imageUrl) : undefined;
+            const actionColumn = template.actionColumnIndex;
+            if (actionColumn != null && !features.membersCanAddCards && targetColumn === actionColumn) {
+                const isAdmin = room.users.some((user) => user.name === actorName && user.role === 'admin');
+                if (!isAdmin)
+                    return;
+            }
+            const cardId = Date.now().toString();
+            const safeImageUrl = features.mediaEnabled && imageUrl
+                ? yield (0, ImageStore_1.replaceCardImage)(actorRoomId, cardId, imageUrl)
+                : undefined;
             const card = {
-                id: Date.now().toString(),
+                id: cardId,
                 text,
-                type,
-                createdBy: currentUser.name,
+                type: (0, types_1.getCardTypeByColumn)(template, targetColumn),
+                createdBy: actorName,
                 likes: [],
                 dislikes: [],
-                column,
+                column: targetColumn,
                 imageUrl: safeImageUrl,
                 comments: [],
                 reactions: []
             };
-            const updatedRoom = yield RoomService_1.RoomService.addCard(currentUser.roomId, card);
+            const updatedRoom = yield RoomService_1.RoomService.addCard(actorRoomId, card);
             if (updatedRoom) {
                 // Обновляем состояние в памяти
-                const roomState = roomStates.get(currentUser.roomId);
+                const roomState = roomStates.get(actorRoomId);
                 if (roomState) {
                     roomState.cards.push(card);
                 }
-                rooms.set(currentUser.roomId, updatedRoom);
+                rooms.set(actorRoomId, updatedRoom);
                 // Отправляем обновление всем клиентам в комнате
-                console.log('Broadcasting card-added to room:', currentUser.roomId);
-                io.to(currentUser.roomId).emit('card-added', card);
-                io.to(currentUser.roomId).emit('state-updated', {
+                console.log('Broadcasting card-added to room:', actorRoomId);
+                io.to(actorRoomId).emit('card-added', card);
+                io.to(actorRoomId).emit('state-updated', {
                     cards: updatedRoom.cards,
                     phase: updatedRoom.phase,
                     users: updatedRoom.users
@@ -1008,7 +1215,7 @@ io.on('connection', (socket) => {
         const currentUserName = currentUser.name;
         try {
             const room = yield RoomService_1.RoomService.getRoom(currentUser.roomId);
-            if (!room || (room.phase !== 'creation' && room.phase !== 'discussion'))
+            if (!room || (room.phase !== 'creation' && room.phase !== 'discussion' && room.phase !== 'roadmap'))
                 return;
             const features = getRoomFeatures(room);
             if (!features.cardEditingEnabled)
@@ -1024,7 +1231,9 @@ io.on('connection', (socket) => {
                 updates.text = text;
             }
             if (typeof imageUrl !== 'undefined') {
-                updates.imageUrl = features.mediaEnabled ? normalizeImageUrl(imageUrl) : undefined;
+                updates.imageUrl = features.mediaEnabled
+                    ? yield (0, ImageStore_1.replaceCardImage)(currentUser.roomId, cardId, imageUrl)
+                    : undefined;
             }
             if (Object.keys(updates).length === 0)
                 return;
@@ -1052,7 +1261,7 @@ io.on('connection', (socket) => {
         const currentUserName = currentUser.name;
         try {
             const room = yield RoomService_1.RoomService.getRoom(currentUser.roomId);
-            if (!room || (room.phase !== 'creation' && room.phase !== 'discussion'))
+            if (!room || (room.phase !== 'creation' && room.phase !== 'discussion' && room.phase !== 'roadmap'))
                 return;
             if (!getRoomFeatures(room).cardEditingEnabled)
                 return;
@@ -1075,6 +1284,33 @@ io.on('connection', (socket) => {
         catch (error) {
             console.error('Error deleting card:', error);
             socket.emit('error', 'Failed to delete card');
+        }
+    }));
+    socket.on('delete-all-cards', () => __awaiter(void 0, void 0, void 0, function* () {
+        if (!(currentUser === null || currentUser === void 0 ? void 0 : currentUser.roomId))
+            return;
+        try {
+            const room = yield RoomService_1.RoomService.getRoom(currentUser.roomId);
+            if (!room)
+                return;
+            const actor = room.users.find((user) => user.id === (currentUser === null || currentUser === void 0 ? void 0 : currentUser.id) || user.name === (currentUser === null || currentUser === void 0 ? void 0 : currentUser.name));
+            if (!actor || actor.role !== 'admin') {
+                socket.emit('error', 'Только администратор может удалить все карточки');
+                return;
+            }
+            const updatedRoom = yield RoomService_1.RoomService.deleteAllCards(currentUser.roomId);
+            if (updatedRoom) {
+                io.to(currentUser.roomId).emit('cards-cleared');
+                io.to(currentUser.roomId).emit('state-updated', {
+                    cards: updatedRoom.cards,
+                    phase: updatedRoom.phase,
+                    users: updatedRoom.users
+                });
+            }
+        }
+        catch (error) {
+            console.error('Error deleting all cards:', error);
+            socket.emit('error', 'Failed to delete all cards');
         }
     }));
     socket.on('merge-cards', ({ targetCardId, sourceCardId }) => __awaiter(void 0, void 0, void 0, function* () {
@@ -1138,6 +1374,27 @@ io.on('connection', (socket) => {
             socket.emit('error', 'Failed to add card comment');
         }
     }));
+    socket.on('update-card-comment', ({ cardId, commentId, text }) => __awaiter(void 0, void 0, void 0, function* () {
+        if (!currentUser)
+            return;
+        try {
+            const room = yield RoomService_1.RoomService.getRoom(currentUser.roomId);
+            if (!room || !canInteractWithCardSocial(room.phase))
+                return;
+            if (!getRoomFeatures(room).commentsEnabled)
+                return;
+            if (typeof cardId !== 'string' || typeof commentId !== 'string' || typeof text !== 'string')
+                return;
+            const comment = yield RoomService_1.RoomService.updateCardComment(currentUser.roomId, cardId, commentId, currentUser.id, text);
+            if (!comment)
+                return;
+            io.to(currentUser.roomId).emit('card-comment-updated', { cardId, comment });
+        }
+        catch (error) {
+            console.error('Error updating card comment:', error);
+            socket.emit('error', 'Failed to update card comment');
+        }
+    }));
     socket.on('toggle-card-reaction', ({ cardId, emoji }) => __awaiter(void 0, void 0, void 0, function* () {
         if (!currentUser)
             return;
@@ -1163,22 +1420,48 @@ io.on('connection', (socket) => {
         }
     }));
     socket.on('move-card', ({ cardId, column }) => __awaiter(void 0, void 0, void 0, function* () {
+        var _a;
         if (!currentUser)
             return;
+        const currentUserName = currentUser.name;
         try {
             const room = yield RoomService_1.RoomService.getRoom(currentUser.roomId);
-            if (!room || room.phase !== 'creation')
-                return;
-            if (!getRoomFeatures(room).moveCardsEnabled)
+            const template = (0, types_1.getRetroTemplate)(room === null || room === void 0 ? void 0 : room.template);
+            const targetColumn = Number(column);
+            const roadmapMove = (room === null || room === void 0 ? void 0 : room.phase) === 'roadmap'
+                && Boolean(template.roadmapColumns)
+                && Number.isInteger(targetColumn)
+                && (isNegativeColumn(template, targetColumn) || isRoadmapColumn(template, targetColumn));
+            const creationMove = (room === null || room === void 0 ? void 0 : room.phase) === 'creation'
+                && Number.isInteger(targetColumn)
+                && targetColumn >= 0
+                && targetColumn < template.columns.length;
+            if (!room || (!creationMove && !roadmapMove))
                 return;
             const card = room.cards.find((currentCard) => currentCard.id === cardId);
             if (!card)
                 return;
-            const nextType = getCardTypeByColumn(column);
-            const updatedRoom = yield RoomService_1.RoomService.updateCard(currentUser.roomId, cardId, { column, type: nextType });
+            if (creationMove) {
+                const isAdmin = room.users.some((user) => user.name === currentUserName && user.role === 'admin');
+                if (!isAdmin) {
+                    if (!getRoomFeatures(room).moveCardsEnabled)
+                        return;
+                    if (card.createdBy !== currentUserName)
+                        return;
+                }
+            }
+            const nextType = (0, types_1.getCardTypeByColumn)(template, targetColumn);
+            const updates = { column: targetColumn, type: nextType };
+            if (roadmapMove
+                && isRoadmapColumn(template, targetColumn)
+                && card.originColumn == null
+                && card.column < template.columns.length) {
+                updates.originColumn = card.column;
+            }
+            const updatedRoom = yield RoomService_1.RoomService.updateCard(currentUser.roomId, cardId, updates);
             if (!updatedRoom)
                 return;
-            io.to(currentUser.roomId).emit('card-moved', { cardId, column });
+            io.to(currentUser.roomId).emit('card-moved', { cardId, column: targetColumn, originColumn: (_a = updates.originColumn) !== null && _a !== void 0 ? _a : card.originColumn });
             io.to(currentUser.roomId).emit('state-updated', {
                 cards: updatedRoom.cards,
                 phase: updatedRoom.phase,
@@ -1230,11 +1513,30 @@ io.on('connection', (socket) => {
             socket.emit('error', message);
         }
     }));
-    socket.on('update-ready-state', ({ isReady }) => __awaiter(void 0, void 0, void 0, function* () {
+    socket.on('update-ready-state', ({ isReady, token, roomId: payloadRoomId }) => __awaiter(void 0, void 0, void 0, function* () {
         try {
-            const actor = yield resolveSocketActor(socket, currentUser);
+            let actor = yield resolveSocketActor(socket, currentUser);
             if (!(actor === null || actor === void 0 ? void 0 : actor.roomId) || !actor.name) {
-                console.log('Ready state update ignored: session not resolved');
+                const auth = typeof token === 'string' ? (0, jwt_1.verifyAuthToken)(token) : null;
+                const roomId = typeof payloadRoomId === 'string' && payloadRoomId
+                    ? payloadRoomId
+                    : (typeof socket.data.roomId === 'string' ? socket.data.roomId : undefined);
+                if ((auth === null || auth === void 0 ? void 0 : auth.name) && roomId) {
+                    const room = yield RoomService_1.RoomService.getRoom(roomId);
+                    const user = room === null || room === void 0 ? void 0 : room.users.find((roomUser) => roomUser.name === auth.name);
+                    if (user) {
+                        actor = Object.assign(Object.assign({}, user), { roomId });
+                        socket.join(roomId);
+                    }
+                }
+            }
+            if (!(actor === null || actor === void 0 ? void 0 : actor.roomId) || !actor.name) {
+                console.log('Ready state update ignored: session not resolved', {
+                    hasToken: typeof token === 'string',
+                    payloadRoomId,
+                    socketRoomId: socket.data.roomId,
+                    socketUserName: socket.data.userName
+                });
                 return;
             }
             currentUser = actor;
@@ -1322,7 +1624,7 @@ io.on('connection', (socket) => {
         }
     }));
     socket.on('change-phase', ({ phase }) => __awaiter(void 0, void 0, void 0, function* () {
-        const allowedPhases = ['creation', 'voting', 'discussion', 'rating'];
+        const allowedPhases = ['creation', 'voting', 'discussion', 'roadmap', 'rating'];
         if (!allowedPhases.includes(phase)) {
             socket.emit('error', 'Invalid phase');
             return;
@@ -1345,9 +1647,13 @@ io.on('connection', (socket) => {
             socket.emit('error', 'Не удалось сменить этап: сессия не восстановлена');
             return;
         }
+        const roomForPhase = yield RoomService_1.RoomService.getRoom(actor.roomId);
+        if (phase === 'roadmap' && (0, types_1.getRetroTemplate)(roomForPhase === null || roomForPhase === void 0 ? void 0 : roomForPhase.template).id !== 'traffic-light') {
+            socket.emit('error', 'Дорожная карта доступна только для шаблона «Светофор»');
+            return;
+        }
         if (phase === 'rating') {
-            const roomForFeatures = yield RoomService_1.RoomService.getRoom(actor.roomId);
-            if (roomForFeatures && !getRoomFeatures(roomForFeatures).retroRatingEnabled) {
+            if (roomForPhase && !getRoomFeatures(roomForPhase).retroRatingEnabled) {
                 socket.emit('error', 'Оценка ретро отключена в настройках комнаты');
                 return;
             }
@@ -1392,7 +1698,7 @@ io.on('connection', (socket) => {
                 phase: roomState.phase,
                 users: roomState.users
             });
-            if (roomState.phase === 'discussion') {
+            if (roomState.phase === 'discussion' && getRoomFeatures(roomState).facilitatorEnabled) {
                 const facilitator = selectRandomFacilitator(roomState);
                 if (facilitator) {
                     roomFacilitators.set(actor.roomId, facilitator);
@@ -1438,6 +1744,40 @@ io.on('connection', (socket) => {
         }
         catch (error) {
             console.error('Error updating column titles:', error);
+        }
+    }));
+    socket.on('set-column-colors', ({ colors }) => __awaiter(void 0, void 0, void 0, function* () {
+        let actor = currentUser;
+        if (!(actor === null || actor === void 0 ? void 0 : actor.roomId)) {
+            const roomId = [...socket.rooms].find((roomName) => roomName !== socket.id);
+            const userName = typeof socket.data.userName === 'string' ? socket.data.userName : undefined;
+            const userId = typeof socket.data.userId === 'string' ? socket.data.userId : socket.id;
+            if (roomId && userName) {
+                const room = yield RoomService_1.RoomService.getRoom(roomId);
+                const user = room === null || room === void 0 ? void 0 : room.users.find((roomUser) => roomUser.name === userName || roomUser.id === userId);
+                if (user) {
+                    actor = Object.assign(Object.assign({}, user), { roomId });
+                    currentUser = actor;
+                }
+            }
+        }
+        if (!(actor === null || actor === void 0 ? void 0 : actor.roomId))
+            return;
+        try {
+            const room = yield RoomService_1.RoomService.getRoom(actor.roomId);
+            if (!room)
+                return;
+            if (!canControlDiscussionNavigation(room, actor.name, actor.role, actor.roomId))
+                return;
+            if (!Array.isArray(colors))
+                return;
+            const updatedRoom = yield RoomService_1.RoomService.updateColumnColors(actor.roomId, colors);
+            if (!(updatedRoom === null || updatedRoom === void 0 ? void 0 : updatedRoom.columnColors))
+                return;
+            io.to(actor.roomId).emit('column-colors-updated', { colors: updatedRoom.columnColors });
+        }
+        catch (error) {
+            console.error('Error updating column colors:', error);
         }
     }));
     socket.on('set-discussion-navigation', ({ unviewedCardIds, viewedCardIds }) => __awaiter(void 0, void 0, void 0, function* () {
@@ -1643,35 +1983,66 @@ io.on('connection', (socket) => {
         io.to(currentUser.roomId).emit('whiteboard-cleared');
     }));
     socket.on('set-room-features', ({ features }) => __awaiter(void 0, void 0, void 0, function* () {
-        let actor = currentUser;
-        if (!(actor === null || actor === void 0 ? void 0 : actor.roomId)) {
-            const roomId = [...socket.rooms].find((roomName) => roomName !== socket.id);
-            const userName = typeof socket.data.userName === 'string' ? socket.data.userName : undefined;
-            const userId = typeof socket.data.userId === 'string' ? socket.data.userId : socket.id;
-            if (roomId && userName) {
-                const room = yield RoomService_1.RoomService.getRoom(roomId);
-                const user = room === null || room === void 0 ? void 0 : room.users.find((roomUser) => roomUser.name === userName || roomUser.id === userId);
-                if (user) {
-                    actor = Object.assign(Object.assign({}, user), { roomId });
-                    currentUser = actor;
+        const actor = yield resolveSocketActor(socket, currentUser);
+        if (!(actor === null || actor === void 0 ? void 0 : actor.roomId) || !features || typeof features !== 'object')
+            return;
+        currentUser = actor;
+        const actorRoomId = actor.roomId;
+        const actorName = actor.name;
+        try {
+            const room = yield RoomService_1.RoomService.getRoom(actorRoomId);
+            if (!room)
+                return;
+            const isAdmin = room.users.some((user) => user.name === actorName && user.role === 'admin');
+            if (!isAdmin)
+                return;
+            const featurePatch = Object.assign({}, features);
+            delete featurePatch.backgroundImage;
+            const updatedRoom = yield RoomService_1.RoomService.updateRoomFeatures(actorRoomId, featurePatch);
+            if (!(updatedRoom === null || updatedRoom === void 0 ? void 0 : updatedRoom.features))
+                return;
+            const _b = updatedRoom.features, { backgroundImage: _backgroundImage } = _b, featuresWithoutBackground = __rest(_b, ["backgroundImage"]);
+            io.to(actorRoomId).emit('room-features-updated', { features: featuresWithoutBackground });
+            if (updatedRoom.phase === 'discussion') {
+                if (updatedRoom.features.facilitatorEnabled && !roomFacilitators.get(actorRoomId)) {
+                    const facilitator = selectRandomFacilitator(updatedRoom);
+                    if (facilitator) {
+                        roomFacilitators.set(actorRoomId, facilitator);
+                        io.to(actorRoomId).emit('facilitator-selected', facilitator);
+                    }
+                }
+                else if (!updatedRoom.features.facilitatorEnabled) {
+                    roomFacilitators.delete(actorRoomId);
+                    io.to(actorRoomId).emit('facilitator-selected', null);
                 }
             }
         }
-        if (!(actor === null || actor === void 0 ? void 0 : actor.roomId) || !features || typeof features !== 'object')
-            return;
-        try {
-            const room = yield RoomService_1.RoomService.getRoom(actor.roomId);
-            if (!room)
-                return;
-            if (!canControlDiscussionNavigation(room, actor.name, actor.role, actor.roomId))
-                return;
-            const updatedRoom = yield RoomService_1.RoomService.updateRoomFeatures(actor.roomId, features);
-            if (!(updatedRoom === null || updatedRoom === void 0 ? void 0 : updatedRoom.features))
-                return;
-            io.to(actor.roomId).emit('room-features-updated', { features: updatedRoom.features });
-        }
         catch (error) {
             console.error('Error updating room features:', error);
+        }
+    }));
+    socket.on('set-room-background', ({ backgroundImage }) => __awaiter(void 0, void 0, void 0, function* () {
+        const actor = yield resolveSocketActor(socket, currentUser);
+        if (!(actor === null || actor === void 0 ? void 0 : actor.roomId))
+            return;
+        currentUser = actor;
+        const actorRoomId = actor.roomId;
+        const actorName = actor.name;
+        try {
+            const room = yield RoomService_1.RoomService.getRoom(actorRoomId);
+            if (!room)
+                return;
+            const isAdmin = room.users.some((user) => user.name === actorName && user.role === 'admin');
+            if (!isAdmin)
+                return;
+            const nextBackground = yield (0, ImageStore_1.replaceBackgroundImage)(actorRoomId, backgroundImage);
+            const updatedRoom = yield RoomService_1.RoomService.updateRoomFeatures(actorRoomId, { backgroundImage: nextBackground });
+            if (!(updatedRoom === null || updatedRoom === void 0 ? void 0 : updatedRoom.features))
+                return;
+            io.to(actorRoomId).emit('room-background-updated', { backgroundImage: updatedRoom.features.backgroundImage });
+        }
+        catch (error) {
+            console.error('Error updating room background:', error);
         }
     }));
     socket.on('transfer-room-admin', ({ userId }) => __awaiter(void 0, void 0, void 0, function* () {
@@ -1707,7 +2078,11 @@ io.on('connection', (socket) => {
                 return;
             }
             const roomId = currentUser.roomId;
-            const updatedRoom = yield RoomService_1.RoomService.removeUser(roomId, userId);
+            const kickedUser = room.users.find((user) => user.id === userId);
+            if (kickedUser) {
+                cancelPendingUserDeparture(roomId, kickedUser.name);
+            }
+            const updatedRoom = yield RoomService_1.RoomService.removeUser(roomId, userId, kickedUser === null || kickedUser === void 0 ? void 0 : kickedUser.name, getPresentUserNames(roomId));
             if (!updatedRoom)
                 return;
             const socketsInRoom = yield io.in(roomId).fetchSockets();
@@ -1770,6 +2145,7 @@ io.on('connection', (socket) => {
             roomFacilitators.delete(roomId);
             roomDiscussionNavigation.delete(roomId);
             roomSprintVipVotes.delete(roomId);
+            cancelPendingDeparturesForRoom(roomId);
             io.to(roomId).emit('room-deleted');
             io.in(roomId).socketsLeave(roomId);
             currentUser = null;
@@ -1798,6 +2174,16 @@ io.on('connection', (socket) => {
         console.error('Socket error for client:', socket.id, error);
     });
 });
+app.get('/api/radio/station', (_req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const station = yield (0, RadioBrowser_1.getRandomRadioStation)();
+        res.json(station);
+    }
+    catch (error) {
+        console.error('Error fetching Radio-Browser station:', error);
+        res.status(502).json({ error: 'Failed to fetch radio station' });
+    }
+}));
 // Handle React routing, return all requests to React app
 app.get('*', (req, res) => {
     console.log('Serving index.html for path:', req.path);
@@ -1806,4 +2192,41 @@ app.get('*', (req, res) => {
 const PORT = process.env.PORT || 3001;
 httpServer.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
+    void (0, ImageStore_1.ensureUploadDir)()
+        .then(() => (0, ImageStore_1.migrateInlineImages)())
+        .catch((error) => {
+        console.error('Failed to prepare image storage:', error);
+    });
 });
+const broadcastExpiredImages = () => __awaiter(void 0, void 0, void 0, function* () {
+    var _b;
+    try {
+        const changes = yield (0, ImageStore_1.purgeExpiredImages)();
+        for (const change of changes) {
+            const room = yield RoomService_1.RoomService.getRoom(change.roomId);
+            if (!room)
+                continue;
+            rooms.set(change.roomId, room);
+            const roomState = roomStates.get(change.roomId);
+            if (roomState) {
+                roomState.cards = room.cards;
+            }
+            if (change.backgroundCleared) {
+                io.to(change.roomId).emit('room-background-updated', { backgroundImage: ((_b = room.features) === null || _b === void 0 ? void 0 : _b.backgroundImage) || '' });
+            }
+            if (change.clearedCardIds.length > 0) {
+                io.to(change.roomId).emit('state-updated', {
+                    cards: room.cards,
+                    phase: room.phase,
+                    users: room.users
+                });
+            }
+        }
+    }
+    catch (error) {
+        console.error('Failed to purge expired images:', error);
+    }
+});
+setInterval(() => {
+    void broadcastExpiredImages();
+}, ImageStore_1.IMAGE_CLEANUP_INTERVAL_MS);

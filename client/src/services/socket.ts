@@ -196,9 +196,9 @@ export class SocketService {
       this.store.clearAllCards();
     });
 
-    this.socket.on('card-moved', ({ cardId, column }: { cardId: string; column: number }) => {
-      console.log('Card moved:', { cardId, column });
-      this.store.moveCard(cardId, column);
+    this.socket.on('card-moved', ({ cardId, column, originColumn }: { cardId: string; column: number; originColumn?: number }) => {
+      console.log('Card moved:', { cardId, column, originColumn });
+      this.store.moveCard(cardId, column, originColumn);
     });
 
     this.socket.on('card-voted', ({ cardId, likes, dislikes }: { cardId: string; likes: string[]; dislikes: string[] }) => {

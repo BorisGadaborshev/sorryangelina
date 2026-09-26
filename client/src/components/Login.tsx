@@ -19,7 +19,7 @@ import {
   useTheme
 } from '@mui/material';
 import { RetroStore } from '../store/RetroStore';
-import { AuthProfile, AvailableRoom, AvailableTeam, BUILTIN_TEAM_ID, Team } from '../types';
+import { AuthProfile, AvailableRoom, AvailableTeam, BUILTIN_TEAM_ID, RETRO_TEMPLATE_LIST, RetroTemplateId, Team } from '../types';
 import CreateTeamDialog from './CreateTeamDialog';
 import RoomTiles from './RoomTiles';
 import TeamLobby from './TeamLobby';
@@ -57,6 +57,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
   const [selectedRoomId, setSelectedRoomId] = useState('');
   const [createRoomId, setCreateRoomId] = useState('');
   const [createRoomPassword, setCreateRoomPassword] = useState('');
+  const [createTemplate, setCreateTemplate] = useState<RetroTemplateId>('classic');
   const [joinRoomPassword, setJoinRoomPassword] = useState('');
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isCreateTeamDialogOpen, setIsCreateTeamDialogOpen] = useState(false);
@@ -313,6 +314,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
   const handleOpenCreateDialog = () => {
     setCreateRoomId('');
     setCreateRoomPassword('');
+    setCreateTemplate('classic');
     setIsCreateDialogOpen(true);
   };
 
@@ -482,7 +484,8 @@ const Login: React.FC<Props> = observer(({ store }) => {
         store.authProfile.name,
         store.authProfile.token,
         {
-          teamId: store.selectedTeam.id
+          teamId: store.selectedTeam.id,
+          template: createTemplate
         }
       );
       setIsCreateDialogOpen(false);
@@ -964,7 +967,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
         />
       </Box>
 
-      <Dialog open={isCreateDialogOpen} onClose={() => setIsCreateDialogOpen(false)} fullWidth maxWidth="xs">
+      <Dialog open={isCreateDialogOpen} onClose={() => setIsCreateDialogOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle>Создать комнату</DialogTitle>
         <DialogContent>
           <DialogContentText sx={{ mb: 1 }}>
@@ -993,6 +996,39 @@ const Login: React.FC<Props> = observer(({ store }) => {
               }
             }}
           />
+          <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>
+            Шаблон
+          </Typography>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            {RETRO_TEMPLATE_LIST.map((template) => {
+              const selected = createTemplate === template.id;
+              return (
+                <Paper
+                  key={template.id}
+                  variant="outlined"
+                  onClick={() => setCreateTemplate(template.id)}
+                  sx={{
+                    p: 1.25,
+                    cursor: 'pointer',
+                    borderWidth: 2,
+                    borderColor: selected ? 'primary.main' : 'divider',
+                    bgcolor: selected ? 'action.selected' : 'background.paper'
+                  }}
+                >
+                  <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                    {template.name}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                    {template.description}
+                  </Typography>
+                  <Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>
+                    {template.columns.map((column) => column.title).join(' · ')}
+                    {template.roadmapColumns ? ` · затем ${template.roadmapColumns.map((column) => column.title).join(' · ')}` : ''}
+                  </Typography>
+                </Paper>
+              );
+            })}
+          </Box>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setIsCreateDialogOpen(false)}>Отмена</Button>

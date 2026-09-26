@@ -1,6 +1,6 @@
 // Postgres access helpers
 import { pool } from '../config/database';
-import { Room, RoomDocument, User, Card, CardComment, CardReaction, RoomFeatures, COLUMN_COUNT, ColumnColorId, mergeCardTexts, normalizeColumnColors } from '../types';
+import { Room, RoomDocument, User, Card, CardComment, CardReaction, RoomFeatures, ColumnColorId, mergeCardTexts, getColumnCount, getRetroTemplate, normalizeColumnColors } from '../types';
 import { normalizeRoomFeatures } from '../utils/roomFeatures';
 
 type CommentRow = {
@@ -67,9 +67,9 @@ export const RoomModel = {
     try {
       await client.query('BEGIN');
       await client.query(
-        `insert into rooms (id, password, team_id, owner, phase) values ($1,$2,$3,$4,$5)
+        `insert into rooms (id, password, team_id, owner, phase, template) values ($1,$2,$3,$4,$5,$6)
          on conflict (id) do nothing`,
-        [doc.id, doc.password, doc.teamId ?? null, doc.owner, doc.phase]
+        [doc.id, doc.password, doc.teamId ?? null, doc.owner, doc.phase, doc.template ?? 'classic']
       );
       for (const user of doc.users || []) {
         await client.query(
@@ -90,7 +90,7 @@ export const RoomModel = {
 
   async findOne(where: { id: string }): Promise<RoomDocument | null> {
     const { rows } = await pool.query(
-      'select id, password, team_id, owner, phase, created_at, column_titles, column_colors, features from rooms where id=$1',
+      'select id, password, team_id, owner, phase, template, created_at, column_titles, column_colors, features from rooms where id=$1',
       [where.id]
     );
     if (rows.length === 0) return null;
@@ -100,17 +100,19 @@ export const RoomModel = {
       team_id: string | null;
       owner: string;
       phase: Room['phase'];
+      template: string | null;
       created_at: string;
       column_titles: string[] | null;
       column_colors: string[] | null;
       features: RoomFeatures | null;
     };
+    const template = getRetroTemplate(roomRow.template);
     const usersRes = await pool.query(
       'select id, name, role, is_ready, mood from room_users where room_id=$1 order by joined_at asc nulls last, name asc',
       [where.id]
     );
-    const cardsRes = await pool.query('select id, text, type, created_by, column_index, image_url from cards where room_id=$1', [where.id]);
-    const cardRows = cardsRes.rows as Array<{ id: string; text: string; type: Card['type']; created_by: string; column_index: number; image_url: string | null }>;
+    const cardsRes = await pool.query('select id, text, type, created_by, column_index, origin_column, image_url from cards where room_id=$1', [where.id]);
+    const cardRows = cardsRes.rows as Array<{ id: string; text: string; type: Card['type']; created_by: string; column_index: number; origin_column: number | null; image_url: string | null }>;
     const votesRes = await pool.query('select card_id, user_id, vote from card_votes where card_id = any($1::text[])', [cardRows.map((r) => r.id)]);
     const cardIdToVotes = new Map<string, { likes: string[]; dislikes: string[] }>();
     for (const v of votesRes.rows as Array<{ card_id: string; user_id: string; vote: 'like' | 'dislike' }>) {
@@ -128,6 +130,7 @@ export const RoomModel = {
       likes: cardIdToVotes.get(r.id)?.likes || [],
       dislikes: cardIdToVotes.get(r.id)?.dislikes || [],
       column: r.column_index,
+      originColumn: r.origin_column ?? undefined,
       imageUrl: r.image_url ?? undefined
     })));
     return {
@@ -136,10 +139,11 @@ export const RoomModel = {
       teamId: roomRow.team_id ?? undefined,
       owner: roomRow.owner,
       phase: roomRow.phase,
-      columnTitles: Array.isArray(roomRow.column_titles) && roomRow.column_titles.length === COLUMN_COUNT
+      template: template.id,
+      columnTitles: Array.isArray(roomRow.column_titles) && roomRow.column_titles.length === getColumnCount(template)
         ? roomRow.column_titles
         : undefined,
-      columnColors: normalizeColumnColors(roomRow.column_colors),
+      columnColors: normalizeColumnColors(roomRow.column_colors, template),
       features: normalizeRoomFeatures(roomRow.features),
       createdAt: roomRow.created_at,
       users,
@@ -353,17 +357,27 @@ export const RoomModel = {
         if (
           typeof update.$set['cards.$.text'] !== 'undefined' ||
           typeof update.$set['cards.$.column'] !== 'undefined' ||
+          typeof update.$set['cards.$.type'] !== 'undefined' ||
+          typeof update.$set['cards.$.originColumn'] !== 'undefined' ||
           typeof update.$set['cards.$.imageUrl'] !== 'undefined'
         ) {
           const cardId = filter['cards.id'];
           const text = update.$set['cards.$.text'];
           const column = update.$set['cards.$.column'];
+          const type = update.$set['cards.$.type'];
+          const originColumn = update.$set['cards.$.originColumn'];
           const imageUrl = update.$set['cards.$.imageUrl'];
           if (typeof text !== 'undefined') {
             await client.query('update cards set text=$1 where id=$2 and room_id=$3', [text, cardId, roomId]);
           }
           if (typeof column !== 'undefined') {
             await client.query('update cards set column_index=$1 where id=$2 and room_id=$3', [column, cardId, roomId]);
+          }
+          if (typeof type !== 'undefined') {
+            await client.query('update cards set type=$1 where id=$2 and room_id=$3', [type, cardId, roomId]);
+          }
+          if (typeof originColumn !== 'undefined') {
+            await client.query('update cards set origin_column=$1 where id=$2 and room_id=$3', [originColumn, cardId, roomId]);
           }
           if (typeof imageUrl !== 'undefined') {
             await client.query('update cards set image_url=$1 where id=$2 and room_id=$3', [imageUrl || null, cardId, roomId]);
@@ -394,8 +408,8 @@ export const RoomModel = {
       if (update.$push?.cards) {
         const c: Card = update.$push.cards;
         await client.query(
-          'insert into cards (id, room_id, text, type, created_by, column_index, image_url) values ($1,$2,$3,$4,$5,$6,$7) on conflict (id) do nothing',
-          [c.id, roomId, c.text, c.type, c.createdBy, c.column, c.imageUrl || null]
+          'insert into cards (id, room_id, text, type, created_by, column_index, image_url, origin_column) values ($1,$2,$3,$4,$5,$6,$7,$8) on conflict (id) do nothing',
+          [c.id, roomId, c.text, c.type, c.createdBy, c.column, c.imageUrl || null, c.originColumn ?? null]
         );
       }
 

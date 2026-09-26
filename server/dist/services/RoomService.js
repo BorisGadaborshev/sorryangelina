@@ -16,10 +16,12 @@ exports.RoomService = void 0;
 const Room_1 = require("../models/Room");
 const types_1 = require("../types");
 const roomFeatures_1 = require("../utils/roomFeatures");
+const ImageStore_1 = require("./ImageStore");
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const NO_ROOM_PASSWORD_MARKER = '__no_room_password__';
 class RoomService {
     static createRoom(roomId, password, owner, username, options = {}) {
+        var _a;
         return __awaiter(this, void 0, void 0, function* () {
             const normalizedPassword = (password === null || password === void 0 ? void 0 : password.trim()) || '';
             const hashSource = normalizedPassword || NO_ROOM_PASSWORD_MARKER;
@@ -37,12 +39,17 @@ class RoomService {
                 owner: username,
                 user
             });
+            const templateId = (_a = options.template) !== null && _a !== void 0 ? _a : 'classic';
+            if (!(0, types_1.isRetroTemplateId)(templateId)) {
+                throw new Error('Invalid retro template');
+            }
             const room = yield Room_1.RoomModel.create({
                 id: roomId,
                 password: hashedPassword,
                 teamId: options.teamId,
                 owner: username,
                 phase: 'creation',
+                template: templateId,
                 users: [user],
                 cards: []
             });
@@ -80,11 +87,29 @@ class RoomService {
     }
     static updateColumnTitles(roomId, titles) {
         return __awaiter(this, void 0, void 0, function* () {
-            if (titles.length !== types_1.COLUMN_COUNT || titles.some((title) => !title.trim())) {
+            const current = yield Room_1.RoomModel.findOne({ id: roomId });
+            if (!current)
+                return null;
+            const columnCount = (0, types_1.getColumnCount)((0, types_1.getRetroTemplate)(current.template));
+            if (titles.length !== columnCount || titles.some((title) => !title.trim())) {
                 return null;
             }
             const normalized = titles.map((title) => title.trim());
             const room = yield Room_1.RoomModel.updateColumnTitles(roomId, normalized);
+            return room ? this.convertToRoom(room) : null;
+        });
+    }
+    static updateColumnColors(roomId, colors) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const current = yield Room_1.RoomModel.findOne({ id: roomId });
+            if (!current)
+                return null;
+            const template = (0, types_1.getRetroTemplate)(current.template);
+            const normalized = (0, types_1.normalizeColumnColors)(colors, template);
+            if (normalized.some((color, index) => color !== colors[index])) {
+                return null;
+            }
+            const room = yield Room_1.RoomModel.updateColumnColors(roomId, normalized);
             return room ? this.convertToRoom(room) : null;
         });
     }
@@ -167,7 +192,8 @@ class RoomService {
             return updatedRoom ? this.convertToRoom(updatedRoom) : null;
         });
     }
-    static removeUser(roomId, userId, userName) {
+    static removeUser(roomId, userId, userName, preferUserNames) {
+        var _a;
         return __awaiter(this, void 0, void 0, function* () {
             const room = yield Room_1.RoomModel.findOne({ id: roomId });
             if (!room)
@@ -191,7 +217,9 @@ class RoomService {
             if (!updatedRoom)
                 return null;
             if (wasAdmin && remainingUsers.length > 0) {
-                const nextAdminId = yield Room_1.RoomModel.getNextRoomAdminUserId(roomId, resolvedUserId);
+                const preferredNames = new Set(preferUserNames !== null && preferUserNames !== void 0 ? preferUserNames : []);
+                const preferredAdmin = remainingUsers.find((user) => preferredNames.has(user.name));
+                const nextAdminId = (_a = preferredAdmin === null || preferredAdmin === void 0 ? void 0 : preferredAdmin.id) !== null && _a !== void 0 ? _a : yield Room_1.RoomModel.getNextRoomAdminUserId(roomId, resolvedUserId);
                 if (nextAdminId) {
                     const roomWithAdmin = yield Room_1.RoomModel.setRoomAdmin(roomId, nextAdminId);
                     return roomWithAdmin ? this.convertToRoom(roomWithAdmin) : this.convertToRoom(updatedRoom);
@@ -237,14 +265,32 @@ class RoomService {
     }
     static deleteCard(roomId, cardId) {
         return __awaiter(this, void 0, void 0, function* () {
+            yield (0, ImageStore_1.deleteCardMedia)(roomId, cardId);
             const room = yield Room_1.RoomModel.findOneAndUpdate({ id: roomId }, {
                 $pull: { cards: { id: cardId } }
             }, { new: true });
             return room ? this.convertToRoom(room) : null;
         });
     }
+    static deleteAllCards(roomId) {
+        return __awaiter(this, void 0, void 0, function* () {
+            yield (0, ImageStore_1.deleteRoomCardMedia)(roomId);
+            yield Room_1.RoomModel.deleteAllCards(roomId);
+            const room = yield Room_1.RoomModel.findOne({ id: roomId });
+            return room ? this.convertToRoom(room) : null;
+        });
+    }
     static mergeCards(roomId, targetCardId, sourceCardId) {
         return __awaiter(this, void 0, void 0, function* () {
+            const current = yield Room_1.RoomModel.findOne({ id: roomId });
+            const targetCard = current === null || current === void 0 ? void 0 : current.cards.find((card) => card.id === targetCardId);
+            const sourceCard = current === null || current === void 0 ? void 0 : current.cards.find((card) => card.id === sourceCardId);
+            if ((sourceCard === null || sourceCard === void 0 ? void 0 : sourceCard.imageUrl) && !(targetCard === null || targetCard === void 0 ? void 0 : targetCard.imageUrl)) {
+                yield (0, ImageStore_1.reassignCardMedia)(roomId, sourceCardId, targetCardId);
+            }
+            else {
+                yield (0, ImageStore_1.deleteCardMedia)(roomId, sourceCardId);
+            }
             const room = yield Room_1.RoomModel.mergeCards(roomId, targetCardId, sourceCardId);
             return room ? this.convertToRoom(room) : null;
         });
@@ -272,6 +318,20 @@ class RoomService {
                 card: Object.assign(Object.assign({}, card), { comments: [...(card.comments || []), comment] }),
                 comment
             };
+        });
+    }
+    static updateCardComment(roomId, cardId, commentId, userId, text) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const trimmed = text.trim();
+            if (!trimmed || typeof commentId !== 'string' || !commentId)
+                return null;
+            const room = yield Room_1.RoomModel.findOne({ id: roomId });
+            if (!room)
+                return null;
+            const card = room.cards.find((currentCard) => currentCard.id === cardId);
+            if (!card)
+                return null;
+            return Room_1.RoomModel.updateCardComment(cardId, commentId, userId, trimmed);
         });
     }
     static toggleCardReaction(roomId, cardId, userId, userName, emoji) {
@@ -397,6 +457,7 @@ class RoomService {
     }
     static deleteRoom(roomId) {
         return __awaiter(this, void 0, void 0, function* () {
+            yield (0, ImageStore_1.deleteRoomMedia)(roomId);
             yield Room_1.RoomModel.deleteOne({ id: roomId });
         });
     }
@@ -490,6 +551,7 @@ class RoomService {
     }
     static clearDatabase() {
         return __awaiter(this, void 0, void 0, function* () {
+            yield (0, ImageStore_1.wipeAllUploads)();
             yield Room_1.RoomModel.deleteMany();
             console.log('Database cleared successfully');
         });
@@ -497,15 +559,8 @@ class RoomService {
     static updateUserReadyState(roomId, userId, isReady, userName) {
         return __awaiter(this, void 0, void 0, function* () {
             console.log('Updating user ready state:', { roomId, userId, userName, isReady });
-            let room = yield Room_1.RoomModel.findOneAndUpdate({
-                id: roomId,
-                'users.id': userId
-            }, {
-                $set: {
-                    'users.$.isReady': isReady
-                }
-            }, { new: true });
-            if (!room && userName) {
+            let room = null;
+            if (userName) {
                 room = yield Room_1.RoomModel.findOneAndUpdate({
                     id: roomId,
                     'users.name': userName
@@ -513,6 +568,16 @@ class RoomService {
                     $set: {
                         'users.$.isReady': isReady,
                         'users.$.id': userId
+                    }
+                }, { new: true });
+            }
+            if (!room) {
+                room = yield Room_1.RoomModel.findOneAndUpdate({
+                    id: roomId,
+                    'users.id': userId
+                }, {
+                    $set: {
+                        'users.$.isReady': isReady
                     }
                 }, { new: true });
             }
@@ -563,7 +628,8 @@ class RoomService {
         });
     }
     static convertToRoom(doc) {
-        const { id, teamId, owner, phase, columnTitles, createdAt, users, cards } = doc;
+        const { id, teamId, owner, phase, columnTitles, columnColors, createdAt, users, cards } = doc;
+        const template = (0, types_1.getRetroTemplate)(doc.template);
         const features = (0, roomFeatures_1.normalizeRoomFeatures)(doc.features);
         const hasAdmin = Boolean(users === null || users === void 0 ? void 0 : users.some((user) => user.role === 'admin'));
         console.log('Converting room document:', {
@@ -577,7 +643,9 @@ class RoomService {
             teamId,
             owner,
             phase,
+            template: template.id,
             columnTitles: doc.columnTitles,
+            columnColors: (0, types_1.normalizeColumnColors)(columnColors, template),
             features,
             createdAt,
             users: users ? users.map(user => ({

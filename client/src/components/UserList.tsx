@@ -128,6 +128,8 @@ const UserList: React.FC<UserListProps> = observer(({
         return 'проголосовал(а)';
       case 'discussion':
         return 'готов(а) к обсуждению';
+      case 'roadmap':
+        return 'собрал(а) дорожную карту';
       case 'rating':
         return 'оценил(а) ретро';
       default:

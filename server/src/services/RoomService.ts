@@ -1,5 +1,5 @@
 import { RoomModel } from '../models/Room';
-import { Room, RoomDocument, User, Card, CardComment, CardReaction, Phase, CreateRoomOptions, RoomFeatures, COLUMN_COUNT, CARD_REACTION_EMOJIS, normalizeColumnColors } from '../types';
+import { Room, RoomDocument, User, Card, CardComment, CardReaction, Phase, CreateRoomOptions, RoomFeatures, CARD_REACTION_EMOJIS, getColumnCount, getRetroTemplate, isRetroTemplateId, normalizeColumnColors } from '../types';
 import { normalizeRoomFeatures } from '../utils/roomFeatures';
 import {
   deleteCardMedia,
@@ -32,12 +32,18 @@ export class RoomService {
       user
     });
     
+    const templateId = options.template ?? 'classic';
+    if (!isRetroTemplateId(templateId)) {
+      throw new Error('Invalid retro template');
+    }
+
     const room = await RoomModel.create({
       id: roomId,
       password: hashedPassword,
       teamId: options.teamId,
       owner: username,
       phase: 'creation',
+      template: templateId,
       users: [user],
       cards: []
     });
@@ -75,7 +81,10 @@ export class RoomService {
   }
 
   static async updateColumnTitles(roomId: string, titles: string[]): Promise<Room | null> {
-    if (titles.length !== COLUMN_COUNT || titles.some((title) => !title.trim())) {
+    const current = await RoomModel.findOne({ id: roomId });
+    if (!current) return null;
+    const columnCount = getColumnCount(getRetroTemplate(current.template));
+    if (titles.length !== columnCount || titles.some((title) => !title.trim())) {
       return null;
     }
     const normalized = titles.map((title) => title.trim());
@@ -84,7 +93,10 @@ export class RoomService {
   }
 
   static async updateColumnColors(roomId: string, colors: string[]): Promise<Room | null> {
-    const normalized = normalizeColumnColors(colors);
+    const current = await RoomModel.findOne({ id: roomId });
+    if (!current) return null;
+    const template = getRetroTemplate(current.template);
+    const normalized = normalizeColumnColors(colors, template);
     if (normalized.some((color, index) => color !== colors[index])) {
       return null;
     }
@@ -757,6 +769,7 @@ export class RoomService {
 
   private static convertToRoom(doc: RoomDocument): Room {
     const { id, teamId, owner, phase, columnTitles, columnColors, createdAt, users, cards } = doc;
+    const template = getRetroTemplate(doc.template);
     const features = normalizeRoomFeatures(doc.features);
     const hasAdmin = Boolean(users?.some((user) => user.role === 'admin'));
     console.log('Converting room document:', {
@@ -771,8 +784,9 @@ export class RoomService {
       teamId,
       owner,
       phase,
+      template: template.id,
       columnTitles: doc.columnTitles,
-      columnColors: columnColors ?? normalizeColumnColors(undefined),
+      columnColors: normalizeColumnColors(columnColors, template),
       features,
       createdAt,
       users: users ? users.map(user => ({

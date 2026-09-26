@@ -3,7 +3,7 @@ import { observer } from 'mobx-react-lite';
 import { Box, Button, LinearProgress, Paper, Radio, Step, StepLabel, Stepper, Typography, useMediaQuery, useTheme } from '@mui/material';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import { RetroStore } from '../store/RetroStore';
-import { Card, ChatMessage, Mood, User, getCardTextSegments } from '../types';
+import { Card, ChatMessage, ColumnKind, Mood, RetroTemplate, User, getCardTextSegments, getTemplateColumn } from '../types';
 
 interface Props {
   store: RetroStore;
@@ -112,10 +112,21 @@ const cardPreview = (card: Card): string => {
   return text.length > 90 ? `${text.slice(0, 87)}…` : text;
 };
 
-const columnKind = (card: Card): 'positive' | 'negative' | 'suggestion' => {
-  if (card.column === 1 || (card.column == null && card.type === 'disliked')) return 'negative';
-  if (card.column === 2 || (card.column == null && card.type === 'suggestion')) return 'suggestion';
+const columnKind = (card: Card, template: RetroTemplate): ColumnKind => {
+  const column = getTemplateColumn(template, card.column);
+  if (column) return column.kind;
+  if (card.type === 'disliked') return 'negative';
+  if (card.type === 'suggestion') return 'suggestion';
   return 'positive';
+};
+
+const kindStatLabel = (prefix: string, template: RetroTemplate, columnTitles: string[], kind: ColumnKind): string => {
+  const titles = template.columns
+    .map((column, index) => columnTitles[index] || column.title)
+    .filter((_, index) => template.columns[index].kind === kind);
+  const useGenericName = titles.length !== 1 && (titles.length === 0 || (kind === 'negative' && template.actionColumnIndex == null));
+  if (useGenericName) return prefix;
+  return `${prefix} · ${titles.join(', ')}`;
 };
 
 const countLabel = (count: number, one: string, few: string, many: string): string =>
@@ -126,6 +137,7 @@ const buildRetroStatSections = (input: {
   users: User[];
   chatMessages: ChatMessage[];
   columnTitles: string[];
+  template: RetroTemplate;
   anonymous: boolean;
   dislikesEnabled: boolean;
   commentsEnabled: boolean;
@@ -139,6 +151,7 @@ const buildRetroStatSections = (input: {
     users,
     chatMessages,
     columnTitles,
+    template,
     anonymous,
     dislikesEnabled,
     commentsEnabled,
@@ -183,7 +196,7 @@ const buildRetroStatSections = (input: {
 
   cards.forEach((card) => {
     bump(cardsCreated, card.createdBy);
-    const kind = columnKind(card);
+    const kind = columnKind(card, template);
     if (kind === 'positive') bump(positiveCards, card.createdBy);
     if (kind === 'negative') bump(negativeCards, card.createdBy);
     if (kind === 'suggestion') bump(suggestionCards, card.createdBy);
@@ -260,9 +273,9 @@ const buildRetroStatSections = (input: {
 
   const cardItems: RetroStat[] = [
     personStat('most-cards', 'Больше всех карточек', pickExtreme(cardsCreated, 'max'), ['карточка', 'карточки', 'карточек']),
-    personStat('most-positive', `Больше позитивных · ${columnTitles[0] || 'Было хорошо'}`, pickExtreme(positiveCards, 'max'), ['карточка', 'карточки', 'карточек']),
-    personStat('most-negative', `Больше негативных · ${columnTitles[1] || 'Было не очень'}`, pickExtreme(negativeCards, 'max'), ['карточка', 'карточки', 'карточек']),
-    personStat('most-suggestions', `Больше предложений · ${columnTitles[2] || 'А, давайте'}`, pickExtreme(suggestionCards, 'max'), ['карточка', 'карточки', 'карточек']),
+    personStat('most-positive', kindStatLabel('Больше позитивных', template, columnTitles, 'positive'), pickExtreme(positiveCards, 'max'), ['карточка', 'карточки', 'карточек']),
+    personStat('most-negative', kindStatLabel('Больше негативных', template, columnTitles, 'negative'), pickExtreme(negativeCards, 'max'), ['карточка', 'карточки', 'карточек']),
+    personStat('most-suggestions', kindStatLabel('Больше предложений', template, columnTitles, 'suggestion'), pickExtreme(suggestionCards, 'max'), ['карточка', 'карточки', 'карточек']),
     personStat('least-cards', 'Меньше всех карточек', pickExtreme(cardsCreated, 'min'), ['карточка', 'карточки', 'карточек']),
     personStat('most-likes-received', 'Больше всех лайков получил', pickExtreme(likesReceived, 'max'), ['лайк', 'лайка', 'лайков']),
     dislikesEnabled ? personStat('most-dislikes-received', 'Больше всех дизлайков получил', pickExtreme(dislikesReceived, 'max'), ['дизлайк', 'дизлайка', 'дизлайков']) : null,
@@ -384,6 +397,7 @@ const RetroRatingView: React.FC<Props> = observer(({ store }) => {
     users: store.users,
     chatMessages: store.chatMessages,
     columnTitles: store.columnTitles,
+    template: store.templateConfig,
     anonymous: store.roomFeatures.anonymousEnabled,
     dislikesEnabled: store.roomFeatures.dislikesEnabled,
     commentsEnabled: store.roomFeatures.commentsEnabled,

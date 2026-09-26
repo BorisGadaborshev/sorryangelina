@@ -17,6 +17,7 @@ import EditNoteRoundedIcon from '@mui/icons-material/EditNoteRounded';
 import HowToVoteRoundedIcon from '@mui/icons-material/HowToVoteRounded';
 import ForumRoundedIcon from '@mui/icons-material/ForumRounded';
 import AutoAwesomeRoundedIcon from '@mui/icons-material/AutoAwesomeRounded';
+import AccountTreeRoundedIcon from '@mui/icons-material/AccountTreeRounded';
 import RetroColumn from './RetroColumn';
 import UserList from './UserList';
 import { RetroStore } from '../store/RetroStore';
@@ -24,9 +25,10 @@ import DiscussionView from './DiscussionView';
 import ChatTerminal from './ChatTerminal';
 import CollaborativeWhiteboard from './CollaborativeWhiteboard';
 import RetroRatingView from './RetroRatingView';
+import RoadmapView from './RoadmapView';
 import RoomSettingsSidebar from './RoomSettingsSidebar';
 import MusicPlayerWidget from './MusicPlayerWidget';
-import { Mood, Phase } from '../types';
+import { Mood, Phase, RetroTemplateId } from '../types';
 import { toCssBackgroundUrl } from '../utils/media';
 import { getReadyButtonSx } from './readyButtonStyles';
 
@@ -57,13 +59,15 @@ const PHASE_OPTIONS: Array<{
   { value: 'creation', label: 'Создание', shortLabel: 'Создание', icon: EditNoteRoundedIcon },
   { value: 'voting', label: 'Голосование', shortLabel: 'Голоса', icon: HowToVoteRoundedIcon },
   { value: 'discussion', label: 'Обсуждение', shortLabel: 'Обсуждение', icon: ForumRoundedIcon },
+  { value: 'roadmap', label: 'Дорожная карта', shortLabel: 'Карта', icon: AccountTreeRoundedIcon },
   { value: 'rating', label: 'Оценка ретро', shortLabel: 'Оценка', icon: AutoAwesomeRoundedIcon },
 ];
 
-const getNextPhase = (phase: Phase, retroRatingEnabled: boolean): Phase | null => {
+const getNextPhase = (phase: Phase, templateId: RetroTemplateId, retroRatingEnabled: boolean): Phase | null => {
   if (phase === 'creation') return 'voting';
   if (phase === 'voting') return 'discussion';
-  if (phase === 'discussion') return retroRatingEnabled ? 'rating' : null;
+  if (phase === 'discussion') return templateId === 'traffic-light' ? 'roadmap' : (retroRatingEnabled ? 'rating' : null);
+  if (phase === 'roadmap') return retroRatingEnabled ? 'rating' : null;
   return null;
 };
 
@@ -191,10 +195,11 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   }, [currentRoomId, currentUserName, currentUserMood, store]);
 
   const getPhaseTranslation = (phase: Phase): string => {
-    const translations = {
+    const translations: Record<Phase, string> = {
       creation: 'Создание',
       voting: 'Голосование',
       discussion: 'Обсуждение',
+      roadmap: 'Дорожная карта',
       rating: 'Оценка ретро'
     };
     return translations[phase];
@@ -243,7 +248,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   const readyCount = store.getUserReadyCount();
   const totalCount = store.getTotalUserCount();
   const allUsersReady = readyEnabled && totalCount > 0 && readyCount === totalCount;
-  const nextPhase = getNextPhase(store.phase, features.retroRatingEnabled);
+  const nextPhase = getNextPhase(store.phase, store.template, features.retroRatingEnabled);
   const canAdvancePhase = store.isAdmin && nextPhase !== null;
   useEffect(() => {
     if (allUsersReady) {
@@ -375,37 +380,27 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
 
   const renderColumns = () => {
     const columns = (
-      <Box sx={{
-        display: 'flex',
-        flexDirection: isMobile ? 'column' : 'row',
-        gap: 2,
-        width: '100%',
-        minWidth: 0,
-        minHeight: isMobile ? 'auto' : '100%',
-        height: 'auto',
-        alignItems: 'stretch',
-      }}>
-        <RetroColumn
-          type="liked"
-          columnIndex={0}
-          store={store}
-          enableDragDrop={store.canUseCardDragDrop}
-          onAddCardStart={() => setIsDrawEnabled(false)}
-        />
-        <RetroColumn
-          type="disliked"
-          columnIndex={1}
-          store={store}
-          enableDragDrop={store.canUseCardDragDrop}
-          onAddCardStart={() => setIsDrawEnabled(false)}
-        />
-        <RetroColumn
-          type="suggestion"
-          columnIndex={2}
-          store={store}
-          enableDragDrop={store.canUseCardDragDrop}
-          onAddCardStart={() => setIsDrawEnabled(false)}
-        />
+      <Box sx={{ width: '100%', minWidth: 0, height: isMobile ? 'auto' : '100%', overflowX: isMobile ? 'visible' : 'auto' }}>
+        <Box sx={{
+          display: 'flex',
+          flexDirection: isMobile ? 'column' : 'row',
+          gap: 2,
+          width: isMobile ? '100%' : 'max-content',
+          minWidth: isMobile ? 0 : '100%',
+          minHeight: isMobile ? 'auto' : '100%',
+          height: 'auto',
+          alignItems: 'stretch',
+        }}>
+          {store.templateConfig.columns.map((column, columnIndex) => (
+            <RetroColumn
+              key={`${column.title}-${columnIndex}`}
+              columnIndex={columnIndex}
+              store={store}
+              enableDragDrop={store.canUseCardDragDrop}
+              onAddCardStart={() => setIsDrawEnabled(false)}
+            />
+          ))}
+        </Box>
       </Box>
     );
 
@@ -420,6 +415,8 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
     switch (store.phase) {
       case 'discussion':
         return <DiscussionView store={store} />;
+      case 'roadmap':
+        return <RoadmapView store={store} />;
       case 'rating':
         return <RetroRatingView store={store} />;
       case 'creation':
@@ -508,6 +505,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                   aria-label="Переключение этапа ретроспективы"
                   sx={{
                     display: isMobile ? 'grid' : 'flex',
+                    flexWrap: isMobile ? undefined : 'wrap',
                     gridTemplateColumns: isMobile ? '1fr 1fr' : undefined,
                     gap: isMobile ? 0.75 : 0.5,
                     width: isMobile ? '100%' : 'auto',
@@ -522,7 +520,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                       : 'inset 0 1px 0 rgba(255,255,255,0.9), 0 1px 3px rgba(20, 24, 40, 0.04)',
                   }}
                 >
-                  {PHASE_OPTIONS.map(({ value, label, shortLabel, icon: PhaseIcon }) => {
+                  {PHASE_OPTIONS.filter((option) => option.value !== 'roadmap' || store.template === 'traffic-light').map(({ value, label, shortLabel, icon: PhaseIcon }) => {
                     const isActive = store.phase === value;
                     const isUnavailable = value === 'rating' && !features.retroRatingEnabled;
 

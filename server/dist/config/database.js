@@ -50,7 +50,8 @@ const connectDB = () => __awaiter(void 0, void 0, void 0, function* () {
       password text not null,
       team_id text references teams(id) on delete set null,
       owner text not null,
-      phase text not null check (phase in ('creation','voting','discussion','rating')),
+      template text not null default 'classic',
+      phase text not null check (phase in ('creation','voting','discussion','roadmap','rating')),
       created_at timestamptz default now(),
       updated_at timestamptz default now()
     );
@@ -72,6 +73,7 @@ const connectDB = () => __awaiter(void 0, void 0, void 0, function* () {
       type text not null check (type in ('liked','disliked','suggestion')),
       created_by text not null,
       column_index integer not null,
+      origin_column integer,
       image_url text
     );
 
@@ -101,19 +103,37 @@ const connectDB = () => __awaiter(void 0, void 0, void 0, function* () {
     );
 
     alter table rooms add column if not exists team_id text references teams(id) on delete set null;
+    alter table teams add column if not exists password_version integer not null default 1;
+    alter table team_members add column if not exists unlocked_password_version integer;
     alter table cards add column if not exists image_url text;
+    alter table card_comments add column if not exists updated_at timestamptz;
     alter table room_users add column if not exists mood text;
     alter table room_users add column if not exists joined_at timestamptz default now();
     alter table rooms add column if not exists column_titles jsonb;
+    alter table rooms add column if not exists column_colors jsonb;
     alter table rooms add column if not exists features jsonb;
+    alter table rooms add column if not exists template text not null default 'classic';
+    alter table cards add column if not exists origin_column integer;
     alter table rooms drop constraint if exists rooms_phase_check;
-    alter table rooms add constraint rooms_phase_check check (phase in ('creation','voting','discussion','rating'));
+    alter table rooms add constraint rooms_phase_check check (phase in ('creation','voting','discussion','roadmap','rating'));
+
+    create table if not exists room_media (
+      id text primary key,
+      room_id text not null references rooms(id) on delete cascade,
+      kind text not null check (kind in ('card', 'background')),
+      card_id text,
+      public_url text not null,
+      file_name text,
+      created_at timestamptz default now()
+    );
 
     create index if not exists idx_cards_room on cards(room_id);
     create index if not exists idx_card_comments_card on card_comments(card_id);
     create index if not exists idx_card_reactions_card on card_reactions(card_id);
     create index if not exists idx_users_room on room_users(room_id);
     create unique index if not exists idx_accounts_name_ci on accounts ((lower(name)));
+    create index if not exists idx_room_media_created on room_media(created_at);
+    create index if not exists idx_room_media_room on room_media(room_id);
   `);
     yield exports.pool.query(`
     do $$
