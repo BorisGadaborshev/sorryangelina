@@ -4,7 +4,7 @@ import { Card as CardType, CARD_REACTION_EMOJIS, cardTextToEditorValue, editorVa
 import { Card, CardContent, Typography, IconButton, TextField, Box, Tooltip, Alert, Button, Menu, MenuItem, ListItemIcon, ListItemText, Popover, Divider } from '@mui/material';
 import { Delete, Edit, MoreVert, Check, Close, ChatBubbleOutline, AddReaction, VisibilityOff } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
-import { RetroStore } from '../store/RetroStore';
+import { ARKANOID_HITS_TO_BREAK, RetroStore } from '../store/RetroStore';
 import { getDislikeIconLabel, getLikeIconLabel, VoteIcon } from './VoteIcon';
 import { fileToImageDataUrl, IMAGE_FILE_ACCEPT, resolveMediaUrl } from '../utils/media';
 
@@ -36,6 +36,33 @@ const formatCommentAuthorName = (fullName: string): string => {
     .map((letter) => `${letter.toUpperCase()}.`)
     .join('');
   return initials ? `${surname} ${initials}` : surname;
+};
+
+const ArkanoidCracks: React.FC<{ hits: number }> = ({ hits }) => {
+  if (hits <= 0) return null;
+  const ink = 'rgba(28, 18, 18, 0.78)';
+  const light = 'rgba(255,255,255,0.8)';
+  return (
+    <Box aria-hidden sx={{ position: 'absolute', inset: 0, zIndex: 2, pointerEvents: 'none' }}>
+      <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
+        <path d="M8 18 L42 46 L22 88" stroke={light} strokeWidth="2.4" fill="none" />
+        <path d="M8 18 L42 46 L22 88" stroke={ink} strokeWidth="1.05" fill="none" />
+        {hits >= 2 && (
+          <>
+            <path d="M78 6 L52 44 L92 72" stroke={light} strokeWidth="2.4" fill="none" />
+            <path d="M78 6 L52 44 L92 72" stroke={ink} strokeWidth="1.05" fill="none" />
+          </>
+        )}
+        {hits >= ARKANOID_HITS_TO_BREAK && (
+          <>
+            <path d="M16 64 L58 36 L96 94" stroke={light} strokeWidth="2.6" fill="none" />
+            <path d="M16 64 L58 36 L96 94" stroke={ink} strokeWidth="1.15" fill="none" />
+            <path d="M42 46 L72 24" stroke={ink} strokeWidth="1" fill="none" />
+          </>
+        )}
+      </svg>
+    </Box>
+  );
 };
 
 const CardBodyText: React.FC<{ text: string; variant?: 'body1' | 'body2' }> = ({ text, variant = 'body1' }) => {
@@ -201,6 +228,9 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store, isMergeDropTa
   const comments = card.comments || [];
   const commentCount = comments.length;
 
+  const arkanoidHits = store.arkanoidActive ? (store.arkanoidHits[card.id] || 0) : 0;
+  const arkanoidBroken = arkanoidHits >= ARKANOID_HITS_TO_BREAK;
+
   const groupedReactions = useMemo(() => {
     const groups = new Map<string, { emoji: string; count: number; reactedByMe: boolean }>();
     (card.reactions || []).forEach((reaction) => {
@@ -216,17 +246,55 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store, isMergeDropTa
 
   return (
     <Card
+      data-arkanoid-card={card.id}
       sx={{
         margin: 0.6,
         backgroundColor: cardColor,
         color: cardColor && theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.92)' : 'inherit',
         position: 'relative',
-        outline: isMergeDropTarget ? `3px solid ${theme.palette.primary.main}` : '3px solid transparent',
+        overflow: 'hidden',
+        opacity: arkanoidBroken ? 0.42 : 1,
+        filter: arkanoidBroken ? 'grayscale(0.75)' : undefined,
+        outline: arkanoidBroken
+          ? '2px dashed rgba(90, 90, 90, 0.85)'
+          : arkanoidHits > 0
+            ? '2px solid rgba(225, 29, 72, 0.8)'
+            : isMergeDropTarget
+              ? `3px solid ${theme.palette.primary.main}`
+              : '3px solid transparent',
         outlineOffset: -2,
-        transition: 'outline-color 0.15s ease'
+        transition: 'outline-color 0.15s ease, opacity 0.2s ease, filter 0.2s ease'
       }}
     >
-      <CardContent sx={{ pb: '4px !important', '&:last-child': { pb: '4px' } }}>
+      <ArkanoidCracks hits={arkanoidHits} />
+      {arkanoidHits > 0 && !arkanoidBroken && (
+        <Box
+          aria-hidden
+          sx={{
+            position: 'absolute',
+            right: 8,
+            bottom: 8,
+            zIndex: 3,
+            display: 'flex',
+            gap: '3px',
+            pointerEvents: 'none'
+          }}
+        >
+          {Array.from({ length: ARKANOID_HITS_TO_BREAK }, (_, pip) => (
+            <Box
+              key={pip}
+              sx={{
+                width: 7,
+                height: 7,
+                borderRadius: '50%',
+                bgcolor: pip < arkanoidHits ? '#e11d48' : 'rgba(0,0,0,0.16)',
+                boxShadow: '0 0 0 1px rgba(255,255,255,0.75)'
+              }}
+            />
+          ))}
+        </Box>
+      )}
+      <CardContent sx={{ pb: '4px !important', '&:last-child': { pb: '4px' }, opacity: arkanoidBroken ? 0.55 : 1 }}>
         {showOriginBadge && originDefinition && (
           <Box
             sx={{

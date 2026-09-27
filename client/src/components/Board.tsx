@@ -24,6 +24,7 @@ import { RetroStore } from '../store/RetroStore';
 import DiscussionView from './DiscussionView';
 import ChatTerminal from './ChatTerminal';
 import CollaborativeWhiteboard from './CollaborativeWhiteboard';
+import ArkanoidGame, { JoystickIcon } from './ArkanoidGame';
 import RetroRatingView from './RetroRatingView';
 import RoadmapView from './RoadmapView';
 import RoomSettingsSidebar from './RoomSettingsSidebar';
@@ -128,6 +129,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   const [isUserListVisible, setIsUserListVisible] = useState(true);
   const [isChatVisible, setIsChatVisible] = useState(false);
   const [isDrawEnabled, setIsDrawEnabled] = useState(false);
+  const [isArkanoidEnabled, setIsArkanoidEnabled] = useState(false);
   const [whiteboardTool, setWhiteboardTool] = useState<'pen' | 'eraser'>('pen');
   const [whiteboardColor, setWhiteboardColor] = useState(WHITEBOARD_COLORS[0]);
   const isMobile = useMediaQuery('(max-width:600px)');
@@ -242,6 +244,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   const canDrawOnBoard = !isMobile
     && features.drawingEnabled
     && (store.phase === 'creation' || store.phase === 'voting');
+  const canPlayArkanoid = !isMobile && (store.phase === 'creation' || store.phase === 'voting');
   const canUseChat = features.chatEnabled;
   const canPlayTimerMusic = features.musicEnabled;
   const readyEnabled = features.readyEnabled;
@@ -312,6 +315,12 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
       setIsDrawEnabled(false);
     }
   }, [canDrawOnBoard, isDrawEnabled]);
+
+  useEffect(() => {
+    if (!canPlayArkanoid && isArkanoidEnabled) {
+      setIsArkanoidEnabled(false);
+    }
+  }, [canPlayArkanoid, isArkanoidEnabled]);
 
   const handleDragEnd = (result: DropResult) => {
     const { destination, source, draggableId, combine } = result;
@@ -836,18 +845,36 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                     </Tooltip>
                   )}
                   {canDrawOnBoard && (
+                    <Tooltip title={isDrawEnabled ? 'Выключить рисование' : 'Включить рисование'}>
+                      <IconButton
+                        size="small"
+                        color={isDrawEnabled ? 'primary' : 'default'}
+                        onClick={() => {
+                          setIsDrawEnabled((prev) => !prev);
+                          setIsArkanoidEnabled(false);
+                        }}
+                      >
+                        <BrushIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  )}
+                  {canPlayArkanoid && (
+                    <Tooltip title={isArkanoidEnabled ? 'Выйти из Arkanoid' : 'Запустить Arkanoid'}>
+                      <IconButton
+                        size="small"
+                        color={isArkanoidEnabled ? 'primary' : 'default'}
+                        aria-label={isArkanoidEnabled ? 'Выйти из Arkanoid' : 'Запустить Arkanoid'}
+                        onClick={() => {
+                          setIsArkanoidEnabled((prev) => !prev);
+                          setIsDrawEnabled(false);
+                        }}
+                      >
+                        <JoystickIcon />
+                      </IconButton>
+                    </Tooltip>
+                  )}
+                  {canDrawOnBoard && isDrawEnabled && (
                     <>
-                      <Tooltip title={isDrawEnabled ? 'Выключить рисование' : 'Включить рисование'}>
-                        <IconButton
-                          size="small"
-                          color={isDrawEnabled ? 'primary' : 'default'}
-                          onClick={() => setIsDrawEnabled((prev) => !prev)}
-                        >
-                          <BrushIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                      {isDrawEnabled && (
-                        <>
                           <Tooltip title="Перо">
                             <IconButton
                               size="small"
@@ -903,31 +930,31 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                               <DeleteSweepIcon fontSize="small" />
                             </IconButton>
                           </Tooltip>
-                        </>
-                      )}
                     </>
                   )}
                 </Box>
               </Box>
             </Box>
-            <Box sx={{ 
+            <Box sx={{
               flexGrow: 1,
               minWidth: 0,
               minHeight: 0,
-              overflow: 'auto',
-              overflowX: 'hidden',
               position: 'relative',
+              overflow: 'hidden',
             }}>
-              {renderContent()}
+              <Box sx={{ height: '100%', overflow: 'auto', overflowX: 'hidden' }}>
+                {renderContent()}
+              </Box>
               {canDrawOnBoard && (
-                <>
-                  <CollaborativeWhiteboard
-                    store={store}
-                    enabled={isDrawEnabled}
-                    tool={whiteboardTool}
-                    color={whiteboardColor}
-                  />
-                </>
+                <CollaborativeWhiteboard
+                  store={store}
+                  enabled={isDrawEnabled && !isArkanoidEnabled}
+                  tool={whiteboardTool}
+                  color={whiteboardColor}
+                />
+              )}
+              {isArkanoidEnabled && canPlayArkanoid && (
+                <ArkanoidGame store={store} />
               )}
             </Box>
             {canUseChat && isChatVisible && (

@@ -17,83 +17,101 @@ interface Props {
   onClose: () => void;
 }
 
-const AboutAppDialog: React.FC<Props> = ({ open, onClose }) => (
-  <Dialog
-    open={open}
-    onClose={onClose}
-    maxWidth="sm"
-    fullWidth
-    scroll="paper"
-    aria-labelledby="about-app-title"
-  >
-    <DialogTitle
-      id="about-app-title"
-      sx={{
-        display: 'flex',
-        alignItems: 'flex-start',
-        justifyContent: 'space-between',
-        gap: 1,
-        pr: 1
+const AboutAppDialog: React.FC<Props> = ({ open, onClose }) => {
+  const latest = CURRENT_APP_VERSION;
+
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      maxWidth="sm"
+      fullWidth
+      scroll="paper"
+      aria-labelledby="about-app-title"
+      PaperProps={{
+        sx: {
+          display: 'flex',
+          flexDirection: 'column',
+          maxHeight: 'calc(100% - 64px)'
+        }
       }}
     >
-      <Box>
-        <Typography variant="h6" component="span" sx={{ fontWeight: 700, display: 'block' }}>
-          О приложении
+      <DialogTitle
+        id="about-app-title"
+        sx={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: 1,
+          pr: 1
+        }}
+      >
+        <Box>
+          <Typography variant="h6" component="span" sx={{ fontWeight: 700, display: 'block' }}>
+            О приложении
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+            Ретроспектива · текущая версия {latest.version}
+          </Typography>
+        </Box>
+        <IconButton onClick={onClose} aria-label="Закрыть" size="small">
+          <CloseIcon />
+        </IconButton>
+      </DialogTitle>
+      <DialogContent dividers sx={{ px: 2.5, py: 2, flex: '1 1 auto', overflowY: 'auto' }}>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2, lineHeight: 1.55 }}>
+          Командная доска для ретроспективы: карточки по колонкам, голосование, обсуждение и оценка встречи.
         </Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-          Ретроспектива · текущая версия {CURRENT_APP_VERSION.version}
+
+        <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1.5 }}>
+          История версий
         </Typography>
-      </Box>
-      <IconButton onClick={onClose} aria-label="Закрыть" size="small">
-        <CloseIcon />
-      </IconButton>
-    </DialogTitle>
-    <DialogContent dividers sx={{ px: 2.5, py: 2 }}>
-      {APP_CHANGELOG.map((entry, index) => (
-        <Box
-          key={entry.version}
-          sx={{
-            pb: 2.5,
-            mb: index === APP_CHANGELOG.length - 1 ? 0 : 2.5,
-            borderBottom: index === APP_CHANGELOG.length - 1 ? 0 : 1,
-            borderColor: 'divider'
-          }}
-        >
+        {APP_CHANGELOG.map((entry, index) => (
           <Box
+            key={entry.version}
             sx={{
-              display: 'flex',
-              alignItems: 'baseline',
-              justifyContent: 'space-between',
-              gap: 1,
-              mb: 1
+              pb: 2.5,
+              mb: index === APP_CHANGELOG.length - 1 ? 0 : 2.5,
+              borderBottom: index === APP_CHANGELOG.length - 1 ? 0 : 1,
+              borderColor: 'divider'
             }}
           >
-            <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-              Версия {entry.version}
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
-              {entry.date}
-            </Typography>
-          </Box>
-          <Box component="ul" sx={{ m: 0, pl: 2.25 }}>
-            {entry.changes.map((change) => (
-              <Typography
-                key={change}
-                component="li"
-                variant="body2"
-                sx={{ mb: 0.5, '&:last-of-type': { mb: 0 } }}
-              >
-                {change}
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'baseline',
+                justifyContent: 'space-between',
+                gap: 1,
+                mb: 1
+              }}
+            >
+              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                Версия {entry.version}
               </Typography>
-            ))}
+              <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+                {entry.date}
+              </Typography>
+            </Box>
+            <Box component="ul" sx={{ m: 0, pl: 2.25 }}>
+              {entry.changes.map((change) => (
+                <Typography
+                  key={change}
+                  component="li"
+                  variant="body2"
+                  sx={{ mb: 0.5, '&:last-of-type': { mb: 0 } }}
+                >
+                  {change}
+                </Typography>
+              ))}
+            </Box>
           </Box>
-        </Box>
-      ))}
-    </DialogContent>
-    <DialogActions sx={{ px: 2.5, py: 1.5 }}>
-      <Button onClick={onClose}>Закрыть</Button>
-    </DialogActions>
-  </Dialog>
-);
+        ))}
+      </DialogContent>
+      <DialogActions sx={{ px: 2.5, py: 1.5, flexShrink: 0 }}>
+        <Button onClick={onClose}>Закрыть</Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
 
 export default AboutAppDialog;

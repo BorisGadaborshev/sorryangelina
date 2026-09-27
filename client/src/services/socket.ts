@@ -1,6 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { RetroStore } from '../store/RetroStore';
-import { Room, RoomState, User, Card, CardComment, CardReaction, FacilitatorAnnouncement, DiscussionNavigationState, Phase, PhaseTimerState, ChatMessage, Mood, RetroRatingState, RoomFeatures, SprintVipState, WhiteboardStroke, CreateRoomOptions, ColumnColorId } from '../types';
+import { Room, RoomState, User, Card, CardComment, CardReaction, FacilitatorAnnouncement, DiscussionNavigationState, Phase, PhaseTimerState, ChatMessage, Mood, RetroRatingState, RoomFeatures, SprintVipState, ArkanoidScoreEntry, WhiteboardStroke, CreateRoomOptions, ColumnColorId } from '../types';
 
 export class SocketService {
   private socket: Socket;
@@ -286,6 +286,10 @@ export class SocketService {
 
     this.socket.on('sprint-vip-state', (state: SprintVipState) => {
       this.store.setSprintVip(state);
+    });
+
+    this.socket.on('arkanoid-scores', ({ scores }: { scores?: ArkanoidScoreEntry[] }) => {
+      this.store.setArkanoidScores(scores || []);
     });
 
     this.socket.on('user-kicked', () => {
@@ -695,6 +699,11 @@ export class SocketService {
 
   setUserMood(mood: Mood): void {
     this.socket.emit('set-user-mood', { mood });
+  }
+
+  submitArkanoidScore(score: number, cardsBroken: number): void {
+    if (!this.socket.connected || score < 0) return;
+    this.socket.emit('arkanoid-score', { score, cardsBroken });
   }
 
   voteSprintVip(userName: string): void {

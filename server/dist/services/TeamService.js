@@ -18,6 +18,8 @@ const database_1 = require("../config/database");
 const Team_1 = require("../models/Team");
 const authNames_1 = require("../config/authNames");
 const AccountService_1 = require("./AccountService");
+const ContentModeration_1 = require("./ContentModeration");
+const UsageLimits_1 = require("./UsageLimits");
 exports.BUILTIN_TEAM_ID = 'cards-partners';
 const BUILTIN_TEAM_NAME = 'Карты и Партнеры';
 const BUILTIN_TEAM_PASSWORD = '1395-5';
@@ -62,6 +64,13 @@ class TeamService {
             if (!name || !password) {
                 throw new Error('Team name and password are required');
             }
+            const owner = (0, authNames_1.normalizeAuthName)(input.owner);
+            yield (0, UsageLimits_1.assertCreationSlotAvailable)(owner, 'team');
+            const memberNames = Array.from(new Set([owner, ...(input.members || [])].map((memberName) => (0, authNames_1.normalizeAuthName)(memberName)).filter(Boolean)));
+            yield (0, ContentModeration_1.assertNoProfanity)([
+                { kind: 'team', text: name },
+                ...memberNames.map((memberName) => ({ kind: 'person', text: memberName }))
+            ]);
             yield this.ensureBuiltinTeam();
             const baseId = slugifyTeamId(name);
             let id = baseId;
@@ -71,7 +80,6 @@ class TeamService {
                 suffix += 1;
             }
             const passwordHash = yield bcryptjs_1.default.hash(password, 10);
-            const owner = (0, authNames_1.normalizeAuthName)(input.owner);
             const members = this.buildMembers(id, owner, input.members, input.scrumMasterName);
             const team = yield Team_1.TeamModel.create({
                 id,
@@ -80,7 +88,7 @@ class TeamService {
                 passwordVersion: 1,
                 owner,
                 members
-            });
+            }, { enforceDailyLimit: true });
             yield Team_1.TeamModel.setMemberPasswordUnlock(id, owner, team.passwordVersion);
             return this.convertToTeam(team);
         });

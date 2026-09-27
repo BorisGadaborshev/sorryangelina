@@ -14,6 +14,7 @@ exports.RoomModel = void 0;
 const database_1 = require("../config/database");
 const types_1 = require("../types");
 const roomFeatures_1 = require("../utils/roomFeatures");
+const UsageLimits_1 = require("../services/UsageLimits");
 const mapCommentRow = (row) => (Object.assign({ id: row.id, cardId: row.card_id, userId: row.user_id, userName: row.user_name, text: row.text, createdAt: row.created_at }, (row.updated_at ? { updatedAt: row.updated_at } : {})));
 const attachSocialDataToCards = (cards) => __awaiter(void 0, void 0, void 0, function* () {
     if (cards.length === 0)
@@ -46,8 +47,12 @@ exports.RoomModel = {
             const client = yield database_1.pool.connect();
             try {
                 yield client.query('BEGIN');
-                yield client.query(`insert into rooms (id, password, team_id, owner, phase, template) values ($1,$2,$3,$4,$5,$6)
-         on conflict (id) do nothing`, [doc.id, doc.password, (_a = doc.teamId) !== null && _a !== void 0 ? _a : null, doc.owner, doc.phase, (_b = doc.template) !== null && _b !== void 0 ? _b : 'classic']);
+                const insertedRoom = yield client.query(`insert into rooms (id, password, team_id, owner, phase, template) values ($1,$2,$3,$4,$5,$6)
+         on conflict (id) do nothing
+         returning id`, [doc.id, doc.password, (_a = doc.teamId) !== null && _a !== void 0 ? _a : null, doc.owner, doc.phase, (_b = doc.template) !== null && _b !== void 0 ? _b : 'classic']);
+                if (insertedRoom.rows.length > 0) {
+                    yield (0, UsageLimits_1.reserveCreationSlot)(client, doc.owner, 'room', doc.id);
+                }
                 for (const user of doc.users || []) {
                     yield client.query(`insert into room_users (id, name, room_id, role, is_ready, mood, joined_at) values ($1,$2,$3,$4,$5,$6, now())
            on conflict (room_id, id) do update set name = excluded.name, role = excluded.role, is_ready = excluded.is_ready, mood = excluded.mood`, [user.id, user.name, doc.id, user.role, (_c = user.isReady) !== null && _c !== void 0 ? _c : false, (_d = user.mood) !== null && _d !== void 0 ? _d : null]);
@@ -371,6 +376,33 @@ exports.RoomModel = {
             finally {
                 client.release();
             }
+        });
+    },
+    insertCard(roomId, card) {
+        var _a;
+        return __awaiter(this, void 0, void 0, function* () {
+            const client = yield database_1.pool.connect();
+            try {
+                yield client.query('BEGIN');
+                const roomExists = yield client.query('select 1 from rooms where id = $1', [roomId]);
+                if (roomExists.rows.length === 0) {
+                    yield client.query('ROLLBACK');
+                    return null;
+                }
+                yield (0, UsageLimits_1.lockAndAssertCardSlot)(client, roomId, card.createdBy);
+                yield client.query(`insert into cards (id, room_id, text, type, created_by, column_index, image_url, origin_column)
+         values ($1,$2,$3,$4,$5,$6,$7,$8)
+         on conflict (id) do nothing`, [card.id, roomId, card.text, card.type, card.createdBy, card.column, card.imageUrl || null, (_a = card.originColumn) !== null && _a !== void 0 ? _a : null]);
+                yield client.query('COMMIT');
+            }
+            catch (error) {
+                yield client.query('ROLLBACK');
+                throw error;
+            }
+            finally {
+                client.release();
+            }
+            return this.findOne({ id: roomId });
         });
     },
     deleteOne(where) {

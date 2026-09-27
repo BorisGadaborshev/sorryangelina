@@ -376,6 +376,7 @@ app.delete('/api/rooms/:roomId', async (req, res) => {
     roomFacilitators.delete(roomId);
     roomDiscussionNavigation.delete(roomId);
     roomSprintVipVotes.delete(roomId);
+    roomArkanoidScores.delete(roomId);
     cancelPendingDeparturesForRoom(roomId);
 
     res.json({ message: 'Room deleted successfully' });
@@ -681,6 +682,7 @@ const roomRetroRatings = new Map<string, RetroRatingRoomState>();
 const roomFacilitators = new Map<string, FacilitatorAnnouncement>();
 const roomDiscussionNavigation = new Map<string, DiscussionNavigationState>();
 const roomSprintVipVotes = new Map<string, Map<string, string>>();
+const roomArkanoidScores = new Map<string, Map<string, { userName: string; score: number; cardsBroken: number }>>();
 const roomUserSocketPresence = new Map<string, Map<string, Set<string>>>();
 const pendingUserDepartures = new Map<string, ReturnType<typeof setTimeout>>();
 const USER_DISCONNECT_GRACE_MS = Math.max(
@@ -975,6 +977,18 @@ const emitSprintVipStateToSocket = (socket: Socket, room: Room): void => {
   socket.emit('sprint-vip-state', buildPersonalSprintVipState(room, voterName));
 };
 
+const arkanoidScoresPayload = (roomId: string) => ({
+  scores: Array.from(roomArkanoidScores.get(roomId)?.values() || [])
+});
+
+const emitArkanoidScoresToRoom = (roomId: string): void => {
+  io.to(roomId).emit('arkanoid-scores', arkanoidScoresPayload(roomId));
+};
+
+const emitArkanoidScoresToSocket = (target: Socket, roomId: string): void => {
+  target.emit('arkanoid-scores', arkanoidScoresPayload(roomId));
+};
+
 const persistUserLeave = async (
   user: User,
   roomId: string,
@@ -1013,6 +1027,7 @@ const persistUserLeave = async (
 
   if (updatedRoom.users.length === 0) {
     roomSprintVipVotes.delete(roomId);
+    roomArkanoidScores.delete(roomId);
     roomUserSocketPresence.delete(roomId);
     cancelPendingDeparturesForRoom(roomId);
     console.log('Room is empty:', roomId);
@@ -1166,6 +1181,7 @@ io.on('connection', (socket) => {
       socket.emit('whiteboard-history', { strokes: roomWhiteboards.get(roomId) || [] });
       emitRetroRatingStateToSocket(socket, room);
       emitSprintVipStateToSocket(socket, room);
+      emitArkanoidScoresToSocket(socket, roomId);
       emitDiscussionNavigationToSocket(socket, roomId, room);
       emitFacilitatorToSocket(socket, roomId, room);
     } catch (error) {
@@ -1250,6 +1266,7 @@ io.on('connection', (socket) => {
       socket.emit('whiteboard-history', { strokes: roomWhiteboards.get(roomId) || [] });
       emitRetroRatingStateToSocket(socket, room);
       emitSprintVipStateToSocket(socket, room);
+      emitArkanoidScoresToSocket(socket, roomId);
     } catch (error) {
       const limitMessage = error instanceof ContentModerationError || error instanceof UsageLimitError
         ? error.message
@@ -1343,6 +1360,7 @@ io.on('connection', (socket) => {
       socket.emit('whiteboard-history', { strokes: roomWhiteboards.get(roomId) || [] });
       emitRetroRatingStateToSocket(socket, room);
       emitSprintVipStateToSocket(socket, room);
+      emitArkanoidScoresToSocket(socket, roomId);
       emitDiscussionNavigationToSocket(socket, roomId, room);
       emitFacilitatorToSocket(socket, roomId, room);
       if (!existingUser) {
@@ -1836,6 +1854,21 @@ io.on('connection', (socket) => {
       console.error('Error voting sprint VIP:', error);
       socket.emit('error', 'Не удалось проголосовать за VIP спринта');
     }
+  });
+
+  socket.on('arkanoid-score', ({ score, cardsBroken }: { score?: number; cardsBroken?: number }) => {
+    if (!currentUser?.roomId || !currentUser.name) return;
+    const safeScore = Math.floor(Number(score));
+    const safeBroken = Math.floor(Number(cardsBroken));
+    if (!Number.isFinite(safeScore) || safeScore < 0 || safeScore > 1_000_000) return;
+    const broken = Number.isFinite(safeBroken) ? Math.max(0, Math.min(10_000, safeBroken)) : 0;
+    const roomId = currentUser.roomId;
+    const byUser = roomArkanoidScores.get(roomId) || new Map<string, { userName: string; score: number; cardsBroken: number }>();
+    const previous = byUser.get(currentUser.name);
+    if (previous && previous.score >= safeScore) return;
+    byUser.set(currentUser.name, { userName: currentUser.name, score: safeScore, cardsBroken: broken });
+    roomArkanoidScores.set(roomId, byUser);
+    emitArkanoidScoresToRoom(roomId);
   });
 
   socket.on('set-user-mood', async ({ mood }) => {
@@ -2412,6 +2445,7 @@ io.on('connection', (socket) => {
       roomFacilitators.delete(roomId);
       roomDiscussionNavigation.delete(roomId);
       roomSprintVipVotes.delete(roomId);
+      roomArkanoidScores.delete(roomId);
       cancelPendingDeparturesForRoom(roomId);
 
       io.to(roomId).emit('room-deleted');

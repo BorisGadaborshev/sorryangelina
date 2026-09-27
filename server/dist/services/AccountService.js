@@ -17,6 +17,7 @@ const crypto_1 = __importDefault(require("crypto"));
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const database_1 = require("../config/database");
 const authNames_1 = require("../config/authNames");
+const ContentModeration_1 = require("./ContentModeration");
 class AccountService {
     static getFixedUsers() {
         return authNames_1.FIXED_AUTH_NAMES;
@@ -87,6 +88,7 @@ class AccountService {
             if (password.length < 4) {
                 throw new Error('Password must contain at least 4 characters');
             }
+            yield (0, ContentModeration_1.assertNoProfanity)([{ kind: 'person', text: normalizedName }]);
             const existing = yield this.getAccountByName(normalizedName);
             if (existing) {
                 throw new Error('Account already exists');
@@ -113,6 +115,7 @@ class AccountService {
                 yield database_1.pool.query(`update accounts set password_hash = $1, updated_at = now() where lower(name) = lower($2)`, [passwordHash, normalizedName]);
             }
             else {
+                yield (0, ContentModeration_1.assertNoProfanity)([{ kind: 'person', text: normalizedName }]);
                 const type = (0, authNames_1.isFixedAuthName)(normalizedName) ? 'fixed' : 'registered';
                 yield database_1.pool.query(`insert into accounts (name, password_hash, type) values ($1, $2, $3)`, [normalizedName, passwordHash, type]);
             }
@@ -120,14 +123,17 @@ class AccountService {
         });
     }
     static guestLogin(name) {
-        const normalizedName = (0, authNames_1.normalizeAuthName)(name);
-        if (!normalizedName) {
-            throw new Error('Guest name is required');
-        }
-        return {
-            name: normalizedName,
-            type: 'guest'
-        };
+        return __awaiter(this, void 0, void 0, function* () {
+            const normalizedName = (0, authNames_1.normalizeAuthName)(name);
+            if (!normalizedName) {
+                throw new Error('Guest name is required');
+            }
+            yield (0, ContentModeration_1.assertNoProfanity)([{ kind: 'person', text: normalizedName }]);
+            return {
+                name: normalizedName,
+                type: 'guest'
+            };
+        });
     }
     static generateTemporaryPassword() {
         const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';

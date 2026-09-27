@@ -11,8 +11,9 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.TeamModel = void 0;
 const database_1 = require("../config/database");
+const UsageLimits_1 = require("../services/UsageLimits");
 exports.TeamModel = {
-    create(doc) {
+    create(doc, options) {
         return __awaiter(this, void 0, void 0, function* () {
             const client = yield database_1.pool.connect();
             try {
@@ -22,6 +23,9 @@ exports.TeamModel = {
                 for (const member of doc.members) {
                     yield client.query(`insert into team_members (team_id, name, role) values ($1,$2,$3)
            on conflict (team_id, name) do update set role = excluded.role`, [doc.id, member.name, member.role]);
+                }
+                if (options === null || options === void 0 ? void 0 : options.enforceDailyLimit) {
+                    yield (0, UsageLimits_1.reserveCreationSlot)(client, doc.owner, 'team', doc.id);
                 }
                 yield client.query('COMMIT');
                 return doc;

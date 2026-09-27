@@ -18,11 +18,13 @@ const types_1 = require("../types");
 const roomFeatures_1 = require("../utils/roomFeatures");
 const ImageStore_1 = require("./ImageStore");
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
+const UsageLimits_1 = require("./UsageLimits");
 const NO_ROOM_PASSWORD_MARKER = '__no_room_password__';
 class RoomService {
     static createRoom(roomId, password, owner, username, options = {}) {
         var _a;
         return __awaiter(this, void 0, void 0, function* () {
+            yield (0, UsageLimits_1.assertCreationSlotAvailable)(username, 'room');
             const normalizedPassword = (password === null || password === void 0 ? void 0 : password.trim()) || '';
             const hashSource = normalizedPassword || NO_ROOM_PASSWORD_MARKER;
             const hashedPassword = yield bcryptjs_1.default.hash(hashSource, 10);
@@ -246,9 +248,7 @@ class RoomService {
     }
     static addCard(roomId, card) {
         return __awaiter(this, void 0, void 0, function* () {
-            const room = yield Room_1.RoomModel.findOneAndUpdate({ id: roomId }, {
-                $push: { cards: card }
-            }, { new: true });
+            const room = yield Room_1.RoomModel.insertCard(roomId, card);
             return room ? this.convertToRoom(room) : null;
         });
     }

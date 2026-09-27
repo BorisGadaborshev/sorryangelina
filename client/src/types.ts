@@ -385,6 +385,12 @@ export interface SprintVipState {
   myVote?: string;
 }
 
+export interface ArkanoidScoreEntry {
+  userName: string;
+  score: number;
+  cardsBroken: number;
+}
+
 export interface ChatMessage {
   id: string;
   roomId: string;

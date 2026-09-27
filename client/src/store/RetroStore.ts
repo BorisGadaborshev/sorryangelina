@@ -1,9 +1,12 @@
 import { makeAutoObservable, runInAction } from 'mobx';
-import { AuthProfile, Card, CardComment, CardReaction, ChatMessage, ColumnColorId, ColumnKind, DEFAULT_COLUMN_COLORS, DEFAULT_COLUMN_TITLES, DEFAULT_ROOM_FEATURES, DiscussionNavigationState, FacilitatorAnnouncement, Mood, Phase, PhaseTimerState, RetroRatingState, RetroTemplate, RetroTemplateId, Room, RoomFeatures, RoomState, SprintVipState, Team, User, WhiteboardStroke, getCardTypeByColumn, getColumnCount, getRetroTemplate, getTemplateColumn, normalizeColumnColors } from '../types';
+import { ArkanoidScoreEntry, AuthProfile, Card, CardComment, CardReaction, ChatMessage, ColumnColorId, ColumnKind, DEFAULT_COLUMN_COLORS, DEFAULT_COLUMN_TITLES, DEFAULT_ROOM_FEATURES, DiscussionNavigationState, FacilitatorAnnouncement, Mood, Phase, PhaseTimerState, RetroRatingState, RetroTemplate, RetroTemplateId, Room, RoomFeatures, RoomState, SprintVipState, Team, User, WhiteboardStroke, getCardTypeByColumn, getColumnCount, getRetroTemplate, getTemplateColumn, normalizeColumnColors } from '../types';
 import { Socket } from 'socket.io-client';
 import { SocketService } from '../services/socket';
 
 const BOARD_STATE_KEY = 'retroBoardState';
+const ARKANOID_STATS_KEY_PREFIX = 'arkanoidBest:';
+export const ARKANOID_HITS_TO_BREAK = 3;
+export const ARKANOID_POINTS_PER_HIT = 10;
 const USER_MOOD_KEY_PREFIX = 'retroUserMood:';
 const FACILITATOR_SEEN_KEY_PREFIX = 'facilitatorSeen:';
 const VALID_MOODS: Mood[] = ['great', 'good', 'neutral', 'bad', 'awful'];
@@ -51,6 +54,15 @@ export class RetroStore {
     totalCount: 0,
     resultsVisible: false
   };
+  arkanoidActive = false;
+  arkanoidHits: Record<string, number> = {};
+  arkanoidScore = 0;
+  arkanoidCardsBroken = 0;
+  arkanoidBestScore = 0;
+  arkanoidBestCardsBroken = 0;
+  arkanoidHasPlayed = false;
+  arkanoidScores: ArkanoidScoreEntry[] = [];
+  private arkanoidStatsKey: string | null = null;
 
   constructor() {
     makeAutoObservable(this, {}, { autoBind: true });
@@ -142,6 +154,7 @@ export class RetroStore {
           ? { ...DEFAULT_ROOM_FEATURES, ...parsed.roomFeatures }
           : { ...DEFAULT_ROOM_FEATURES };
         this.currentUser = parsed.currentUser;
+        this.ensureArkanoidStats();
       });
     } catch {
       sessionStorage.removeItem(BOARD_STATE_KEY);
@@ -412,6 +425,7 @@ export class RetroStore {
 
   setRoom(room: Room | null) {
     console.log('Setting room:', room);
+    const previousRoomId = this.room?.id;
     runInAction(() => {
       this.room = room;
       if (room) {
@@ -448,6 +462,18 @@ export class RetroStore {
           }
         }
         this.persistBoardState();
+        if (previousRoomId && previousRoomId !== room.id) {
+          this.arkanoidStatsKey = null;
+          this.arkanoidActive = false;
+          this.arkanoidHits = {};
+          this.arkanoidScore = 0;
+          this.arkanoidCardsBroken = 0;
+          this.arkanoidBestScore = 0;
+          this.arkanoidBestCardsBroken = 0;
+          this.arkanoidHasPlayed = false;
+          this.arkanoidScores = [];
+        }
+        this.ensureArkanoidStats();
       } else {
         this.currentUser = null;
         this.clearSession();
@@ -464,6 +490,15 @@ export class RetroStore {
         this.roomFeatures = { ...DEFAULT_ROOM_FEATURES };
         this.sprintVip = { voteCount: 0 };
         this.retroRating = { hasVoted: false, votesCount: 0, totalCount: 0, resultsVisible: false };
+        this.arkanoidStatsKey = null;
+        this.arkanoidActive = false;
+        this.arkanoidHits = {};
+        this.arkanoidScore = 0;
+        this.arkanoidCardsBroken = 0;
+        this.arkanoidBestScore = 0;
+        this.arkanoidBestCardsBroken = 0;
+        this.arkanoidHasPlayed = false;
+        this.arkanoidScores = [];
         this.isReconnecting = false;
         console.log('Cleared room and session');
       }
@@ -845,6 +880,110 @@ export class RetroStore {
 
   isCurrentUserReady(): boolean {
     return this.currentUser?.isReady || false;
+  }
+
+  private arkanoidStorageKey(): string | null {
+    const roomId = this.room?.id;
+    const name = this.currentUser?.name?.trim();
+    if (!roomId || !name) return null;
+    return `${roomId}:${name}`;
+  }
+
+  ensureArkanoidStats() {
+    const key = this.arkanoidStorageKey();
+    if (!key || this.arkanoidStatsKey === key) return;
+    this.arkanoidStatsKey = key;
+    try {
+      const raw = localStorage.getItem(`${ARKANOID_STATS_KEY_PREFIX}${key}`);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { bestScore?: number; bestCardsBroken?: number };
+      const savedBest = Math.max(0, Math.floor(Number(parsed.bestScore) || 0));
+      if (savedBest > this.arkanoidBestScore) {
+        this.arkanoidBestScore = savedBest;
+        this.arkanoidBestCardsBroken = Math.max(0, Math.floor(Number(parsed.bestCardsBroken) || 0));
+      }
+    } catch {
+      localStorage.removeItem(`${ARKANOID_STATS_KEY_PREFIX}${key}`);
+    }
+  }
+
+  private persistArkanoidStats() {
+    const key = this.arkanoidStorageKey();
+    if (!key || this.arkanoidBestScore <= 0) return;
+    this.arkanoidStatsKey = key;
+    try {
+      localStorage.setItem(`${ARKANOID_STATS_KEY_PREFIX}${key}`, JSON.stringify({
+        bestScore: this.arkanoidBestScore,
+        bestCardsBroken: this.arkanoidBestCardsBroken
+      }));
+    } catch {
+      // Ignore quota errors.
+    }
+  }
+
+  beginArkanoidRound() {
+    this.ensureArkanoidStats();
+    this.arkanoidActive = true;
+    this.arkanoidHasPlayed = true;
+    this.arkanoidHits = {};
+    this.arkanoidScore = 0;
+    this.arkanoidCardsBroken = 0;
+    const sharedScore = this.arkanoidBestScore > 0 ? this.arkanoidBestScore : 0;
+    const sharedBroken = sharedScore > 0 ? this.arkanoidBestCardsBroken : 0;
+    this.socketService?.submitArkanoidScore(sharedScore, sharedBroken);
+  }
+
+  restartArkanoidRound() {
+    this.arkanoidActive = true;
+    this.arkanoidHits = {};
+    this.arkanoidScore = 0;
+    this.arkanoidCardsBroken = 0;
+  }
+
+  finishArkanoidRound() {
+    this.arkanoidActive = false;
+    this.arkanoidHits = {};
+    this.arkanoidScore = 0;
+    this.arkanoidCardsBroken = 0;
+  }
+
+  recordArkanoidHit(cardId: string): number {
+    const previous = this.arkanoidHits[cardId] || 0;
+    if (previous >= ARKANOID_HITS_TO_BREAK) return previous;
+    const next = previous + 1;
+    this.arkanoidHits = { ...this.arkanoidHits, [cardId]: next };
+    this.arkanoidScore += ARKANOID_POINTS_PER_HIT;
+    if (next >= ARKANOID_HITS_TO_BREAK) {
+      this.arkanoidCardsBroken += 1;
+    }
+    if (this.arkanoidScore > this.arkanoidBestScore) {
+      this.arkanoidBestScore = this.arkanoidScore;
+      this.arkanoidBestCardsBroken = this.arkanoidCardsBroken;
+      this.persistArkanoidStats();
+    }
+    this.socketService?.submitArkanoidScore(this.arkanoidScore, this.arkanoidCardsBroken);
+    return next;
+  }
+
+  setArkanoidScores(scores: ArkanoidScoreEntry[]) {
+    const myName = this.currentUser?.name?.trim();
+    const list = Array.isArray(scores) ? scores : [];
+    const mine = myName ? list.find((entry) => entry.userName.trim() === myName) : undefined;
+    const localBest = this.arkanoidBestScore;
+    runInAction(() => {
+      this.arkanoidScores = list;
+      if (mine && mine.score > this.arkanoidBestScore) {
+        this.arkanoidBestScore = Math.floor(mine.score);
+        this.arkanoidBestCardsBroken = Math.max(0, Math.floor(mine.cardsBroken || 0));
+      }
+    });
+    if (mine && mine.score > localBest) {
+      this.persistArkanoidStats();
+      return;
+    }
+    if (myName && localBest > (mine?.score || 0)) {
+      this.socketService?.submitArkanoidScore(localBest, this.arkanoidBestCardsBroken);
+    }
   }
 
   updateUserReadyState(isReady: boolean) {

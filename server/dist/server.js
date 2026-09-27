@@ -32,6 +32,8 @@ const roomFeatures_1 = require("./utils/roomFeatures");
 const RoomService_1 = require("./services/RoomService");
 const TeamService_1 = require("./services/TeamService");
 const AccountService_1 = require("./services/AccountService");
+const ContentModeration_1 = require("./services/ContentModeration");
+const UsageLimits_1 = require("./services/UsageLimits");
 const jwt_1 = require("./config/jwt");
 const dotenv_1 = __importDefault(require("dotenv"));
 const path_1 = __importDefault(require("path"));
@@ -351,6 +353,7 @@ app.delete('/api/rooms/:roomId', (req, res) => __awaiter(void 0, void 0, void 0,
         roomFacilitators.delete(roomId);
         roomDiscussionNavigation.delete(roomId);
         roomSprintVipVotes.delete(roomId);
+        roomArkanoidScores.delete(roomId);
         cancelPendingDeparturesForRoom(roomId);
         res.json({ message: 'Room deleted successfully' });
     }
@@ -419,20 +422,20 @@ app.post('/api/auth/register', (req, res) => __awaiter(void 0, void 0, void 0, f
         res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to register' });
     }
 }));
-app.post('/api/auth/guest', (req, res) => {
+app.post('/api/auth/guest', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { name } = req.body;
     if (!name || !name.trim()) {
         res.status(400).json({ error: 'Name is required' });
         return;
     }
     try {
-        const profile = AccountService_1.AccountService.guestLogin(name);
+        const profile = yield AccountService_1.AccountService.guestLogin(name);
         res.json(buildAuthResponse(profile));
     }
     catch (error) {
         res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to login as guest' });
     }
-});
+}));
 // Настраиваем Socket.IO с учетом Vercel
 const io = new socket_io_1.Server(httpServer, {
     cors: {
@@ -561,6 +564,7 @@ const roomRetroRatings = new Map();
 const roomFacilitators = new Map();
 const roomDiscussionNavigation = new Map();
 const roomSprintVipVotes = new Map();
+const roomArkanoidScores = new Map();
 const roomUserSocketPresence = new Map();
 const pendingUserDepartures = new Map();
 const USER_DISCONNECT_GRACE_MS = Math.max(0, Number(process.env.USER_DISCONNECT_GRACE_MS) || 5 * 60 * 1000);
@@ -818,6 +822,18 @@ const emitSprintVipStateToSocket = (socket, room) => {
     const voterName = resolveVoterNameForSocket(room, socket);
     socket.emit('sprint-vip-state', buildPersonalSprintVipState(room, voterName));
 };
+const arkanoidScoresPayload = (roomId) => {
+    var _a;
+    return ({
+        scores: Array.from(((_a = roomArkanoidScores.get(roomId)) === null || _a === void 0 ? void 0 : _a.values()) || [])
+    });
+};
+const emitArkanoidScoresToRoom = (roomId) => {
+    io.to(roomId).emit('arkanoid-scores', arkanoidScoresPayload(roomId));
+};
+const emitArkanoidScoresToSocket = (target, roomId) => {
+    target.emit('arkanoid-scores', arkanoidScoresPayload(roomId));
+};
 const persistUserLeave = (user, roomId, options = {}) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     if (options.requireAbsent && hasRoomPresence(roomId, user.name)) {
@@ -845,6 +861,7 @@ const persistUserLeave = (user, roomId, options = {}) => __awaiter(void 0, void 
     }
     if (updatedRoom.users.length === 0) {
         roomSprintVipVotes.delete(roomId);
+        roomArkanoidScores.delete(roomId);
         roomUserSocketPresence.delete(roomId);
         cancelPendingDeparturesForRoom(roomId);
         console.log('Room is empty:', roomId);
@@ -976,6 +993,7 @@ io.on('connection', (socket) => {
             socket.emit('whiteboard-history', { strokes: roomWhiteboards.get(roomId) || [] });
             emitRetroRatingStateToSocket(socket, room);
             emitSprintVipStateToSocket(socket, room);
+            emitArkanoidScoresToSocket(socket, roomId);
             emitDiscussionNavigationToSocket(socket, roomId, room);
             emitFacilitatorToSocket(socket, roomId, room);
         }
@@ -1017,6 +1035,12 @@ io.on('connection', (socket) => {
                 socket.emit('error', 'Unknown retro template');
                 return;
             }
+            if (typeof roomId !== 'string' || !roomId.trim()) {
+                socket.emit('error', 'Room name is required');
+                return;
+            }
+            yield (0, UsageLimits_1.assertCreationSlotAvailable)(effectiveUsername, 'room');
+            yield (0, ContentModeration_1.assertNoProfanity)([{ kind: 'room', text: roomId }]);
             const room = yield RoomService_1.RoomService.createRoom(roomId, password, socket.id, effectiveUsername, {
                 teamId: normalizedTeamId,
                 template: (0, types_1.isRetroTemplateId)(template) ? template : 'classic'
@@ -1047,10 +1071,16 @@ io.on('connection', (socket) => {
             socket.emit('whiteboard-history', { strokes: roomWhiteboards.get(roomId) || [] });
             emitRetroRatingStateToSocket(socket, room);
             emitSprintVipStateToSocket(socket, room);
+            emitArkanoidScoresToSocket(socket, roomId);
         }
         catch (error) {
-            console.error('Error creating room:', error);
-            socket.emit('error', 'Failed to create room');
+            const limitMessage = error instanceof ContentModeration_1.ContentModerationError || error instanceof UsageLimits_1.UsageLimitError
+                ? error.message
+                : null;
+            if (!limitMessage) {
+                console.error('Error creating room:', error);
+            }
+            socket.emit('error', limitMessage !== null && limitMessage !== void 0 ? limitMessage : 'Failed to create room');
         }
     }));
     socket.on('join-room', ({ roomId, password, username, token }) => __awaiter(void 0, void 0, void 0, function* () {
@@ -1125,6 +1155,7 @@ io.on('connection', (socket) => {
             socket.emit('whiteboard-history', { strokes: roomWhiteboards.get(roomId) || [] });
             emitRetroRatingStateToSocket(socket, room);
             emitSprintVipStateToSocket(socket, room);
+            emitArkanoidScoresToSocket(socket, roomId);
             emitDiscussionNavigationToSocket(socket, roomId, room);
             emitFacilitatorToSocket(socket, roomId, room);
             if (!existingUser) {
@@ -1170,6 +1201,7 @@ io.on('connection', (socket) => {
                 if (!isAdmin)
                     return;
             }
+            yield (0, UsageLimits_1.assertCardSlotAvailable)(actorRoomId, actorName);
             const cardId = Date.now().toString();
             const safeImageUrl = features.mediaEnabled && imageUrl
                 ? yield (0, ImageStore_1.replaceCardImage)(actorRoomId, cardId, imageUrl)
@@ -1205,6 +1237,10 @@ io.on('connection', (socket) => {
             }
         }
         catch (error) {
+            if (error instanceof UsageLimits_1.UsageLimitError) {
+                socket.emit('error', error.message);
+                return;
+            }
             console.error('Error adding card:', error);
             socket.emit('error', 'Failed to add card');
         }
@@ -1599,6 +1635,23 @@ io.on('connection', (socket) => {
             socket.emit('error', 'Не удалось проголосовать за VIP спринта');
         }
     }));
+    socket.on('arkanoid-score', ({ score, cardsBroken }) => {
+        if (!(currentUser === null || currentUser === void 0 ? void 0 : currentUser.roomId) || !currentUser.name)
+            return;
+        const safeScore = Math.floor(Number(score));
+        const safeBroken = Math.floor(Number(cardsBroken));
+        if (!Number.isFinite(safeScore) || safeScore < 0 || safeScore > 1000000)
+            return;
+        const broken = Number.isFinite(safeBroken) ? Math.max(0, Math.min(10000, safeBroken)) : 0;
+        const roomId = currentUser.roomId;
+        const byUser = roomArkanoidScores.get(roomId) || new Map();
+        const previous = byUser.get(currentUser.name);
+        if (previous && previous.score >= safeScore)
+            return;
+        byUser.set(currentUser.name, { userName: currentUser.name, score: safeScore, cardsBroken: broken });
+        roomArkanoidScores.set(roomId, byUser);
+        emitArkanoidScoresToRoom(roomId);
+    });
     socket.on('set-user-mood', ({ mood }) => __awaiter(void 0, void 0, void 0, function* () {
         if (!(currentUser === null || currentUser === void 0 ? void 0 : currentUser.roomId))
             return;
@@ -2145,6 +2198,7 @@ io.on('connection', (socket) => {
             roomFacilitators.delete(roomId);
             roomDiscussionNavigation.delete(roomId);
             roomSprintVipVotes.delete(roomId);
+            roomArkanoidScores.delete(roomId);
             cancelPendingDeparturesForRoom(roomId);
             io.to(roomId).emit('room-deleted');
             io.in(roomId).socketsLeave(roomId);

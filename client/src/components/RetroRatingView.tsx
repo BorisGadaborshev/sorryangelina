@@ -1,9 +1,9 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { observer } from 'mobx-react-lite';
 import { Box, Button, LinearProgress, Paper, Radio, Step, StepLabel, Stepper, Typography, useMediaQuery, useTheme } from '@mui/material';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import { RetroStore } from '../store/RetroStore';
-import { Card, ChatMessage, ColumnKind, Mood, RetroTemplate, User, getCardTextSegments, getTemplateColumn } from '../types';
+import { ArkanoidScoreEntry, Card, ChatMessage, ColumnKind, Mood, RetroTemplate, User, getCardTextSegments, getTemplateColumn } from '../types';
 
 interface Props {
   store: RetroStore;
@@ -381,6 +381,50 @@ const buildRetroStatSections = (input: {
   ].filter((section) => section.items.length > 0);
 };
 
+const buildArkanoidStatSection = (
+  remote: ArkanoidScoreEntry[],
+  local: { userName?: string; score: number; cardsBroken: number; played: boolean }
+): RetroStatSection | null => {
+  const byName = new Map<string, ArkanoidScoreEntry>();
+  remote.forEach((entry) => {
+    const name = entry.userName?.trim();
+    const score = Math.max(0, Math.floor(Number(entry.score) || 0));
+    if (!name || !Number.isFinite(score)) return;
+    const cardsBroken = Math.max(0, Math.floor(Number(entry.cardsBroken) || 0));
+    const existing = byName.get(name);
+    if (!existing || score > existing.score) {
+      byName.set(name, { userName: name, score, cardsBroken });
+    }
+  });
+
+  const localName = local.userName?.trim();
+  if (localName && (local.score > 0 || local.played)) {
+    const existing = byName.get(localName);
+    const localScore = Math.max(0, Math.floor(local.score || 0));
+    if (!existing || localScore > existing.score) {
+      byName.set(localName, {
+        userName: localName,
+        score: localScore,
+        cardsBroken: Math.max(0, Math.floor(local.cardsBroken || 0))
+      });
+    }
+  }
+
+  const entries = Array.from(byName.values()).sort((a, b) => b.score - a.score || a.userName.localeCompare(b.userName, 'ru'));
+  if (entries.length === 0) return null;
+  const bestScore = entries[0].score;
+  return {
+    id: 'arkanoid',
+    title: 'Arkanoid',
+    items: entries.map((entry) => ({
+      id: `arkanoid-${entry.userName}`,
+      label: bestScore > 0 && entry.score === bestScore ? 'Больше всех очков в Arkanoid' : 'Играл в Arkanoid',
+      primary: entry.userName,
+      secondary: `${countLabel(entry.score, 'очко', 'очка', 'очков')} · ${countLabel(entry.cardsBroken, 'разбитая карточка', 'разбитые карточки', 'разбитых карточек')}`
+    }))
+  };
+};
+
 const RetroRatingView: React.FC<Props> = observer(({ store }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
@@ -389,6 +433,9 @@ const RetroRatingView: React.FC<Props> = observer(({ store }) => {
     [theme.palette.mode]
   );
   const [selectedRating, setSelectedRating] = useState<1 | 2 | 3 | 4 | 5 | null>(null);
+  useEffect(() => {
+    store.ensureArkanoidStats();
+  }, [store, store.room?.id, store.currentUser?.name]);
   const rating = store.retroRating;
   const isAdmin = store.currentUser?.role === 'admin';
   const canShowResults = isAdmin && rating.votesCount >= rating.totalCount && rating.totalCount > 0;
@@ -406,6 +453,13 @@ const RetroRatingView: React.FC<Props> = observer(({ store }) => {
     sprintVipName: store.sprintVip.vipUserName,
     sprintVipVotes: store.sprintVip.voteCount
   });
+  const arkanoidSection = buildArkanoidStatSection(store.arkanoidScores, {
+    userName: store.currentUser?.name,
+    score: store.arkanoidBestScore,
+    cardsBroken: store.arkanoidBestCardsBroken,
+    played: store.arkanoidHasPlayed
+  });
+  if (arkanoidSection) statSections.push(arkanoidSection);
   const hasCards = store.cards.length > 0;
 
   const handleSubmit = () => {
@@ -505,7 +559,7 @@ const RetroRatingView: React.FC<Props> = observer(({ store }) => {
                   Статистика ретро
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                  Кто писал карточки, кто голосовал и кто больше всех обсуждал.
+                  Кто писал карточки, кто голосовал, кто больше всех обсуждал и кто играл в Arkanoid.
                   {store.roomFeatures.anonymousEnabled ? ' На доске авторы скрыты, в этой сводке имена видны.' : ''}
                 </Typography>
 
