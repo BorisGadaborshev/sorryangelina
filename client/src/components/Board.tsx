@@ -491,7 +491,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
             const isAdmin = store.canChangePhase();
 
             const timerControls = (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mr: 2, whiteSpace: 'nowrap' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, whiteSpace: 'nowrap' }}>
                 <Typography variant="caption" sx={{ color: store.phaseTimer.running ? 'warning.light' : 'text.secondary', whiteSpace: 'nowrap' }}>
                   Таймер: {formatDuration(store.phaseTimer.remainingSeconds)}
                 </Typography>

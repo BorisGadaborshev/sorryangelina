@@ -52,7 +52,7 @@ export class SocketService {
 
     this.socket.on('connect_error', (error) => {
       console.error('Socket connection error:', error);
-      this.store.setError('Failed to connect to server. Please try again.');
+      this.store.setError('Не удалось подключиться к серверу. Попробуйте ещё раз.');
       
       // Try to reconnect with polling if websocket fails
       const transport = this.socket.io?.opts?.transports?.[0];
@@ -545,7 +545,7 @@ export class SocketService {
       });
     } catch (error) {
       console.error('Failed to connect to server:', error);
-      throw new Error('Failed to connect to server');
+      throw new Error('Не удалось подключиться к серверу');
     }
   }
 
@@ -596,7 +596,7 @@ export class SocketService {
       });
     } catch (error) {
       console.error('Failed to connect to server:', error);
-      throw new Error('Failed to connect to server');
+      throw new Error('Не удалось подключиться к серверу');
     }
   }
 
@@ -826,7 +826,7 @@ export class SocketService {
       });
     } catch (error) {
       console.error('Failed to connect to server:', error);
-      throw new Error('Failed to connect to server');
+      throw new Error('Не удалось подключиться к серверу');
     }
   }
 
