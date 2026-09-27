@@ -218,6 +218,7 @@ export interface RoomFeatures {
   retroRatingEnabled: boolean;
   sprintVipEnabled: boolean;
   drawingEnabled: boolean;
+  arkanoidEnabled: boolean;
   cardEditingEnabled: boolean;
   chatEnabled: boolean;
   readyEnabled: boolean;
@@ -242,6 +243,7 @@ export const DEFAULT_ROOM_FEATURES: RoomFeatures = {
   retroRatingEnabled: true,
   sprintVipEnabled: true,
   drawingEnabled: true,
+  arkanoidEnabled: true,
   cardEditingEnabled: true,
   chatEnabled: true,
   readyEnabled: true,

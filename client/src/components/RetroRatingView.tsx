@@ -453,13 +453,15 @@ const RetroRatingView: React.FC<Props> = observer(({ store }) => {
     sprintVipName: store.sprintVip.vipUserName,
     sprintVipVotes: store.sprintVip.voteCount
   });
-  const arkanoidSection = buildArkanoidStatSection(store.arkanoidScores, {
-    userName: store.currentUser?.name,
-    score: store.arkanoidBestScore,
-    cardsBroken: store.arkanoidBestCardsBroken,
-    played: store.arkanoidHasPlayed
-  });
-  if (arkanoidSection) statSections.push(arkanoidSection);
+  if (store.roomFeatures.arkanoidEnabled) {
+    const arkanoidSection = buildArkanoidStatSection(store.arkanoidScores, {
+      userName: store.currentUser?.name,
+      score: store.arkanoidBestScore,
+      cardsBroken: store.arkanoidBestCardsBroken,
+      played: store.arkanoidHasPlayed
+    });
+    if (arkanoidSection) statSections.push(arkanoidSection);
+  }
   const hasCards = store.cards.length > 0;
 
   const handleSubmit = () => {
@@ -559,7 +561,7 @@ const RetroRatingView: React.FC<Props> = observer(({ store }) => {
                   Статистика ретро
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                  Кто писал карточки, кто голосовал, кто больше всех обсуждал и кто играл в Arkanoid.
+                  Кто писал карточки, кто голосовал, кто больше всех обсуждал{store.roomFeatures.arkanoidEnabled ? ' и кто играл в Arkanoid' : ''}.
                   {store.roomFeatures.anonymousEnabled ? ' На доске авторы скрыты, в этой сводке имена видны.' : ''}
                 </Typography>
 

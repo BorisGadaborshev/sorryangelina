@@ -24,6 +24,7 @@ import MusicNoteIcon from '@mui/icons-material/MusicNote';
 import StarRateIcon from '@mui/icons-material/StarRate';
 import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
 import BrushIcon from '@mui/icons-material/Brush';
+import SportsEsportsIcon from '@mui/icons-material/SportsEsports';
 import EditIcon from '@mui/icons-material/Edit';
 import ChatIcon from '@mui/icons-material/Chat';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
@@ -459,6 +460,15 @@ const RoomSettingsSidebar: React.FC<Props> = observer(({ store, open, onClose, t
                 tooltip="Разрешить рисование на доске"
                 icon={<BrushIcon fontSize="inherit" />}
                 onClick={() => toggleFeature('drawingEnabled')}
+                showTooltip={showTooltips}
+                disabled={!canEditFeatures}
+              />
+              <FeatureToggle
+                active={features.arkanoidEnabled}
+                label="Arkanoid"
+                tooltip="Разрешить игру Arkanoid на этапах создания и голосования. Если выключено, статистика игры скрывается"
+                icon={<SportsEsportsIcon fontSize="inherit" />}
+                onClick={() => toggleFeature('arkanoidEnabled')}
                 showTooltip={showTooltips}
                 disabled={!canEditFeatures}
               />

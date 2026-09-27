@@ -175,6 +175,7 @@ export interface RoomFeatures {
   retroRatingEnabled: boolean;
   sprintVipEnabled: boolean;
   drawingEnabled: boolean;
+  arkanoidEnabled: boolean;
   cardEditingEnabled: boolean;
   chatEnabled: boolean;
   readyEnabled: boolean;

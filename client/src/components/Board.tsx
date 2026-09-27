@@ -244,7 +244,9 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   const canDrawOnBoard = !isMobile
     && features.drawingEnabled
     && (store.phase === 'creation' || store.phase === 'voting');
-  const canPlayArkanoid = !isMobile && (store.phase === 'creation' || store.phase === 'voting');
+  const canPlayArkanoid = !isMobile
+    && features.arkanoidEnabled
+    && (store.phase === 'creation' || store.phase === 'voting');
   const canUseChat = features.chatEnabled;
   const canPlayTimerMusic = features.musicEnabled;
   const readyEnabled = features.readyEnabled;
