@@ -81,7 +81,7 @@ const CardBodyText: React.FC<{ text: string; variant?: 'body1' | 'body2' }> = ({
               }}
             />
           )}
-          <Typography variant={variant} sx={{ wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>
+          <Typography variant={variant} sx={{ wordBreak: 'break-word', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap', minWidth: 0 }}>
             {segment}
           </Typography>
         </React.Fragment>
@@ -249,6 +249,9 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store, isMergeDropTa
       data-arkanoid-card={card.id}
       sx={{
         margin: 0.6,
+        width: 'auto',
+        maxWidth: '100%',
+        minWidth: 0,
         backgroundColor: cardColor,
         color: cardColor && theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.92)' : 'inherit',
         position: 'relative',
@@ -373,7 +376,7 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store, isMergeDropTa
         ) : (
           <>
             <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
-              <Box sx={{ flex: 1 }}>
+              <Box sx={{ flex: 1, minWidth: 0 }}>
                 {isTextHidden ? (
                   <Box
                     sx={{
@@ -447,6 +450,7 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store, isMergeDropTa
                 sx={{
                   mt: 1,
                   width: '100%',
+                  maxWidth: '100%',
                   maxHeight: 260,
                   objectFit: 'contain',
                   borderRadius: 1

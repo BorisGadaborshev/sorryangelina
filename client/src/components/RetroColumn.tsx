@@ -395,10 +395,10 @@ const RetroColumn: React.FC<Props> = observer(({ columnIndex, store, enableDragD
     <Paper 
       elevation={0}
       sx={{
-        width: '100%',
+        width: isMobile ? '100%' : 'auto',
         maxWidth: '100%',
-        flex: isMobile ? '0 0 auto' : '1 0 220px',
-        minWidth: isMobile ? '100%' : 220,
+        flex: isMobile ? '0 0 auto' : '1 1 220px',
+        minWidth: isMobile ? 0 : 220,
         minHeight: isMobile ? 'auto' : '100%',
         height: 'auto',
         maxHeight: 'none',
@@ -465,7 +465,7 @@ const RetroColumn: React.FC<Props> = observer(({ columnIndex, store, enableDragD
           </Box>
         ) : (
           <>
-            <Typography variant="h6" align="center" sx={{ flex: 1 }}>
+            <Typography variant="h6" align="center" sx={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere', lineHeight: 1.2 }}>
               {displayTitle}
             </Typography>
             {canCopyMarkdown && (
@@ -897,6 +897,8 @@ const RetroColumn: React.FC<Props> = observer(({ columnIndex, store, enableDragD
               sx={{
                 flexGrow: 1,
                 minHeight: 0,
+                minWidth: 0,
+                maxWidth: '100%',
                 overflow: 'visible',
                 display: 'flex',
                 flexDirection: 'column',
@@ -913,7 +915,9 @@ const RetroColumn: React.FC<Props> = observer(({ columnIndex, store, enableDragD
                       {...dragProvided.draggableProps}
                       {...dragProvided.dragHandleProps}
                       sx={{
-                        opacity: dragSnapshot.isDragging ? 0.85 : 1
+                        opacity: dragSnapshot.isDragging ? 0.85 : 1,
+                        minWidth: 0,
+                        maxWidth: '100%'
                       }}
                     >
                       <RetroCard
@@ -931,7 +935,7 @@ const RetroColumn: React.FC<Props> = observer(({ columnIndex, store, enableDragD
           )}
         </Droppable>
       ) : (
-        <Box sx={{ flexGrow: 1, minHeight: 0, overflow: 'visible', display: 'flex', flexDirection: 'column' }}>
+        <Box sx={{ flexGrow: 1, minHeight: 0, minWidth: 0, maxWidth: '100%', overflow: 'visible', display: 'flex', flexDirection: 'column' }}>
           {localCards.map((card, index) => (
             <RetroCard key={card.id} card={card} index={index} store={store} />
           ))}
