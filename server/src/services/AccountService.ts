@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import bcrypt from 'bcryptjs';
+import bcrypt from 'bcrypt';
 import { pool } from '../config/database';
 import { FIXED_AUTH_NAMES, isFixedAuthName, normalizeAuthName } from '../config/authNames';
 import { assertNoProfanity } from './ContentModeration';
@@ -149,12 +149,22 @@ export class AccountService {
       throw new Error('Guest name is required');
     }
 
+    if (isFixedAuthName(normalizedName) || await this.hasAccount(normalizedName)) {
+      throw new Error('Это имя занято, войдите с паролем');
+    }
+
     await assertNoProfanity([{ kind: 'person', text: normalizedName }]);
 
     return {
       name: normalizedName,
       type: 'guest'
     };
+  }
+
+  static async hasAccount(name: string): Promise<boolean> {
+    const normalizedName = normalizeAuthName(name);
+    if (!normalizedName) return false;
+    return (await this.getAccountByName(normalizedName)) !== null;
   }
 
   private static generateTemporaryPassword(): string {

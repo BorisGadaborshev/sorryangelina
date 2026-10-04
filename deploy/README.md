@@ -46,8 +46,8 @@
 # Update system
 sudo apt update && sudo apt upgrade -y
 
-# Install Node.js 18.x
-curl -fsSL https://deb.nodesource.com/setup_18.x | sudo bash -
+# Install Node.js 22.x
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash -
 sudo apt install -y nodejs
 
 # Install PostgreSQL

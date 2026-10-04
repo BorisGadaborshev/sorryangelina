@@ -1,5 +1,6 @@
-import bcrypt from 'bcryptjs';
+import bcrypt from 'bcrypt';
 import { pool } from '../config/database';
+import { RoomCache } from './RoomCache';
 import { TeamModel } from '../models/Team';
 import { AvailableTeam, CreateTeamInput, Team, TeamDocument, TeamMember } from '../types';
 import { FIXED_AUTH_NAMES, normalizeAuthName } from '../config/authNames';
@@ -329,5 +330,6 @@ export class TeamService {
 
   private static async assignLegacyRoomsToBuiltinTeam(): Promise<void> {
     await pool.query('update rooms set team_id=$1 where team_id is null', [BUILTIN_TEAM_ID]);
+    RoomCache.clear();
   }
 }

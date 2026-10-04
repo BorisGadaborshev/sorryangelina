@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
 import { pool } from '../config/database';
+import { RoomCache } from './RoomCache';
 
 export const IMAGE_TTL_MS = 2 * 60 * 60 * 1000;
 export const IMAGE_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
@@ -169,8 +170,12 @@ export const replaceCardImage = async (roomId: string, cardId: string, imageValu
     [roomId, cardId]
   );
   await deleteMediaRows(existing.rows as MediaRow[]);
-  if (!nextUrl) return undefined;
+  if (!nextUrl) {
+    RoomCache.invalidate(roomId);
+    return undefined;
+  }
   await insertMedia(roomId, 'card', nextUrl, fileNameFromUrl(nextUrl), cardId);
+  RoomCache.invalidate(roomId);
   return nextUrl;
 };
 
@@ -185,6 +190,7 @@ export const replaceBackgroundImage = async (roomId: string, imageValue: unknown
   if (nextUrl) {
     await insertMedia(roomId, 'background', nextUrl, fileNameFromUrl(nextUrl));
   }
+  RoomCache.invalidate(roomId);
   return nextUrl;
 };
 
@@ -260,6 +266,7 @@ export const migrateInlineImages = async (): Promise<void> => {
   for (const row of cards.rows as Array<{ id: string; room_id: string; image_url: string }>) {
     const nextUrl = await replaceCardImage(row.room_id, row.id, row.image_url);
     await pool.query('update cards set image_url=$1 where id=$2', [nextUrl || null, row.id]);
+    RoomCache.invalidate(row.room_id);
   }
 
   const rooms = await pool.query(
@@ -274,19 +281,8 @@ export const migrateInlineImages = async (): Promise<void> => {
        where id=$2`,
       [nextUrl, row.id]
     );
+    RoomCache.invalidate(row.id);
   }
-};
-
-export const wipeAllUploads = async (): Promise<void> => {
-  let entries: string[] = [];
-  try {
-    entries = await fs.readdir(getUploadDir());
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') return;
-    throw error;
-  }
-  await Promise.all(entries.filter((name) => !name.startsWith('.')).map((fileName) => deleteFileIfExists(fileName)));
 };
 
 export const purgeExpiredImages = async (): Promise<ExpiredImageChange[]> => {
@@ -332,5 +328,8 @@ export const purgeExpiredImages = async (): Promise<ExpiredImageChange[]> => {
   }
 
   await deleteOrphanFiles();
+  for (const roomId of byRoom.keys()) {
+    RoomCache.invalidate(roomId);
+  }
   return Array.from(byRoom.values());
 };

@@ -5,63 +5,62 @@ import {
   deleteCardMedia,
   deleteRoomCardMedia,
   deleteRoomMedia,
-  reassignCardMedia,
-  wipeAllUploads
+  reassignCardMedia
 } from './ImageStore';
-import bcrypt from 'bcryptjs';
+import bcrypt from 'bcrypt';
 import { assertCreationSlotAvailable } from './UsageLimits';
-
-const NO_ROOM_PASSWORD_MARKER = '__no_room_password__';
+import { RoomCache } from './RoomCache';
 
 export class RoomService {
   static async createRoom(roomId: string, password: string | undefined, owner: string, username: string, options: CreateRoomOptions = {}): Promise<Room> {
-    await assertCreationSlotAvailable(username, 'room');
-    const normalizedPassword = password?.trim() || '';
-    const hashSource = normalizedPassword || NO_ROOM_PASSWORD_MARKER;
-    const hashedPassword = await bcrypt.hash(hashSource, 10);
-    const user: User = {
-      id: owner,
-      name: username,
-      roomId,
-      role: 'admin',
-      isReady: false
-    };
+    RoomCache.invalidate(roomId);
+    try {
+      await assertCreationSlotAvailable(username, 'room');
+      const normalizedPassword = password?.trim() || '';
+      const hasPassword = normalizedPassword.length > 0;
+      const hashedPassword = hasPassword ? await bcrypt.hash(normalizedPassword, 10) : '';
+      const user: User = {
+        id: owner,
+        name: username,
+        roomId,
+        role: 'admin',
+        isReady: false
+      };
     
-    console.log('Creating room:', {
-      roomId,
-      teamId: options.teamId,
-      owner: username,
-      user
-    });
-    
-    const templateId = options.template ?? 'classic';
-    if (!isRetroTemplateId(templateId)) {
-      throw new Error('Invalid retro template');
+        
+      const templateId = options.template ?? 'classic';
+      if (!isRetroTemplateId(templateId)) {
+        throw new Error('Invalid retro template');
+      }
+
+      const room = await RoomModel.create({
+        id: roomId,
+        password: hashedPassword,
+        hasPassword,
+        teamId: options.teamId,
+        owner: username,
+        phase: 'creation',
+        template: templateId,
+        users: [user],
+        cards: []
+      });
+
+      const convertedRoom = this.convertToRoom(room);
+          return convertedRoom;
+      } finally {
+      RoomCache.invalidate(roomId);
     }
-
-    const room = await RoomModel.create({
-      id: roomId,
-      password: hashedPassword,
-      teamId: options.teamId,
-      owner: username,
-      phase: 'creation',
-      template: templateId,
-      users: [user],
-      cards: []
-    });
-
-    const convertedRoom = this.convertToRoom(room);
-    console.log('Room created and converted:', {
-      originalUsers: room.users,
-      convertedUsers: convertedRoom.users
-    });
-
-    return convertedRoom;
-  }
+}
 
   static async getRoom(roomId: string): Promise<Room | null> {
+    const cached = RoomCache.get(roomId);
+    if (cached) return cached;
+    const generation = RoomCache.generation(roomId);
     const room = await this.ensureRoomHasAdmin(roomId);
-    return room ? this.convertToRoom(room) : null;
+    if (!room) return null;
+    const converted = this.convertToRoom(room);
+    RoomCache.set(roomId, converted, generation);
+    return converted;
   }
 
   private static isRoomAdmin(user: User, roomOwner: string): boolean {
@@ -78,54 +77,63 @@ export class RoomService {
     const nextAdminId = await RoomModel.getNextRoomAdminUserId(roomId, '');
     if (!nextAdminId) return room;
 
-    console.log('Assigning missing room admin:', { roomId, nextAdminId });
-    return RoomModel.setRoomAdmin(roomId, nextAdminId);
+        return RoomModel.setRoomAdmin(roomId, nextAdminId);
   }
 
   static async updateColumnTitles(roomId: string, titles: string[]): Promise<Room | null> {
-    const current = await RoomModel.findOne({ id: roomId });
-    if (!current) return null;
-    const columnCount = getColumnCount(getRetroTemplate(current.template));
-    if (titles.length !== columnCount || titles.some((title) => !title.trim())) {
-      return null;
+    RoomCache.invalidate(roomId);
+    try {
+      const current = await RoomModel.findOne({ id: roomId });
+      if (!current) return null;
+      const columnCount = getColumnCount(getRetroTemplate(current.template));
+      if (titles.length !== columnCount || titles.some((title) => !title.trim())) {
+        return null;
+      }
+      const normalized = titles.map((title) => title.trim());
+      const room = await RoomModel.updateColumnTitles(roomId, normalized);
+      return room ? this.convertToRoom(room) : null;
+      } finally {
+      RoomCache.invalidate(roomId);
     }
-    const normalized = titles.map((title) => title.trim());
-    const room = await RoomModel.updateColumnTitles(roomId, normalized);
-    return room ? this.convertToRoom(room) : null;
-  }
+}
 
   static async updateColumnColors(roomId: string, colors: string[]): Promise<Room | null> {
-    const current = await RoomModel.findOne({ id: roomId });
-    if (!current) return null;
-    const template = getRetroTemplate(current.template);
-    const normalized = normalizeColumnColors(colors, template);
-    if (normalized.some((color, index) => color !== colors[index])) {
-      return null;
+    RoomCache.invalidate(roomId);
+    try {
+      const current = await RoomModel.findOne({ id: roomId });
+      if (!current) return null;
+      const template = getRetroTemplate(current.template);
+      const normalized = normalizeColumnColors(colors, template);
+      if (normalized.some((color, index) => color !== colors[index])) {
+        return null;
+      }
+      const room = await RoomModel.updateColumnColors(roomId, normalized);
+      return room ? this.convertToRoom(room) : null;
+      } finally {
+      RoomCache.invalidate(roomId);
     }
-    const room = await RoomModel.updateColumnColors(roomId, normalized);
-    return room ? this.convertToRoom(room) : null;
-  }
+}
 
   static async updateRoomFeatures(roomId: string, features: Partial<RoomFeatures>): Promise<Room | null> {
-    const current = await RoomModel.findOne({ id: roomId });
-    if (!current) return null;
-    const merged = normalizeRoomFeatures({ ...current.features, ...features });
-    const room = await RoomModel.updateRoomFeatures(roomId, merged);
-    return room ? this.convertToRoom(room) : null;
-  }
+    RoomCache.invalidate(roomId);
+    try {
+      const current = await RoomModel.findOne({ id: roomId });
+      if (!current) return null;
+      const merged = normalizeRoomFeatures({ ...current.features, ...features });
+      const room = await RoomModel.updateRoomFeatures(roomId, merged);
+      return room ? this.convertToRoom(room) : null;
+      } finally {
+      RoomCache.invalidate(roomId);
+    }
+}
 
   static async validatePassword(roomId: string, password?: string): Promise<boolean> {
     const room = await RoomModel.findOne({ id: roomId });
     if (!room) return false;
-    const isOpenRoom = await this.roomHasPassword(room.password) === false;
-    if (isOpenRoom) return true;
+    if (!room.hasPassword) return true;
     const provided = password?.trim() || '';
     if (!provided) return false;
     return bcrypt.compare(provided, room.password);
-  }
-
-  static async roomHasPassword(hashedPassword: string): Promise<boolean> {
-    return !(await bcrypt.compare(NO_ROOM_PASSWORD_MARKER, hashedPassword));
   }
 
   static async findExistingUser(roomId: string, username: string): Promise<User | null> {
@@ -134,13 +142,7 @@ export class RoomService {
     
     const existingUser = room.users.find(user => user.name === username);
     if (existingUser) {
-      console.log('Found existing user check:', { 
-        username,
-        role: existingUser.role,
-        roomOwner: room.owner
-      });
-
-      return {
+            return {
         ...existingUser,
         role: existingUser.role || 'user' as const
       };
@@ -149,56 +151,53 @@ export class RoomService {
   }
 
   static async addUser(roomId: string, user: User): Promise<Room | null> {
-    const room = await RoomModel.findOne({ id: roomId });
-    if (!room) return null;
+    RoomCache.invalidate(roomId);
+    try {
+      const room = await RoomModel.findOne({ id: roomId });
+      if (!room) return null;
 
-    const existingUser = await this.findExistingUser(roomId, user.name);
+      const existingUser = await this.findExistingUser(roomId, user.name);
     
-    if (existingUser) {
+      if (existingUser) {
+        const userWithRole = { 
+          ...user, 
+          role: existingUser.role || 'user' as const
+        };
+      
+            
+        const updatedRoom = await RoomModel.findOneAndUpdate(
+          { 
+            id: roomId,
+            'users.name': user.name 
+          },
+          { 
+            $set: { 
+              'users.$.id': user.id,
+              'users.$.role': userWithRole.role
+            }
+          },
+          { new: true }
+        );
+        return updatedRoom ? this.convertToRoom(updatedRoom) : null;
+      }
+
       const userWithRole = { 
         ...user, 
-        role: existingUser.role || 'user' as const
+        role: 'user' as const
       };
-      
-      console.log('Updating existing user:', {
-        user: userWithRole
-      });
-      
-      const updatedRoom = await RoomModel.findOneAndUpdate(
+    
+          const updatedRoom = await RoomModel.findOneAndUpdate(
+        { id: roomId },
         { 
-          id: roomId,
-          'users.name': user.name 
-        },
-        { 
-          $set: { 
-            'users.$.id': user.id,
-            'users.$.role': userWithRole.role
-          }
+          $addToSet: { users: userWithRole }
         },
         { new: true }
       );
       return updatedRoom ? this.convertToRoom(updatedRoom) : null;
+      } finally {
+      RoomCache.invalidate(roomId);
     }
-
-    const userWithRole = { 
-      ...user, 
-      role: 'user' as const
-    };
-    
-    console.log('Adding new user:', {
-      user: userWithRole,
-      existingUsersCount: room.users.length
-    });
-
-    const updatedRoom = await RoomModel.findOneAndUpdate(
-      { id: roomId },
-      { 
-        $addToSet: { users: userWithRole }
-      },
-      { new: true }
-    );
-    return updatedRoom ? this.convertToRoom(updatedRoom) : null;
-  }
+}
 
   static async removeUser(
     roomId: string,
@@ -206,46 +205,51 @@ export class RoomService {
     userName?: string,
     preferUserNames?: string[]
   ): Promise<Room | null> {
-    const room = await RoomModel.findOne({ id: roomId });
-    if (!room) return null;
+    RoomCache.invalidate(roomId);
+    try {
+      const room = await RoomModel.findOne({ id: roomId });
+      if (!room) return null;
 
-    let leaveIndex = room.users.findIndex((user) => user.id === userId);
-    let resolvedUserId = userId;
-    if (leaveIndex === -1 && userName) {
-      leaveIndex = room.users.findIndex((user) => user.name === userName);
-      if (leaveIndex !== -1) {
-        resolvedUserId = room.users[leaveIndex].id;
+      let leaveIndex = room.users.findIndex((user) => user.id === userId);
+      let resolvedUserId = userId;
+      if (leaveIndex === -1 && userName) {
+        leaveIndex = room.users.findIndex((user) => user.name === userName);
+        if (leaveIndex !== -1) {
+          resolvedUserId = room.users[leaveIndex].id;
+        }
       }
-    }
-    if (leaveIndex === -1) return this.convertToRoom(room);
+      if (leaveIndex === -1) return this.convertToRoom(room);
 
-    const leavingUser = room.users[leaveIndex];
-    const wasAdmin = this.isRoomAdmin(leavingUser, room.owner);
-    const remainingUsers = room.users.filter((user) => user.id !== resolvedUserId);
+      const leavingUser = room.users[leaveIndex];
+      const wasAdmin = this.isRoomAdmin(leavingUser, room.owner);
+      const remainingUsers = room.users.filter((user) => user.id !== resolvedUserId);
 
-    const updatedRoom = await RoomModel.findOneAndUpdate(
-      { id: roomId },
-      {
-        $pull: { users: { id: resolvedUserId } }
-      },
-      { new: true }
-    );
-    if (!updatedRoom) return null;
+      const updatedRoom = await RoomModel.findOneAndUpdate(
+        { id: roomId },
+        {
+          $pull: { users: { id: resolvedUserId } }
+        },
+        { new: true }
+      );
+      if (!updatedRoom) return null;
 
-    if (wasAdmin && remainingUsers.length > 0) {
-      const preferredNames = new Set(preferUserNames ?? []);
-      const preferredAdmin = remainingUsers.find((user) => preferredNames.has(user.name));
-      const nextAdminId = preferredAdmin?.id
-        ?? await RoomModel.getNextRoomAdminUserId(roomId, resolvedUserId);
-      if (nextAdminId) {
-        const roomWithAdmin = await RoomModel.setRoomAdmin(roomId, nextAdminId);
-        return roomWithAdmin ? this.convertToRoom(roomWithAdmin) : this.convertToRoom(updatedRoom);
+      if (wasAdmin && remainingUsers.length > 0) {
+        const preferredNames = new Set(preferUserNames ?? []);
+        const preferredAdmin = remainingUsers.find((user) => preferredNames.has(user.name));
+        const nextAdminId = preferredAdmin?.id
+          ?? await RoomModel.getNextRoomAdminUserId(roomId, resolvedUserId);
+        if (nextAdminId) {
+          const roomWithAdmin = await RoomModel.setRoomAdmin(roomId, nextAdminId);
+          return roomWithAdmin ? this.convertToRoom(roomWithAdmin) : this.convertToRoom(updatedRoom);
+        }
       }
-    }
 
-    const healedRoom = await this.ensureRoomHasAdmin(roomId);
-    return healedRoom ? this.convertToRoom(healedRoom) : this.convertToRoom(updatedRoom);
-  }
+      const healedRoom = await this.ensureRoomHasAdmin(roomId);
+      return healedRoom ? this.convertToRoom(healedRoom) : this.convertToRoom(updatedRoom);
+      } finally {
+      RoomCache.invalidate(roomId);
+    }
+}
 
   static async transferRoomAdmin(
     roomId: string,
@@ -253,73 +257,103 @@ export class RoomService {
     targetUserId: string,
     actorUserName?: string
   ): Promise<Room | null> {
-    const room = await RoomModel.findOne({ id: roomId });
-    if (!room) return null;
+    RoomCache.invalidate(roomId);
+    try {
+      const room = await RoomModel.findOne({ id: roomId });
+      if (!room) return null;
 
-    const actor = room.users.find((user) => user.id === actorUserId)
-      ?? (actorUserName ? room.users.find((user) => user.name === actorUserName) : undefined);
-    const target = room.users.find((user) => user.id === targetUserId);
-    if (!actor || !this.isRoomAdmin(actor, room.owner) || !target || target.id === actor.id) {
-      return null;
+      const actor = room.users.find((user) => user.id === actorUserId)
+        ?? (actorUserName ? room.users.find((user) => user.name === actorUserName) : undefined);
+      const target = room.users.find((user) => user.id === targetUserId);
+      if (!actor || !this.isRoomAdmin(actor, room.owner) || !target || target.id === actor.id) {
+        return null;
+      }
+
+      const updatedRoom = await RoomModel.setRoomAdmin(roomId, targetUserId);
+      return updatedRoom ? this.convertToRoom(updatedRoom) : null;
+      } finally {
+      RoomCache.invalidate(roomId);
     }
-
-    const updatedRoom = await RoomModel.setRoomAdmin(roomId, targetUserId);
-    return updatedRoom ? this.convertToRoom(updatedRoom) : null;
-  }
+}
 
   static async addCard(roomId: string, card: Card): Promise<Room | null> {
-    const room = await RoomModel.insertCard(roomId, card);
-    return room ? this.convertToRoom(room) : null;
-  }
+    RoomCache.invalidate(roomId);
+    try {
+      const room = await RoomModel.insertCard(roomId, card);
+      return room ? this.convertToRoom(room) : null;
+      } finally {
+      RoomCache.invalidate(roomId);
+    }
+}
 
   static async updateCard(roomId: string, cardId: string, updates: Partial<Card>): Promise<Room | null> {
-    const room = await RoomModel.findOneAndUpdate(
-      { 
-        id: roomId,
-        'cards.id': cardId
-      },
-      { 
-        $set: Object.entries(updates).reduce((acc, [key, value]) => ({
-          ...acc,
-          [`cards.$.${key}`]: value
-        }), {})
-      },
-      { new: true }
-    );
-    return room ? this.convertToRoom(room) : null;
-  }
+    RoomCache.invalidate(roomId);
+    try {
+      const room = await RoomModel.findOneAndUpdate(
+        { 
+          id: roomId,
+          'cards.id': cardId
+        },
+        { 
+          $set: Object.entries(updates).reduce((acc, [key, value]) => ({
+            ...acc,
+            [`cards.$.${key}`]: value
+          }), {})
+        },
+        { new: true }
+      );
+      return room ? this.convertToRoom(room) : null;
+      } finally {
+      RoomCache.invalidate(roomId);
+    }
+}
 
   static async deleteCard(roomId: string, cardId: string): Promise<Room | null> {
-    await deleteCardMedia(roomId, cardId);
-    const room = await RoomModel.findOneAndUpdate(
-      { id: roomId },
-      { 
-        $pull: { cards: { id: cardId } }
-      },
-      { new: true }
-    );
-    return room ? this.convertToRoom(room) : null;
-  }
+    RoomCache.invalidate(roomId);
+    try {
+      await deleteCardMedia(roomId, cardId);
+      const room = await RoomModel.findOneAndUpdate(
+        { id: roomId },
+        { 
+          $pull: { cards: { id: cardId } }
+        },
+        { new: true }
+      );
+      return room ? this.convertToRoom(room) : null;
+      } finally {
+      RoomCache.invalidate(roomId);
+    }
+}
 
   static async deleteAllCards(roomId: string): Promise<Room | null> {
-    await deleteRoomCardMedia(roomId);
-    await RoomModel.deleteAllCards(roomId);
-    const room = await RoomModel.findOne({ id: roomId });
-    return room ? this.convertToRoom(room) : null;
-  }
+    RoomCache.invalidate(roomId);
+    try {
+      await deleteRoomCardMedia(roomId);
+      await RoomModel.deleteAllCards(roomId);
+      const room = await RoomModel.findOne({ id: roomId });
+      return room ? this.convertToRoom(room) : null;
+      } finally {
+      RoomCache.invalidate(roomId);
+    }
+}
 
   static async mergeCards(roomId: string, targetCardId: string, sourceCardId: string): Promise<Room | null> {
-    const current = await RoomModel.findOne({ id: roomId });
-    const targetCard = current?.cards.find((card) => card.id === targetCardId);
-    const sourceCard = current?.cards.find((card) => card.id === sourceCardId);
-    if (sourceCard?.imageUrl && !targetCard?.imageUrl) {
-      await reassignCardMedia(roomId, sourceCardId, targetCardId);
-    } else {
-      await deleteCardMedia(roomId, sourceCardId);
+    RoomCache.invalidate(roomId);
+    try {
+      const current = await RoomModel.findOne({ id: roomId });
+      const targetCard = current?.cards.find((card) => card.id === targetCardId);
+      const sourceCard = current?.cards.find((card) => card.id === sourceCardId);
+      if (sourceCard?.imageUrl && !targetCard?.imageUrl) {
+        await reassignCardMedia(roomId, sourceCardId, targetCardId);
+      } else {
+        await deleteCardMedia(roomId, sourceCardId);
+      }
+      const room = await RoomModel.mergeCards(roomId, targetCardId, sourceCardId);
+      return room ? this.convertToRoom(room) : null;
+      } finally {
+      RoomCache.invalidate(roomId);
     }
-    const room = await RoomModel.mergeCards(roomId, targetCardId, sourceCardId);
-    return room ? this.convertToRoom(room) : null;
-  }
+}
 
   static async addCardComment(
     roomId: string,
@@ -328,31 +362,36 @@ export class RoomService {
     userName: string,
     text: string
   ): Promise<{ card: Card; comment: CardComment } | null> {
-    const trimmed = text.trim();
-    if (!trimmed) return null;
+    RoomCache.invalidate(roomId);
+    try {
+      const trimmed = text.trim();
+      if (!trimmed) return null;
 
-    const room = await RoomModel.findOne({ id: roomId });
-    if (!room) return null;
-    const card = room.cards.find((currentCard) => currentCard.id === cardId);
-    if (!card) return null;
+      const room = await RoomModel.findOne({ id: roomId });
+      if (!room) return null;
+      const card = room.cards.find((currentCard) => currentCard.id === cardId);
+      if (!card) return null;
 
-    const comment = await RoomModel.addCardComment({
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      cardId,
-      userId,
-      userName,
-      text: trimmed,
-      createdAt: new Date().toISOString()
-    });
+      const comment = await RoomModel.addCardComment({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        cardId,
+        userId,
+        userName,
+        text: trimmed,
+        createdAt: new Date().toISOString()
+      });
 
-    return {
-      card: {
-        ...card,
-        comments: [...(card.comments || []), comment]
-      },
-      comment
-    };
-  }
+      return {
+        card: {
+          ...card,
+          comments: [...(card.comments || []), comment]
+        },
+        comment
+      };
+      } finally {
+      RoomCache.invalidate(roomId);
+    }
+}
 
   static async updateCardComment(
     roomId: string,
@@ -361,16 +400,21 @@ export class RoomService {
     userId: string,
     text: string
   ): Promise<CardComment | null> {
-    const trimmed = text.trim();
-    if (!trimmed || typeof commentId !== 'string' || !commentId) return null;
+    RoomCache.invalidate(roomId);
+    try {
+      const trimmed = text.trim();
+      if (!trimmed || typeof commentId !== 'string' || !commentId) return null;
 
-    const room = await RoomModel.findOne({ id: roomId });
-    if (!room) return null;
-    const card = room.cards.find((currentCard) => currentCard.id === cardId);
-    if (!card) return null;
+      const room = await RoomModel.findOne({ id: roomId });
+      if (!room) return null;
+      const card = room.cards.find((currentCard) => currentCard.id === cardId);
+      if (!card) return null;
 
-    return RoomModel.updateCardComment(cardId, commentId, userId, trimmed);
-  }
+      return RoomModel.updateCardComment(cardId, commentId, userId, trimmed);
+      } finally {
+      RoomCache.invalidate(roomId);
+    }
+}
 
   static async toggleCardReaction(
     roomId: string,
@@ -379,21 +423,26 @@ export class RoomService {
     userName: string,
     emoji: string
   ): Promise<Card | null> {
-    if (!CARD_REACTION_EMOJIS.includes(emoji as typeof CARD_REACTION_EMOJIS[number])) {
-      return null;
+    RoomCache.invalidate(roomId);
+    try {
+      if (!CARD_REACTION_EMOJIS.includes(emoji as typeof CARD_REACTION_EMOJIS[number])) {
+        return null;
+      }
+
+      const room = await RoomModel.findOne({ id: roomId });
+      if (!room) return null;
+      const card = room.cards.find((currentCard) => currentCard.id === cardId);
+      if (!card) return null;
+
+      const reactions = await RoomModel.toggleCardReaction(cardId, userId, userName, emoji);
+      return {
+        ...card,
+        reactions
+      };
+      } finally {
+      RoomCache.invalidate(roomId);
     }
-
-    const room = await RoomModel.findOne({ id: roomId });
-    if (!room) return null;
-    const card = room.cards.find((currentCard) => currentCard.id === cardId);
-    if (!card) return null;
-
-    const reactions = await RoomModel.toggleCardReaction(cardId, userId, userName, emoji);
-    return {
-      ...card,
-      reactions
-    };
-  }
+}
 
   static async updatePhase(
     roomId: string,
@@ -401,62 +450,33 @@ export class RoomService {
     userId: string,
     userName?: string
   ): Promise<Room | null> {
-    console.log('Attempting to update phase:', { roomId, phase, userId });
-    
-    // Получаем комнату и проверяем существование
-    const room = await RoomModel.findOne({ id: roomId });
-    if (!room) {
-      console.log('Room not found for phase update');
-      return null;
+    RoomCache.invalidate(roomId);
+    try {
+      // Получаем комнату и проверяем существование
+      const room = await RoomModel.findOne({ id: roomId });
+      if (!room) return null;
+
+      let user = userName ? room.users.find(u => u.name === userName) : undefined;
+      if (!user) {
+        user = room.users.find(u => u.id === userId);
+      }
+      if (!user) return null;
+
+      const hasAdminRole = user.role === 'admin';
+      const isRoomOwner = user.name === room.owner;
+      if (!hasAdminRole && !isRoomOwner) return null;
+
+      const updatedRoom = await RoomModel.findOneAndUpdate(
+        { id: roomId },
+        { $set: { phase } },
+        { new: true }
+      );
+      if (!updatedRoom) return null;
+      return this.convertToRoom(updatedRoom);
+      } finally {
+      RoomCache.invalidate(roomId);
     }
-
-    // Находим пользователя по имени, иначе по id (на случай смены socket.id)
-    let user = userName ? room.users.find(u => u.name === userName) : undefined;
-    if (!user) {
-      user = room.users.find(u => u.id === userId);
-    }
-
-    if (!user) {
-      console.log('User not found for phase update:', { userId, userName, availableUsers: room.users });
-      return null;
-    }
-
-    const hasAdminRole = user.role === 'admin';
-    const isRoomOwner = user.name === room.owner;
-
-    console.log('Checking phase update permissions:', {
-      userName: user.name,
-      userRole: user.role,
-      hasAdminRole,
-      isRoomOwner,
-      currentPhase: room.phase,
-      requestedPhase: phase
-    });
-
-    if (!hasAdminRole && !isRoomOwner) {
-      console.log('Permission denied: user is not admin or room owner');
-      return null;
-    }
-
-    // Обновляем фазу
-    const updatedRoom = await RoomModel.findOneAndUpdate(
-      { id: roomId },
-      { $set: { phase } },
-      { new: true }
-    );
-
-    if (!updatedRoom) {
-      console.log('Failed to update room phase');
-      return null;
-    }
-
-    console.log('Phase updated successfully:', {
-      newPhase: updatedRoom.phase,
-      roomId: updatedRoom.id
-    });
-
-    return this.convertToRoom(updatedRoom);
-  }
+}
 
   static async updateCardVotes(
     roomId: string, 
@@ -464,85 +484,95 @@ export class RoomService {
     userId: string, 
     voteType: 'like' | 'dislike'
   ): Promise<Room | null> {
-    // Fetch current room to inspect existing votes
-    const current = await RoomModel.findOne({ id: roomId });
-    if (!current) return null;
-    const card = current.cards.find(c => c.id === cardId);
-    if (!card) return null;
+    RoomCache.invalidate(roomId);
+    try {
+      // Fetch current room to inspect existing votes
+      const current = await RoomModel.findOne({ id: roomId });
+      if (!current) return null;
+      const card = current.cards.find(c => c.id === cardId);
+      if (!card) return null;
 
-    const features = normalizeRoomFeatures(current.features);
-    if (voteType === 'dislike' && !features.dislikesEnabled) {
-      throw new Error('Дизлайки отключены в этой комнате');
-    }
-
-    const likesLimit = features.likesPerUser;
-    const dislikesLimit = features.dislikesPerUser;
-
-    const likesUsed = current.cards.reduce((acc, currentCard) => {
-      return acc + ((currentCard.likes || []).includes(userId) ? 1 : 0);
-    }, 0);
-    const dislikesUsed = current.cards.reduce((acc, currentCard) => {
-      return acc + ((currentCard.dislikes || []).includes(userId) ? 1 : 0);
-    }, 0);
-
-    const alreadyLiked = (card.likes || []).includes(userId);
-    const alreadyDisliked = (card.dislikes || []).includes(userId);
-
-    // Vote limits per user across the room.
-    if (voteType === 'like' && !alreadyLiked) {
-      const nextLikesUsed = likesUsed + 1;
-      if (nextLikesUsed > likesLimit) {
-        throw new Error(`Вы можете поставить не более ${likesLimit} лайков`);
+      const features = normalizeRoomFeatures(current.features);
+      if (voteType === 'dislike' && !features.dislikesEnabled) {
+        throw new Error('Дизлайки отключены в этой комнате');
       }
-    }
-    if (voteType === 'dislike' && !alreadyDisliked) {
-      const nextDislikesUsed = dislikesUsed + 1;
-      if (nextDislikesUsed > dislikesLimit) {
-        throw new Error(`Вы можете поставить не более ${dislikesLimit} дизлайков`);
-      }
-    }
 
-    // If user clicks the same vote again → toggle off (remove only)
-    if ((voteType === 'like' && alreadyLiked) || (voteType === 'dislike' && alreadyDisliked)) {
+      const likesLimit = features.likesPerUser;
+      const dislikesLimit = features.dislikesPerUser;
+
+      const likesUsed = current.cards.reduce((acc, currentCard) => {
+        return acc + ((currentCard.likes || []).includes(userId) ? 1 : 0);
+      }, 0);
+      const dislikesUsed = current.cards.reduce((acc, currentCard) => {
+        return acc + ((currentCard.dislikes || []).includes(userId) ? 1 : 0);
+      }, 0);
+
+      const alreadyLiked = (card.likes || []).includes(userId);
+      const alreadyDisliked = (card.dislikes || []).includes(userId);
+
+      // Vote limits per user across the room.
+      if (voteType === 'like' && !alreadyLiked) {
+        const nextLikesUsed = likesUsed + 1;
+        if (nextLikesUsed > likesLimit) {
+          throw new Error(`Вы можете поставить не более ${likesLimit} лайков`);
+        }
+      }
+      if (voteType === 'dislike' && !alreadyDisliked) {
+        const nextDislikesUsed = dislikesUsed + 1;
+        if (nextDislikesUsed > dislikesLimit) {
+          throw new Error(`Вы можете поставить не более ${dislikesLimit} дизлайков`);
+        }
+      }
+
+      // If user clicks the same vote again → toggle off (remove only)
+      if ((voteType === 'like' && alreadyLiked) || (voteType === 'dislike' && alreadyDisliked)) {
+        await RoomModel.updateOne(
+          { id: roomId, 'cards.id': cardId },
+          { 
+            $pull: {
+              [`cards.$.${voteType}s`]: userId
+            }
+          }
+        );
+        const updated = await RoomModel.findOne({ id: roomId });
+        return updated ? this.convertToRoom(updated) : null;
+      }
+
+      // Otherwise switch the vote: remove from both, then add chosen
       await RoomModel.updateOne(
         { id: roomId, 'cards.id': cardId },
         { 
           $pull: {
-            [`cards.$.${voteType}s`]: userId
+            'cards.$.likes': userId,
+            'cards.$.dislikes': userId
           }
         }
       );
-      const updated = await RoomModel.findOne({ id: roomId });
-      return updated ? this.convertToRoom(updated) : null;
+
+      const room = await RoomModel.findOneAndUpdate(
+        { id: roomId, 'cards.id': cardId },
+        { 
+          $addToSet: {
+            [`cards.$.${voteType}s`]: userId
+          }
+        },
+        { new: true }
+      );
+      return room ? this.convertToRoom(room) : null;
+      } finally {
+      RoomCache.invalidate(roomId);
     }
-
-    // Otherwise switch the vote: remove from both, then add chosen
-    await RoomModel.updateOne(
-      { id: roomId, 'cards.id': cardId },
-      { 
-        $pull: {
-          'cards.$.likes': userId,
-          'cards.$.dislikes': userId
-        }
-      }
-    );
-
-    const room = await RoomModel.findOneAndUpdate(
-      { id: roomId, 'cards.id': cardId },
-      { 
-        $addToSet: {
-          [`cards.$.${voteType}s`]: userId
-        }
-      },
-      { new: true }
-    );
-    return room ? this.convertToRoom(room) : null;
-  }
+}
 
   static async deleteRoom(roomId: string): Promise<void> {
-    await deleteRoomMedia(roomId);
-    await RoomModel.deleteOne({ id: roomId });
-  }
+    RoomCache.invalidate(roomId);
+    try {
+      await deleteRoomMedia(roomId);
+      await RoomModel.deleteOne({ id: roomId });
+      } finally {
+      RoomCache.invalidate(roomId);
+    }
+}
 
   static async getAllRooms(teamId?: string): Promise<Room[]> {
     const rooms = await RoomModel.find(teamId ? { teamId } : undefined);
@@ -550,19 +580,7 @@ export class RoomService {
   }
 
   static async getAvailableRoomSummaries(teamId?: string) {
-    const rooms = await RoomModel.find(teamId ? { teamId } : undefined);
-    return Promise.all(rooms.map(async (room) => {
-      const converted = this.convertToRoom(room);
-      return {
-        id: converted.id,
-        teamId: converted.teamId,
-        usersCount: converted.users.length,
-        phase: converted.phase,
-        owner: converted.owner,
-        createdAt: converted.createdAt,
-        hasPassword: await this.roomHasPassword(room.password)
-      };
-    }));
+    return RoomModel.listSummaries(teamId ? { teamId } : undefined);
   }
 
   static async restoreSession(
@@ -571,98 +589,75 @@ export class RoomService {
     newSocketId: string,
     username?: string
   ): Promise<{ room: Room | null, user: User | null }> {
-    console.log('Starting session restoration:', { roomId, userId, newSocketId, username });
-    const room = await RoomModel.findOne({ id: roomId });
-    if (!room) {
-      console.log('Room not found during session restoration');
-      return { room: null, user: null };
-    }
+    RoomCache.invalidate(roomId);
+    try {
+      const room = await RoomModel.findOne({ id: roomId });
+      if (!room) {
+              return { room: null, user: null };
+      }
 
-    let existingUser = room.users.find(user => user.id === userId);
-    if (!existingUser && username) {
-      existingUser = room.users.find(user => user.name === username);
-    }
-    if (!existingUser) {
-      console.log('User not found during session restoration');
-      return { room: null, user: null };
-    }
+      let existingUser = room.users.find(user => user.id === userId);
+      if (!existingUser && username) {
+        existingUser = room.users.find(user => user.name === username);
+      }
+      if (!existingUser) {
+              return { room: null, user: null };
+      }
 
-    const resolvedUser = existingUser;
+      const resolvedUser = existingUser;
 
-    console.log('Found existing user:', resolvedUser);
+          const role = resolvedUser.role || 'user' as const;
 
-    const role = resolvedUser.role || 'user' as const;
-
-    console.log('Role determination during restore:', {
-      username: resolvedUser.name,
-      assignedRole: role,
-      currentRole: resolvedUser.role
-    });
-
-    // Update socket ID and role for the existing user
-    const updatedRoom = await RoomModel.findOneAndUpdate(
-      {
-        id: roomId,
-        'users.name': resolvedUser.name
-      },
-      {
-        $set: {
-          'users.$.id': newSocketId,
-          'users.$.role': role
-        }
-      },
-      { new: true }
-    );
-
-    if (!updatedRoom) {
-      console.log('Failed to update room during session restoration');
-      return { room: null, user: null };
-    }
-
-    const healedRoom = await this.ensureRoomHasAdmin(roomId);
-    const roomDoc = healedRoom ?? updatedRoom;
-    const syncedUser = roomDoc.users.find((user) => user.name === resolvedUser.name) ?? {
-      ...resolvedUser,
-      id: newSocketId,
-      role
-    };
-
-    const updatedUser = {
-      ...syncedUser,
-      id: newSocketId
-    };
-
-    console.log('Session restoration complete:', {
-      user: updatedUser,
-      userRole: updatedUser.role,
-      roomUsers: roomDoc.users.map(u => ({ name: u.name, role: u.role }))
-    });
-
-    const convertedRoom = this.convertToRoom(roomDoc);
-    console.log('Converted room after restoration:', {
-      users: convertedRoom.users.map(u => ({ name: u.name, role: u.role }))
-    });
-
-    const convertedUser = convertedRoom.users.find((user) => user.name === resolvedUser.name);
-
-    return {
-      room: convertedRoom,
-      user: convertedUser
-        ? { ...convertedUser, id: newSocketId }
-        : {
-            id: newSocketId,
-            name: resolvedUser.name,
-            roomId,
-            role
+          // Update socket ID and role for the existing user
+      const updatedRoom = await RoomModel.findOneAndUpdate(
+        {
+          id: roomId,
+          'users.name': resolvedUser.name
+        },
+        {
+          $set: {
+            'users.$.id': newSocketId,
+            'users.$.role': role
           }
-    };
-  }
+        },
+        { new: true }
+      );
 
-  static async clearDatabase(): Promise<void> {
-    await wipeAllUploads();
-    await RoomModel.deleteMany();
-    console.log('Database cleared successfully');
-  }
+      if (!updatedRoom) {
+              return { room: null, user: null };
+      }
+
+      const healedRoom = await this.ensureRoomHasAdmin(roomId);
+      const roomDoc = healedRoom ?? updatedRoom;
+      const syncedUser = roomDoc.users.find((user) => user.name === resolvedUser.name) ?? {
+        ...resolvedUser,
+        id: newSocketId,
+        role
+      };
+
+      const updatedUser = {
+        ...syncedUser,
+        id: newSocketId
+      };
+
+          const convertedRoom = this.convertToRoom(roomDoc);
+          const convertedUser = convertedRoom.users.find((user) => user.name === resolvedUser.name);
+
+      return {
+        room: convertedRoom,
+        user: convertedUser
+          ? { ...convertedUser, id: newSocketId }
+          : {
+              id: newSocketId,
+              name: resolvedUser.name,
+              roomId,
+              role
+            }
+      };
+      } finally {
+      RoomCache.invalidate(roomId);
+    }
+}
 
   static async updateUserReadyState(
     roomId: string,
@@ -670,111 +665,104 @@ export class RoomService {
     isReady: boolean,
     userName?: string
   ): Promise<Room | null> {
-    console.log('Updating user ready state:', { roomId, userId, userName, isReady });
+    RoomCache.invalidate(roomId);
+    try {
+      let room: RoomDocument | null = null;
 
-    let room: RoomDocument | null = null;
+      if (userName) {
+        room = await RoomModel.findOneAndUpdate(
+          {
+            id: roomId,
+            'users.name': userName
+          },
+          {
+            $set: {
+              'users.$.isReady': isReady,
+              'users.$.id': userId
+            }
+          },
+          { new: true }
+        );
+      }
 
-    if (userName) {
-      room = await RoomModel.findOneAndUpdate(
-        {
-          id: roomId,
-          'users.name': userName
-        },
-        {
-          $set: {
-            'users.$.isReady': isReady,
-            'users.$.id': userId
+      if (!room) {
+        room = await RoomModel.findOneAndUpdate(
+          {
+            id: roomId,
+            'users.id': userId
+          },
+          {
+            $set: {
+              'users.$.isReady': isReady
+            }
+          },
+          { new: true }
+        );
+      }
+
+      if (!room) {
+              return null;
+      }
+
+          return this.convertToRoom(room);
+      } finally {
+      RoomCache.invalidate(roomId);
+    }
+}
+
+  static async resetUsersReadyState(roomId: string): Promise<Room | null> {
+    RoomCache.invalidate(roomId);
+    try {
+        
+      const room = await RoomModel.findOneAndUpdate(
+        { id: roomId },
+        { 
+          $set: { 
+            'users.$[].isReady': false 
           }
         },
         { new: true }
       );
-    }
 
-    if (!room) {
-      room = await RoomModel.findOneAndUpdate(
+      if (!room) {
+              return null;
+      }
+
+          return this.convertToRoom(room);
+      } finally {
+      RoomCache.invalidate(roomId);
+    }
+}
+
+  static async updateUserMood(roomId: string, userId: string, mood: User['mood']): Promise<Room | null> {
+    RoomCache.invalidate(roomId);
+    try {
+      const room = await RoomModel.findOneAndUpdate(
         {
           id: roomId,
           'users.id': userId
         },
         {
           $set: {
-            'users.$.isReady': isReady
+            'users.$.mood': mood
           }
         },
         { new: true }
       );
+
+      if (!room) return null;
+      return this.convertToRoom(room);
+      } finally {
+      RoomCache.invalidate(roomId);
     }
-
-    if (!room) {
-      console.log('Room or user not found while updating ready state');
-      return null;
-    }
-
-    console.log('User ready state updated:', {
-      userId,
-      isReady,
-      allUsers: room.users.map(u => ({ name: u.name, isReady: u.isReady }))
-    });
-
-    return this.convertToRoom(room);
-  }
-
-  static async resetUsersReadyState(roomId: string): Promise<Room | null> {
-    console.log('Resetting ready states for room:', roomId);
-    
-    const room = await RoomModel.findOneAndUpdate(
-      { id: roomId },
-      { 
-        $set: { 
-          'users.$[].isReady': false 
-        }
-      },
-      { new: true }
-    );
-
-    if (!room) {
-      console.log('Room not found while resetting ready states');
-      return null;
-    }
-
-    console.log('Ready states reset for room:', {
-      roomId,
-      users: room.users.map(u => ({ name: u.name, isReady: u.isReady }))
-    });
-
-    return this.convertToRoom(room);
-  }
-
-  static async updateUserMood(roomId: string, userId: string, mood: User['mood']): Promise<Room | null> {
-    const room = await RoomModel.findOneAndUpdate(
-      {
-        id: roomId,
-        'users.id': userId
-      },
-      {
-        $set: {
-          'users.$.mood': mood
-        }
-      },
-      { new: true }
-    );
-
-    if (!room) return null;
-    return this.convertToRoom(room);
-  }
+}
 
   private static convertToRoom(doc: RoomDocument): Room {
     const { id, teamId, owner, phase, columnTitles, columnColors, createdAt, users, cards } = doc;
     const template = getRetroTemplate(doc.template);
     const features = normalizeRoomFeatures(doc.features);
     const hasAdmin = Boolean(users?.some((user) => user.role === 'admin'));
-    console.log('Converting room document:', {
-      teamId,
-      owner,
-      hasAdmin,
-      originalUsers: users?.map(u => ({ name: u.name, role: u.role }))
-    });
-    
+        
     const convertedRoom = {
       id,
       teamId,
@@ -796,10 +784,6 @@ export class RoomService {
       cards: cards || []
     };
 
-    console.log('Room conversion result:', {
-      convertedUsers: convertedRoom.users.map(u => ({ name: u.name, role: u.role }))
-    });
-
-    return convertedRoom;
+        return convertedRoom;
   }
 } 

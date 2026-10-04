@@ -24,42 +24,97 @@ const mapCommentRow = (row: CommentRow): CardComment => ({
   ...(row.updated_at ? { updatedAt: row.updated_at } : {})
 });
 
-const attachSocialDataToCards = async (cards: Card[]): Promise<Card[]> => {
-  if (cards.length === 0) return cards;
+const ROOM_WITH_CHILDREN_SQL = `
+  select
+    r.id,
+    r.password,
+    r.has_password,
+    r.team_id,
+    r.owner,
+    r.phase,
+    r.template,
+    r.created_at,
+    r.column_titles,
+    r.column_colors,
+    r.features,
+    coalesce((
+      select json_agg(json_build_object(
+        'id', u.id,
+        'name', u.name,
+        'role', u.role,
+        'is_ready', u.is_ready,
+        'mood', u.mood
+      ) order by u.joined_at asc nulls last, u.name asc)
+      from room_users u
+      where u.room_id = r.id
+    ), '[]'::json) as users,
+    coalesce((
+      select json_agg(json_build_object(
+        'id', c.id,
+        'text', c.text,
+        'type', c.type,
+        'created_by', c.created_by,
+        'column_index', c.column_index,
+        'origin_column', c.origin_column,
+        'image_url', c.image_url,
+        'author_revealed', c.author_revealed,
+        'likes', coalesce((
+          select json_agg(v.user_id) from card_votes v where v.card_id = c.id and v.vote = 'like'
+        ), '[]'::json),
+        'dislikes', coalesce((
+          select json_agg(v.user_id) from card_votes v where v.card_id = c.id and v.vote = 'dislike'
+        ), '[]'::json),
+        'comments', coalesce((
+          select json_agg(json_build_object(
+            'id', cm.id,
+            'card_id', cm.card_id,
+            'user_id', cm.user_id,
+            'user_name', cm.user_name,
+            'text', cm.text,
+            'created_at', cm.created_at,
+            'updated_at', cm.updated_at
+          ) order by cm.created_at asc)
+          from card_comments cm
+          where cm.card_id = c.id
+        ), '[]'::json),
+        'reactions', coalesce((
+          select json_agg(json_build_object(
+            'emoji', cr.emoji,
+            'user_id', cr.user_id,
+            'user_name', cr.user_name
+          ))
+          from card_reactions cr
+          where cr.card_id = c.id
+        ), '[]'::json)
+      ))
+      from cards c
+      where c.room_id = r.id
+    ), '[]'::json) as cards
+  from rooms r
+  where r.id = $1
+`;
 
-  const cardIds = cards.map((card) => card.id);
-  const commentsRes = await pool.query(
-    'select id, card_id, user_id, user_name, text, created_at, updated_at from card_comments where card_id = any($1::text[]) order by created_at asc',
-    [cardIds]
-  );
-  const reactionsRes = await pool.query(
-    'select card_id, user_id, user_name, emoji from card_reactions where card_id = any($1::text[])',
-    [cardIds]
-  );
+type RoomUserJson = {
+  id: string;
+  name: string;
+  role: User['role'];
+  is_ready: boolean;
+  mood: User['mood'] | null;
+};
 
-  const commentsByCard = new Map<string, CardComment[]>();
-  for (const row of commentsRes.rows as CommentRow[]) {
-    const entry = commentsByCard.get(row.card_id) || [];
-    entry.push(mapCommentRow(row));
-    commentsByCard.set(row.card_id, entry);
-  }
-
-  const reactionsByCard = new Map<string, CardReaction[]>();
-  for (const row of reactionsRes.rows as Array<{ card_id: string; user_id: string; user_name: string; emoji: string }>) {
-    const entry = reactionsByCard.get(row.card_id) || [];
-    entry.push({
-      emoji: row.emoji,
-      userId: row.user_id,
-      userName: row.user_name
-    });
-    reactionsByCard.set(row.card_id, entry);
-  }
-
-  return cards.map((card) => ({
-    ...card,
-    comments: commentsByCard.get(card.id) || [],
-    reactions: reactionsByCard.get(card.id) || []
-  }));
+type RoomCardJson = {
+  id: string;
+  text: string;
+  type: Card['type'];
+  created_by: string;
+  column_index: number;
+  origin_column: number | null;
+  image_url: string | null;
+  author_revealed: boolean;
+  likes: string[] | null;
+  dislikes: string[] | null;
+  comments: CommentRow[] | null;
+  reactions: Array<{ emoji: string; user_id: string; user_name: string }> | null;
 };
 
 export const RoomModel = {
@@ -68,10 +123,10 @@ export const RoomModel = {
     try {
       await client.query('BEGIN');
       const insertedRoom = await client.query(
-        `insert into rooms (id, password, team_id, owner, phase, template) values ($1,$2,$3,$4,$5,$6)
+        `insert into rooms (id, password, has_password, team_id, owner, phase, template) values ($1,$2,$3,$4,$5,$6,$7)
          on conflict (id) do nothing
          returning id`,
-        [doc.id, doc.password, doc.teamId ?? null, doc.owner, doc.phase, doc.template ?? 'classic']
+        [doc.id, doc.password, doc.hasPassword, doc.teamId ?? null, doc.owner, doc.phase, doc.template ?? 'classic']
       );
       if (insertedRoom.rows.length > 0) {
         await reserveCreationSlot(client, doc.owner, 'room', doc.id);
@@ -94,14 +149,12 @@ export const RoomModel = {
   },
 
   async findOne(where: { id: string }): Promise<RoomDocument | null> {
-    const { rows } = await pool.query(
-      'select id, password, team_id, owner, phase, template, created_at, column_titles, column_colors, features from rooms where id=$1',
-      [where.id]
-    );
+    const { rows } = await pool.query(ROOM_WITH_CHILDREN_SQL, [where.id]);
     if (rows.length === 0) return null;
     const roomRow = rows[0] as {
       id: string;
       password: string;
+      has_password: boolean;
       team_id: string | null;
       owner: string;
       phase: Room['phase'];
@@ -110,38 +163,40 @@ export const RoomModel = {
       column_titles: string[] | null;
       column_colors: string[] | null;
       features: RoomFeatures | null;
+      users: RoomUserJson[];
+      cards: RoomCardJson[];
     };
     const template = getRetroTemplate(roomRow.template);
-    const usersRes = await pool.query(
-      'select id, name, role, is_ready, mood from room_users where room_id=$1 order by joined_at asc nulls last, name asc',
-      [where.id]
-    );
-    const cardsRes = await pool.query('select id, text, type, created_by, column_index, origin_column, image_url, author_revealed from cards where room_id=$1', [where.id]);
-    const cardRows = cardsRes.rows as Array<{ id: string; text: string; type: Card['type']; created_by: string; column_index: number; origin_column: number | null; image_url: string | null; author_revealed: boolean }>;
-    const votesRes = await pool.query('select card_id, user_id, vote from card_votes where card_id = any($1::text[])', [cardRows.map((r) => r.id)]);
-    const cardIdToVotes = new Map<string, { likes: string[]; dislikes: string[] }>();
-    for (const v of votesRes.rows as Array<{ card_id: string; user_id: string; vote: 'like' | 'dislike' }>) {
-      const entry = cardIdToVotes.get(v.card_id) || { likes: [], dislikes: [] };
-      entry[v.vote === 'like' ? 'likes' : 'dislikes'].push(v.user_id);
-      cardIdToVotes.set(v.card_id, entry);
-    }
-    const userRows = usersRes.rows as Array<{ id: string; name: string; role: User['role']; is_ready: boolean; mood: User['mood'] | null }>;
-    const users: User[] = userRows.map((r) => ({ id: r.id, name: r.name, roomId: roomRow.id, role: r.role, isReady: r.is_ready, mood: r.mood ?? undefined }));
-    const cards: Card[] = await attachSocialDataToCards(cardRows.map((r) => ({
-      id: r.id,
-      text: r.text,
-      type: r.type,
-      createdBy: r.created_by,
-      likes: cardIdToVotes.get(r.id)?.likes || [],
-      dislikes: cardIdToVotes.get(r.id)?.dislikes || [],
-      column: r.column_index,
-      originColumn: r.origin_column ?? undefined,
-      imageUrl: r.image_url ?? undefined,
-      authorRevealed: Boolean(r.author_revealed)
-    })));
+    const users: User[] = (roomRow.users || []).map((userRow) => ({
+      id: userRow.id,
+      name: userRow.name,
+      roomId: roomRow.id,
+      role: userRow.role,
+      isReady: userRow.is_ready,
+      mood: userRow.mood ?? undefined
+    }));
+    const cards: Card[] = (roomRow.cards || []).map((cardRow) => ({
+      id: cardRow.id,
+      text: cardRow.text,
+      type: cardRow.type,
+      createdBy: cardRow.created_by,
+      likes: cardRow.likes || [],
+      dislikes: cardRow.dislikes || [],
+      column: cardRow.column_index,
+      originColumn: cardRow.origin_column ?? undefined,
+      imageUrl: cardRow.image_url ?? undefined,
+      authorRevealed: Boolean(cardRow.author_revealed),
+      comments: (cardRow.comments || []).map(mapCommentRow),
+      reactions: (cardRow.reactions || []).map((reaction): CardReaction => ({
+        emoji: reaction.emoji,
+        userId: reaction.user_id,
+        userName: reaction.user_name
+      }))
+    }));
     return {
       id: roomRow.id,
       password: roomRow.password,
+      hasPassword: roomRow.has_password,
       teamId: roomRow.team_id ?? undefined,
       owner: roomRow.owner,
       phase: roomRow.phase,
@@ -536,8 +591,46 @@ export const RoomModel = {
     }
   },
 
-  async deleteMany(): Promise<void> {
-    await pool.query('truncate table card_votes, card_comments, card_reactions, cards, room_users, room_media, rooms restart identity cascade');
+  async listSummaries(where?: { teamId?: string }): Promise<Array<{
+    id: string;
+    teamId?: string;
+    usersCount: number;
+    phase: Room['phase'];
+    owner: string;
+    createdAt: string;
+    hasPassword: boolean;
+  }>> {
+    const params: string[] = [];
+    let filter = '';
+    if (where?.teamId) {
+      params.push(where.teamId);
+      filter = 'where r.team_id = $1';
+    }
+    const { rows } = await pool.query(
+      `select r.id, r.team_id, r.owner, r.phase, r.created_at, r.has_password,
+              (select count(*)::int from room_users u where u.room_id = r.id) as users_count
+       from rooms r
+       ${filter}
+       order by r.created_at desc`,
+      params
+    );
+    return (rows as Array<{
+      id: string;
+      team_id: string | null;
+      owner: string;
+      phase: Room['phase'];
+      created_at: string;
+      has_password: boolean;
+      users_count: number;
+    }>).map((row) => ({
+      id: row.id,
+      teamId: row.team_id ?? undefined,
+      usersCount: row.users_count,
+      phase: row.phase,
+      owner: row.owner,
+      createdAt: row.created_at,
+      hasPassword: row.has_password
+    }));
   },
 
   async find(where?: { teamId?: string }): Promise<RoomDocument[]> {

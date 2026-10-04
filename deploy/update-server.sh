@@ -5,7 +5,7 @@
 
 set -e
 
-APP_DIR="/var/www/sorryangelina"
+APP_DIR="/root/apps/sorryangelina"
 
 echo "🔄 Updating Sorry Angelina server..."
 
@@ -17,8 +17,16 @@ git pull origin main
 # Build server
 echo "🔨 Building Node.js server..."
 cd server
-npm install --production
+npm install
 npm run build
+# shellcheck disable=SC1091
+source "$APP_DIR/deploy/database-url.sh"
+load_database_url "$APP_DIR/server"
+if [ -z "${DATABASE_URL:-}" ]; then
+  echo "DATABASE_URL is not set. Add it to server/.env or the systemd unit."
+  exit 1
+fi
+npm run migrate:up
 cd ..
 
 # Restart service

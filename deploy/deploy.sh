@@ -33,9 +33,9 @@ apt update && apt upgrade -y
 echo -e "${YELLOW}📦 Installing required packages...${NC}"
 apt install -y curl wget git build-essential certbot python3-certbot-nginx
 
-# Install Node.js 18.x
-echo -e "${YELLOW}📦 Installing Node.js 18.x...${NC}"
-curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+# Install Node.js 22.x
+echo -e "${YELLOW}📦 Installing Node.js 22.x...${NC}"
+curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
 apt install -y nodejs
 
 # Install PostgreSQL
@@ -78,11 +78,19 @@ npm install --production
 npm run build
 cd ..
 
-# Build server
+# Build server (devDependencies include the TypeScript compiler)
 echo "Building Node.js server..."
 cd server
-npm install --production
+npm install
 npm run build
+# shellcheck disable=SC1091
+source "$APP_DIR/deploy/database-url.sh"
+load_database_url "$APP_DIR/server"
+if [ -z "${DATABASE_URL:-}" ]; then
+  echo "DATABASE_URL is not set. Add it to server/.env or the systemd unit."
+  exit 1
+fi
+npm run migrate:up
 cd ..
 
 # Create logs directory
@@ -122,7 +130,7 @@ ufw --force enable
 # Create deployment script
 cat > /usr/local/bin/deploy-sorryangelina << 'EOF'
 #!/bin/bash
-cd /var/www/sorryangelina
+cd /root/apps/sorryangelina
 git pull origin main
 
 # Build client
@@ -133,8 +141,16 @@ cd ..
 
 # Build server
 cd server
-npm install --production
+npm install
 npm run build
+# shellcheck disable=SC1091
+source /root/apps/sorryangelina/deploy/database-url.sh
+load_database_url /root/apps/sorryangelina/server
+if [ -z "${DATABASE_URL:-}" ]; then
+  echo "DATABASE_URL is not set. Add it to server/.env or the systemd unit."
+  exit 1
+fi
+npm run migrate:up
 cd ..
 
 # Restart service

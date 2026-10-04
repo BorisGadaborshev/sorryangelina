@@ -1,7 +1,11 @@
 import crypto from 'crypto';
 import { AuthProfileType } from '../types';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-jwt-secret-change-me';
+const configuredSecret = process.env.JWT_SECRET?.trim() || '';
+if (!configuredSecret && process.env.NODE_ENV === 'production') {
+  throw new Error('JWT_SECRET is required in production');
+}
+const JWT_SECRET = configuredSecret || 'dev-jwt-secret-change-me';
 const TOKEN_TTL_SECONDS = 2 * 60 * 60;
 
 export interface AuthTokenPayload {
@@ -56,7 +60,14 @@ export const verifyAuthToken = (token?: string): AuthTokenPayload | null => {
 
   const [encodedHeader, encodedPayload, signature] = parts;
   const expectedSignature = signRaw(`${encodedHeader}.${encodedPayload}`);
-  if (signature !== expectedSignature) return null;
+  const signatureBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expectedSignature);
+  if (
+    signatureBuffer.length !== expectedBuffer.length ||
+    !crypto.timingSafeEqual(signatureBuffer, expectedBuffer)
+  ) {
+    return null;
+  }
 
   try {
     const payload = JSON.parse(base64UrlDecode(encodedPayload)) as AuthTokenPayload;

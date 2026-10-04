@@ -250,6 +250,7 @@ export interface Card {
 export interface RoomDocument {
   id: string;
   password: string;
+  hasPassword: boolean;
   teamId?: string;
   owner: string;
   phase: Phase;

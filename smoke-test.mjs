@@ -5,7 +5,7 @@
  */
 import { chromium } from 'playwright';
 
-const BASE_URL = 'https://insretro.ru';
+const BASE_URL = process.env.BASE_URL || 'https://insretro.ru';
 const GUEST_NAME = 'Smoke Bot 2026';
 const ROOM_ID = 'SMOKE-2026';
 const ROOM_PASSWORD = '1234';
