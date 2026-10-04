@@ -10,6 +10,7 @@ import { corsOrigin } from './config/cors';
 import { pool } from './config/database';
 import { io as boundIo } from './realtime/runtime';
 import { RoomService } from './services/RoomService';
+import { logger } from './utils/logger';
 import {
   ensureUploadDir,
   IMAGE_CLEANUP_INTERVAL_MS,
@@ -18,9 +19,9 @@ import {
 } from './services/ImageStore';
 
 connectDB().catch((err) => {
-  console.error('PostgreSQL connection error:', err);
+  logger.error({ err }, 'PostgreSQL connection error');
   if (process.env.NODE_ENV === 'production') {
-    console.error('Server will keep running, but database-backed features may fail until PostgreSQL is available.');
+    logger.error('database-backed features may fail until PostgreSQL is available');
     return;
   }
   process.exit(1);
@@ -59,11 +60,11 @@ app.get('*', (_req, res) => {
 
 const PORT = process.env.PORT || 3001;
 httpServer.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  logger.info({ port: PORT }, 'server listening');
   void ensureUploadDir()
     .then(() => migrateInlineImages())
     .catch((error) => {
-      console.error('Failed to prepare image storage:', error);
+      logger.error({ err: error }, 'failed to prepare image storage');
     });
 });
 
@@ -85,7 +86,7 @@ const broadcastExpiredImages = async () => {
       }
     }
   } catch (error) {
-    console.error('Failed to purge expired images:', error);
+    logger.error({ err: error }, 'failed to purge expired images');
   }
 };
 
@@ -94,14 +95,14 @@ const imageCleanup = setInterval(() => {
 }, IMAGE_CLEANUP_INTERVAL_MS);
 
 process.on('unhandledRejection', (reason) => {
-  console.error('Unhandled rejection:', reason);
+  logger.error({ err: reason }, 'unhandled rejection');
 });
 
 let shuttingDown = false;
 const shutdown = (signal: string): void => {
   if (shuttingDown) return;
   shuttingDown = true;
-  console.log(`Received ${signal}, shutting down`);
+  logger.info({ signal }, 'shutting down');
   clearInterval(imageCleanup);
   io.close();
   httpServer.close(() => {

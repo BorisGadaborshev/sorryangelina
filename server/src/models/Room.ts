@@ -339,188 +339,146 @@ export const RoomModel = {
     return this.getCardReactions(cardId);
   },
 
-  async findOneAndUpdate(filter: any, update: any, options?: { new?: boolean }): Promise<RoomDocument | null> {
-    const roomId: string = filter.id;
+  async rebindUser(
+    roomId: string,
+    match: { name?: string; id?: string },
+    updates: { id?: string; role?: User['role']; isReady?: boolean; mood?: User['mood'] | null }
+  ): Promise<RoomDocument | null> {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-
-      // Direct field updates (e.g., { phase })
-      if (typeof update.phase !== 'undefined') {
-        await client.query('update rooms set phase=$1, updated_at=now() where id=$2', [update.phase, roomId]);
+      const previousUser = match.id
+        ? await client.query('select id from room_users where room_id=$1 and id=$2', [roomId, match.id])
+        : await client.query('select id from room_users where room_id=$1 and name=$2', [roomId, match.name]);
+      const previousId = previousUser.rows[0]?.id as string | undefined;
+      const params = [
+        updates.id ?? null,
+        updates.role ?? null,
+        typeof updates.isReady === 'boolean' ? updates.isReady : null,
+        updates.mood ?? null,
+        roomId,
+        match.id ?? match.name
+      ];
+      const result = match.id
+        ? await client.query(
+          'update room_users set id = coalesce($1, id), role = coalesce($2, role), is_ready = coalesce($3, is_ready), mood = coalesce($4, mood) where room_id=$5 and id=$6',
+          params
+        )
+        : await client.query(
+          'update room_users set id = coalesce($1, id), role = coalesce($2, role), is_ready = coalesce($3, is_ready), mood = coalesce($4, mood) where room_id=$5 and name=$6',
+          params
+        );
+      if ((result.rowCount ?? 0) === 0) {
+        await client.query('ROLLBACK');
+        return null;
       }
-
-      if (update.$set) {
-        if (typeof update.$set.phase !== 'undefined') {
-          await client.query('update rooms set phase=$1, updated_at=now() where id=$2', [update.$set.phase, roomId]);
-        }
-        if (
-          typeof update.$set['users.$.id'] !== 'undefined' ||
-          typeof update.$set['users.$.role'] !== 'undefined' ||
-          typeof update.$set['users.$.isReady'] !== 'undefined' ||
-          typeof update.$set['users.$.is_ready'] !== 'undefined' ||
-          typeof update.$set['users.$.mood'] !== 'undefined'
-        ) {
-          if (filter['users.id'] || filter['users.name']) {
-            const newId = update.$set['users.$.id'];
-            const role = update.$set['users.$.role'];
-            const isReady = typeof update.$set['users.$.isReady'] !== 'undefined' ? update.$set['users.$.isReady'] : update.$set['users.$.is_ready'];
-            const mood = update.$set['users.$.mood'];
-            const previousUser = filter['users.id']
-              ? await client.query('select id from room_users where room_id=$1 and id=$2', [roomId, filter['users.id']])
-              : await client.query('select id from room_users where room_id=$1 and name=$2', [roomId, filter['users.name']]);
-            const previousId = previousUser.rows[0]?.id as string | undefined;
-            const result = filter['users.id']
-              ? await client.query(
-                  'update room_users set id = coalesce($1, id), role = coalesce($2, role), is_ready = coalesce($3, is_ready), mood = coalesce($4, mood) where room_id=$5 and id=$6',
-                  [newId ?? null, role ?? null, typeof isReady === 'boolean' ? isReady : null, mood ?? null, roomId, filter['users.id']]
-                )
-              : await client.query(
-                  'update room_users set id = coalesce($1, id), role = coalesce($2, role), is_ready = coalesce($3, is_ready), mood = coalesce($4, mood) where room_id=$5 and name=$6',
-                  [newId ?? null, role ?? null, typeof isReady === 'boolean' ? isReady : null, mood ?? null, roomId, filter['users.name']]
-                );
-            if (typeof newId === 'string' && previousId && previousId !== newId) {
-              await client.query(
-                `update card_votes as target
-                 set user_id = $1
-                 where target.user_id = $2
-                   and target.card_id in (select id from cards where room_id = $3)
-                   and not exists (
-                     select 1 from card_votes existing
-                     where existing.card_id = target.card_id and existing.user_id = $1
-                   )`,
-                [newId, previousId, roomId]
-              );
-              await client.query(
-                'update card_comments set user_id = $1 where user_id = $2 and card_id in (select id from cards where room_id = $3)',
-                [newId, previousId, roomId]
-              );
-              await client.query(
-                `update card_reactions as target
-                 set user_id = $1
-                 where target.user_id = $2
-                   and target.card_id in (select id from cards where room_id = $3)
-                   and not exists (
-                     select 1 from card_reactions existing
-                     where existing.card_id = target.card_id
-                       and existing.user_id = $1
-                       and existing.emoji = target.emoji
-                   )`,
-                [newId, previousId, roomId]
-              );
-            }
-            if ((result.rowCount ?? 0) === 0) {
-              await client.query('ROLLBACK');
-              return null;
-            }
-          }
-        }
-        if (
-          typeof update.$set['cards.$.text'] !== 'undefined' ||
-          typeof update.$set['cards.$.column'] !== 'undefined' ||
-          typeof update.$set['cards.$.type'] !== 'undefined' ||
-          typeof update.$set['cards.$.originColumn'] !== 'undefined' ||
-          typeof update.$set['cards.$.imageUrl'] !== 'undefined' ||
-          typeof update.$set['cards.$.authorRevealed'] !== 'undefined'
-        ) {
-          const cardId = filter['cards.id'];
-          const text = update.$set['cards.$.text'];
-          const column = update.$set['cards.$.column'];
-          const type = update.$set['cards.$.type'];
-          const originColumn = update.$set['cards.$.originColumn'];
-          const imageUrl = update.$set['cards.$.imageUrl'];
-          const authorRevealed = update.$set['cards.$.authorRevealed'];
-          if (typeof text !== 'undefined') {
-            await client.query('update cards set text=$1 where id=$2 and room_id=$3', [text, cardId, roomId]);
-          }
-          if (typeof column !== 'undefined') {
-            await client.query('update cards set column_index=$1 where id=$2 and room_id=$3', [column, cardId, roomId]);
-          }
-          if (typeof type !== 'undefined') {
-            await client.query('update cards set type=$1 where id=$2 and room_id=$3', [type, cardId, roomId]);
-          }
-          if (typeof originColumn !== 'undefined') {
-            await client.query('update cards set origin_column=$1 where id=$2 and room_id=$3', [originColumn, cardId, roomId]);
-          }
-          if (typeof imageUrl !== 'undefined') {
-            await client.query('update cards set image_url=$1 where id=$2 and room_id=$3', [imageUrl || null, cardId, roomId]);
-          }
-          if (typeof authorRevealed !== 'undefined') {
-            await client.query('update cards set author_revealed=$1 where id=$2 and room_id=$3', [Boolean(authorRevealed), cardId, roomId]);
-          }
-        }
-        if (update.$set['users.$[].isReady'] === false || update.$set['users.$[].is_ready'] === false) {
-          await client.query('update room_users set is_ready=false where room_id=$1', [roomId]);
-        }
-      }
-
-      if (update.$addToSet) {
-        if (update.$addToSet.users) {
-          const u: User = update.$addToSet.users;
-          await client.query(
-            `insert into room_users (id, name, room_id, role, is_ready, mood, joined_at) values ($1,$2,$3,$4,$5,$6, now())
-             on conflict (room_id, id) do update set name = excluded.name, role = excluded.role, is_ready = excluded.is_ready, mood = excluded.mood`,
-            [u.id, u.name, roomId, u.role, u.isReady ?? false, u.mood ?? null]
-          );
-        }
-        if (update.$addToSet[`cards.$.likes`] || update.$addToSet[`cards.$.dislikes`]) {
-          const cardId = filter['cards.id'];
-          const userId = update.$addToSet[`cards.$.likes`] || update.$addToSet[`cards.$.dislikes`];
-          const vote: 'like' | 'dislike' = update.$addToSet[`cards.$.likes`] ? 'like' : 'dislike';
-          await client.query('insert into card_votes (card_id, user_id, vote) values ($1,$2,$3) on conflict (card_id, user_id) do update set vote=excluded.vote', [cardId, userId, vote]);
-        }
-      }
-
-      if (update.$push?.cards) {
-        const c: Card = update.$push.cards;
+      if (typeof updates.id === 'string' && previousId && previousId !== updates.id) {
         await client.query(
-          'insert into cards (id, room_id, text, type, created_by, column_index, image_url, origin_column) values ($1,$2,$3,$4,$5,$6,$7,$8) on conflict (id) do nothing',
-          [c.id, roomId, c.text, c.type, c.createdBy, c.column, c.imageUrl || null, c.originColumn ?? null]
+          `update card_votes as target
+           set user_id = $1
+           where target.user_id = $2
+             and target.card_id in (select id from cards where room_id = $3)
+             and not exists (
+               select 1 from card_votes existing
+               where existing.card_id = target.card_id and existing.user_id = $1
+             )`,
+          [updates.id, previousId, roomId]
+        );
+        await client.query(
+          'update card_comments set user_id = $1 where user_id = $2 and card_id in (select id from cards where room_id = $3)',
+          [updates.id, previousId, roomId]
+        );
+        await client.query(
+          `update card_reactions as target
+           set user_id = $1
+           where target.user_id = $2
+             and target.card_id in (select id from cards where room_id = $3)
+             and not exists (
+               select 1 from card_reactions existing
+               where existing.card_id = target.card_id
+                 and existing.user_id = $1
+                 and existing.emoji = target.emoji
+             )`,
+          [updates.id, previousId, roomId]
         );
       }
-
-      if (update.$pull?.users) {
-        if (update.$pull.users.id) {
-          await client.query('delete from room_users where room_id=$1 and id=$2', [roomId, update.$pull.users.id]);
-        }
-      }
-      if (update.$pull?.cards) {
-        if (update.$pull.cards.id) {
-          await client.query('delete from cards where room_id=$1 and id=$2', [roomId, update.$pull.cards.id]);
-        }
-      }
-
       await client.query('COMMIT');
-    } catch (e) {
+    } catch (error) {
       await client.query('ROLLBACK');
-      throw e;
+      throw error;
     } finally {
       client.release();
     }
     return this.findOne({ id: roomId });
   },
 
-  async updateOne(filter: any, update: any): Promise<void> {
-    const roomId: string = filter.id;
-    const cardId: string = filter['cards.id'];
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      if (update.$pull) {
-        const removeUserFromLikes = update.$pull[`cards.$.likes`];
-        const removeUserFromDislikes = update.$pull[`cards.$.dislikes`];
-        const userIdToRemove = removeUserFromLikes || removeUserFromDislikes;
-        if (userIdToRemove) {
-          await client.query('delete from card_votes where card_id=$1 and user_id=$2', [cardId, userIdToRemove]);
-        }
-      }
-      await client.query('COMMIT');
-    } catch (e) {
-      await client.query('ROLLBACK');
-      throw e;
-    } finally {
-      client.release();
+  async insertRoomUser(roomId: string, user: User): Promise<RoomDocument | null> {
+    const { rowCount } = await pool.query(
+      `insert into room_users (id, name, room_id, role, is_ready, mood, joined_at) values ($1,$2,$3,$4,$5,$6, now())
+       on conflict (room_id, id) do update set name = excluded.name, role = excluded.role, is_ready = excluded.is_ready, mood = excluded.mood`,
+      [user.id, user.name, roomId, user.role, user.isReady ?? false, user.mood ?? null]
+    );
+    if (!rowCount) return null;
+    return this.findOne({ id: roomId });
+  },
+
+  async deleteRoomUser(roomId: string, userId: string): Promise<RoomDocument | null> {
+    await pool.query('delete from room_users where room_id=$1 and id=$2', [roomId, userId]);
+    return this.findOne({ id: roomId });
+  },
+
+  async patchCard(roomId: string, cardId: string, updates: Partial<Card>): Promise<RoomDocument | null> {
+    const assignments: string[] = [];
+    const params: unknown[] = [];
+    const set = (column: string, value: unknown) => {
+      params.push(value);
+      assignments.push(`${column} = $${params.length}`);
+    };
+    if (typeof updates.text !== 'undefined') set('text', updates.text);
+    if (typeof updates.column !== 'undefined') set('column_index', updates.column);
+    if (typeof updates.type !== 'undefined') set('type', updates.type);
+    if (typeof updates.originColumn !== 'undefined') set('origin_column', updates.originColumn);
+    if (typeof updates.imageUrl !== 'undefined') set('image_url', updates.imageUrl || null);
+    if (typeof updates.authorRevealed !== 'undefined') set('author_revealed', Boolean(updates.authorRevealed));
+    if (assignments.length === 0) return this.findOne({ id: roomId });
+    params.push(cardId, roomId);
+    const { rowCount } = await pool.query(
+      `update cards set ${assignments.join(', ')} where id = $${params.length - 1} and room_id = $${params.length}`,
+      params
+    );
+    if (!rowCount) return null;
+    return this.findOne({ id: roomId });
+  },
+
+  async deleteCardById(roomId: string, cardId: string): Promise<RoomDocument | null> {
+    await pool.query('delete from cards where room_id=$1 and id=$2', [roomId, cardId]);
+    return this.findOne({ id: roomId });
+  },
+
+  async setPhase(roomId: string, phase: Room['phase']): Promise<RoomDocument | null> {
+    const { rowCount } = await pool.query(
+      'update rooms set phase=$1, updated_at=now() where id=$2',
+      [phase, roomId]
+    );
+    if (!rowCount) return null;
+    return this.findOne({ id: roomId });
+  },
+
+  async resetReady(roomId: string): Promise<RoomDocument | null> {
+    await pool.query('update room_users set is_ready=false where room_id=$1', [roomId]);
+    return this.findOne({ id: roomId });
+  },
+
+  async setCardVote(cardId: string, userId: string, vote: 'like' | 'dislike' | null): Promise<void> {
+    if (vote === null) {
+      await pool.query('delete from card_votes where card_id=$1 and user_id=$2', [cardId, userId]);
+      return;
     }
+    await pool.query(
+      `insert into card_votes (card_id, user_id, vote) values ($1,$2,$3)
+       on conflict (card_id, user_id) do update set vote = excluded.vote`,
+      [cardId, userId, vote]
+    );
   },
 
   async insertCard(roomId: string, card: Card): Promise<RoomDocument | null> {

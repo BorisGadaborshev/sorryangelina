@@ -1,5 +1,7 @@
 import { Socket } from 'socket.io';
-import { on } from '../on';
+import { on, rejectAction } from '../on';
+import { isRoomAdmin } from '../access';
+import { logger } from '../../utils/logger';
 import { RealtimeSession } from '../session';
 import { Phase, RoomFeatures, getRetroTemplate } from '../../types';
 import { RoomService } from '../../services/RoomService';
@@ -12,6 +14,7 @@ import {
   getRoomFeatures,
   getSortedCards,
   io,
+  persistRoomEphemeral,
   resolveSocketActor,
   roomDiscussionNavigation,
   roomFacilitators,
@@ -24,7 +27,7 @@ export function registerPhaseHandlers(socket: Socket, session: RealtimeSession):
   on(socket, 'change-phase', async ({ phase }) => {
     const allowedPhases: Phase[] = ['creation', 'voting', 'discussion', 'roadmap', 'rating'];
     if (!allowedPhases.includes(phase)) {
-      socket.emit('error', 'Invalid phase');
+      rejectAction(socket, 'Invalid phase');
       return;
     }
 
@@ -32,18 +35,18 @@ export function registerPhaseHandlers(socket: Socket, session: RealtimeSession):
     if (actor?.roomId) session.currentUser = actor;
 
     if (!actor?.roomId) {
-      socket.emit('error', 'Не удалось сменить этап: сессия не восстановлена');
+      rejectAction(socket, 'Не удалось сменить этап: сессия не восстановлена');
       return;
     }
 
     const roomForPhase = await RoomService.getRoom(actor.roomId);
     if (phase === 'roadmap' && getRetroTemplate(roomForPhase?.template).id !== 'traffic-light') {
-      socket.emit('error', 'Дорожная карта доступна только для шаблона «Светофор»');
+      rejectAction(socket, 'Дорожная карта доступна только для шаблона «Светофор»');
       return;
     }
     if (phase === 'rating') {
       if (roomForPhase && !getRoomFeatures(roomForPhase).retroRatingEnabled) {
-        socket.emit('error', 'Оценка ретро отключена в настройках комнаты');
+        rejectAction(socket, 'Оценка ретро отключена в настройках комнаты');
         return;
       }
     }
@@ -51,7 +54,7 @@ export function registerPhaseHandlers(socket: Socket, session: RealtimeSession):
     try {
       const updatedRoom = await RoomService.updatePhase(actor.roomId, phase, actor.id, actor.name);
       if (!updatedRoom) {
-        socket.emit('error', 'Failed to change phase');
+        rejectAction(socket, 'Failed to change phase');
         return;
       }
 
@@ -97,9 +100,10 @@ export function registerPhaseHandlers(socket: Socket, session: RealtimeSession):
       }
 
       await emitRetroRatingStateToRoom(actor.roomId);
+      await persistRoomEphemeral(actor.roomId);
     } catch (error) {
-      console.error('Error changing phase:', error);
-      socket.emit('error', 'Failed to change phase');
+      logger.error({ err: error }, 'failed to change phase');
+      rejectAction(socket, 'Failed to change phase');
     }
   });
 
@@ -121,7 +125,7 @@ export function registerPhaseHandlers(socket: Socket, session: RealtimeSession):
 
       io.to(actor.roomId).emit('column-titles-updated', { titles: updatedRoom.columnTitles });
     } catch (error) {
-      console.error('Error updating column titles:', error);
+      logger.error({ err: error }, 'error updating column titles');
     }
   });
 
@@ -143,7 +147,7 @@ export function registerPhaseHandlers(socket: Socket, session: RealtimeSession):
 
       io.to(actor.roomId).emit('column-colors-updated', { colors: updatedRoom.columnColors });
     } catch (error) {
-      console.error('Error updating column colors:', error);
+      logger.error({ err: error }, 'error updating column colors');
     }
   });
 
@@ -158,8 +162,7 @@ export function registerPhaseHandlers(socket: Socket, session: RealtimeSession):
     try {
       const room = await RoomService.getRoom(actorRoomId);
       if (!room) return;
-      const isAdmin = room.users.some((user) => user.name === actorName && user.role === 'admin');
-      if (!isAdmin) return;
+      if (!isRoomAdmin(room, actorName)) return;
 
       const featurePatch = { ...(features as Partial<RoomFeatures>) };
       delete featurePatch.backgroundImage;
@@ -186,7 +189,7 @@ export function registerPhaseHandlers(socket: Socket, session: RealtimeSession):
         }
       }
     } catch (error) {
-      console.error('Error updating room features:', error);
+      logger.error({ err: error }, 'error updating room features');
     }
   });
 

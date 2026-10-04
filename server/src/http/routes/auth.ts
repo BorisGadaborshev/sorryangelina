@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { logger } from '../../utils/logger';
 import { AccountService } from '../../services/AccountService';
 import { TeamService } from '../../services/TeamService';
 import { signAuthToken } from '../../config/jwt';
@@ -43,7 +44,7 @@ authRouter.post('/fixed-login', async (req, res) => {
       isFirstLogin: result.isFirstLogin
     });
   } catch (error) {
-    console.error('Fixed login error:', error);
+    logger.error({ err: error }, 'fixed login error');
     res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to login' });
   }
 });
@@ -60,7 +61,7 @@ authRouter.post('/login', async (req, res) => {
     const profile = await AccountService.login(name, password);
     res.json(buildAuthResponse(profile));
   } catch (error) {
-    console.error('Login error:', error);
+    logger.error({ err: error }, 'login error');
     res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to login' });
   }
 });
@@ -77,7 +78,7 @@ authRouter.post('/register', async (req, res) => {
     const profile = await AccountService.register(name, password);
     res.json(buildAuthResponse(profile));
   } catch (error) {
-    console.error('Register error:', error);
+    logger.error({ err: error }, 'register error');
     res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to register' });
   }
 });

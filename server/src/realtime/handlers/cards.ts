@@ -1,11 +1,16 @@
+import crypto from 'crypto';
 import { Socket } from 'socket.io';
-import { on } from '../on';
+import { on, rejectAction } from '../on';
 import { RealtimeSession } from '../session';
 import { Card, getCardTypeByColumn, getRetroTemplate } from '../../types';
 import { RoomService } from '../../services/RoomService';
-import { assertCardSlotAvailable, assertCreationSlotAvailable, UsageLimitError } from '../../services/UsageLimits';
+import { assertCardSlotAvailable, UsageLimitError } from '../../services/UsageLimits';
+import { ContentModerationError } from '../../services/ContentModeration';
 import { eventAuth } from '../socketAuth';
-import { replaceBackgroundImage, replaceCardImage } from '../../services/ImageStore';
+import { replaceCardImage } from '../../services/ImageStore';
+import { logger } from '../../utils/logger';
+import { isRoomAdmin, moderateRoomText } from '../access';
+import { bumpRoomVersion } from '../roomSync';
 import {
   allowDiscussionBurst,
   emitDiscussionBurst,
@@ -23,7 +28,7 @@ export function registerCardsHandlers(socket: Socket, session: RealtimeSession):
     const actorRoomId = session.currentUser.roomId;
 
     try {
-      console.log('Received add-card:', { roomId: actorRoomId, column });
+      logger.debug({ roomId: actorRoomId, column }, 'add-card');
       const room = await RoomService.getRoom(actorRoomId);
       const template = getRetroTemplate(room?.template);
       const targetColumn = Number(column);
@@ -36,18 +41,20 @@ export function registerCardsHandlers(socket: Socket, session: RealtimeSession):
       const features = getRoomFeatures(room);
       const actionColumn = template.actionColumnIndex;
       if (actionColumn != null && !features.membersCanAddCards && targetColumn === actionColumn) {
-        const isAdmin = room.users.some((user) => user.name === actorName && user.role === 'admin');
-        if (!isAdmin) return;
+        if (!isRoomAdmin(room, actorName)) return;
       }
+      const trimmedText = typeof text === 'string' ? text.trim() : '';
+      if (!trimmedText && !imageUrl) return;
+      await moderateRoomText(room, trimmedText);
       await assertCardSlotAvailable(actorRoomId, actorName);
-      const cardId = Date.now().toString();
+      const cardId = crypto.randomUUID();
       const safeImageUrl = features.mediaEnabled && imageUrl
         ? await replaceCardImage(actorRoomId, cardId, imageUrl)
         : undefined;
 
       const card: Card = {
         id: cardId,
-        text,
+        text: trimmedText,
         type: getCardTypeByColumn(template, targetColumn),
         createdBy: actorName,
         likes: [],
@@ -61,19 +68,15 @@ export function registerCardsHandlers(socket: Socket, session: RealtimeSession):
       const updatedRoom = await RoomService.addCard(actorRoomId, card);
       if (updatedRoom) {
         io.to(actorRoomId).emit('card-added', card);
-        io.to(actorRoomId).emit('state-updated', {
-          cards: updatedRoom.cards,
-          phase: updatedRoom.phase,
-          users: updatedRoom.users
-        });
+        bumpRoomVersion(actorRoomId);
       }
     } catch (error) {
-      if (error instanceof UsageLimitError) {
-        socket.emit('error', error.message);
+      if (error instanceof UsageLimitError || error instanceof ContentModerationError) {
+        rejectAction(socket, error.message);
         return;
       }
-      console.error('Error adding card:', error);
-      socket.emit('error', 'Failed to add card');
+      logger.error({ err: error }, 'failed to add card');
+      rejectAction(socket, 'Failed to add card');
     }
   });
 
@@ -91,12 +94,12 @@ export function registerCardsHandlers(socket: Socket, session: RealtimeSession):
 
       const card = room.cards.find(c => c.id === cardId);
       if (!card) return;
-      const isAdmin = room.users.some((user) => user.name === currentUserName && user.role === 'admin');
-      if (!isAdmin && card.createdBy !== currentUserName) return;
+      if (!isRoomAdmin(room, currentUserName) && card.createdBy !== currentUserName) return;
 
       const updates: Partial<Card> = {};
       if (typeof text === 'string') {
-        updates.text = text;
+        await moderateRoomText(room, text);
+        updates.text = text.trim();
       }
       if (typeof imageUrl !== 'undefined') {
         updates.imageUrl = features.mediaEnabled
@@ -111,15 +114,15 @@ export function registerCardsHandlers(socket: Socket, session: RealtimeSession):
         if (updatedCard) {
           io.to(session.currentUser.roomId).emit('card-updated', updatedCard);
         }
-        io.to(session.currentUser.roomId).emit('state-updated', {
-          cards: updatedRoom.cards,
-          phase: updatedRoom.phase,
-          users: updatedRoom.users
-        });
+        bumpRoomVersion(session.currentUser.roomId);
       }
     } catch (error) {
-      console.error('Error updating card:', error);
-      socket.emit('error', 'Failed to update card');
+      if (error instanceof ContentModerationError) {
+        rejectAction(socket, error.message);
+        return;
+      }
+      logger.error({ err: error }, 'failed to update card');
+      rejectAction(socket, 'Failed to update card');
     }
   });
 
@@ -135,21 +138,16 @@ export function registerCardsHandlers(socket: Socket, session: RealtimeSession):
 
       const card = room.cards.find(c => c.id === cardId);
       if (!card) return;
-      const isAdmin = room.users.some((user) => user.name === currentUserName && user.role === 'admin');
-      if (!isAdmin && card.createdBy !== currentUserName) return;
+      if (!isRoomAdmin(room, currentUserName) && card.createdBy !== currentUserName) return;
 
       const updatedRoom = await RoomService.deleteCard(session.currentUser.roomId, cardId);
       if (updatedRoom) {
         io.to(session.currentUser.roomId).emit('card-deleted', cardId);
-        io.to(session.currentUser.roomId).emit('state-updated', {
-          cards: updatedRoom.cards,
-          phase: updatedRoom.phase,
-          users: updatedRoom.users
-        });
+        bumpRoomVersion(session.currentUser.roomId);
       }
     } catch (error) {
-      console.error('Error deleting card:', error);
-      socket.emit('error', 'Failed to delete card');
+      logger.error({ err: error }, 'failed to delete card');
+      rejectAction(socket, 'Failed to delete card');
     }
   });
 
@@ -162,23 +160,19 @@ export function registerCardsHandlers(socket: Socket, session: RealtimeSession):
       if (!room) return;
 
       const actor = room.users.find((user) => user.id === session.currentUser?.id || user.name === session.currentUser?.name);
-      if (!actor || actor.role !== 'admin') {
-        socket.emit('error', 'Только администратор может удалить все карточки');
+      if (!actor || !isRoomAdmin(room, actor.name)) {
+        rejectAction(socket, 'Только администратор может удалить все карточки');
         return;
       }
 
       const updatedRoom = await RoomService.deleteAllCards(session.currentUser.roomId);
       if (updatedRoom) {
         io.to(session.currentUser.roomId).emit('cards-cleared');
-        io.to(session.currentUser.roomId).emit('state-updated', {
-          cards: updatedRoom.cards,
-          phase: updatedRoom.phase,
-          users: updatedRoom.users
-        });
+        bumpRoomVersion(session.currentUser.roomId);
       }
     } catch (error) {
-      console.error('Error deleting all cards:', error);
-      socket.emit('error', 'Failed to delete all cards');
+      logger.error({ err: error }, 'failed to delete all cards');
+      rejectAction(socket, 'Failed to delete all cards');
     }
   });
 
@@ -192,10 +186,7 @@ export function registerCardsHandlers(socket: Socket, session: RealtimeSession):
       if (!room || room.phase !== 'creation') return;
       if (!getRoomFeatures(room).cardEditingEnabled) return;
 
-      const isAdmin = room.users.some(
-        (user) => user.name === session.currentUser?.name && user.role === 'admin'
-      );
-      if (!isAdmin) return;
+      if (!isRoomAdmin(room, session.currentUser.name)) return;
 
       const targetCard = room.cards.find((card) => card.id === targetCardId);
       const sourceCard = room.cards.find((card) => card.id === sourceCardId);
@@ -208,10 +199,11 @@ export function registerCardsHandlers(socket: Socket, session: RealtimeSession):
           phase: updatedRoom.phase,
           users: updatedRoom.users
         });
+        bumpRoomVersion(session.currentUser.roomId);
       }
     } catch (error) {
-      console.error('Error merging cards:', error);
-      socket.emit('error', 'Failed to merge cards');
+      logger.error({ err: error }, 'failed to merge cards');
+      rejectAction(socket, 'Failed to merge cards');
     }
   });
 
@@ -238,8 +230,7 @@ export function registerCardsHandlers(socket: Socket, session: RealtimeSession):
       if (!card) return;
 
       if (creationMove) {
-        const isAdmin = room.users.some((user) => user.name === currentUserName && user.role === 'admin');
-        if (!isAdmin) {
+        if (!isRoomAdmin(room, currentUserName)) {
           if (!getRoomFeatures(room).moveCardsEnabled) return;
           if (card.createdBy !== currentUserName) return;
         }
@@ -259,14 +250,10 @@ export function registerCardsHandlers(socket: Socket, session: RealtimeSession):
       if (!updatedRoom) return;
 
       io.to(session.currentUser.roomId).emit('card-moved', { cardId, column: targetColumn, originColumn: updates.originColumn ?? card.originColumn });
-      io.to(session.currentUser.roomId).emit('state-updated', {
-        cards: updatedRoom.cards,
-        phase: updatedRoom.phase,
-        users: updatedRoom.users
-      });
+      bumpRoomVersion(session.currentUser.roomId);
     } catch (error) {
-      console.error('Error moving card:', error);
-      socket.emit('error', 'Failed to move card');
+      logger.error({ err: error }, 'failed to move card');
+      rejectAction(socket, 'Failed to move card');
     }
   });
 
@@ -293,21 +280,17 @@ export function registerCardsHandlers(socket: Socket, session: RealtimeSession):
             likes: updatedCard.likes,
             dislikes: updatedCard.dislikes
           });
-          io.to(session.currentUser.roomId).emit('state-updated', {
-            cards: updatedRoom.cards,
-            phase: updatedRoom.phase,
-            users: updatedRoom.users
-          });
+          bumpRoomVersion(session.currentUser.roomId);
         }
       }
     } catch (error) {
-      console.error('Error voting for card:', error);
       const message = error instanceof Error ? error.message : 'Failed to vote for card';
-      if (error instanceof Error && message.includes('не более')) {
+      if (error instanceof Error && (message.includes('не более') || message.includes('отключены'))) {
         socket.emit('vote-error', { cardId, message });
         return;
       }
-      socket.emit('error', message);
+      logger.error({ err: error }, 'failed to vote for card');
+      rejectAction(socket, message);
     }
   });
 
@@ -340,7 +323,7 @@ export function registerCardsHandlers(socket: Socket, session: RealtimeSession):
 
       const roomForFeatures = await RoomService.getRoom(actor.roomId);
       if (roomForFeatures && !getRoomFeatures(roomForFeatures).readyEnabled) {
-        socket.emit('error', 'Отметка готовности отключена в настройках комнаты');
+        rejectAction(socket, 'Отметка готовности отключена в настройках комнаты');
         return;
       }
 
@@ -351,9 +334,10 @@ export function registerCardsHandlers(socket: Socket, session: RealtimeSession):
           phase: room.phase,
           users: room.users
         });
+        bumpRoomVersion(actor.roomId);
       }
     } catch (error) {
-      console.error('Error updating ready state:', error);
+      logger.error({ err: error }, 'failed to update ready state');
     }
   });
 
@@ -377,11 +361,12 @@ export function registerCardsHandlers(socket: Socket, session: RealtimeSession):
       if (!updatedCard) return;
 
       io.to(actor.roomId).emit('card-updated', updatedCard);
+      bumpRoomVersion(actor.roomId);
       if (nextRevealed && allowDiscussionBurst(actor.roomId, actor.name)) {
         emitDiscussionBurst(actor.roomId, '✍️', actor.name);
       }
     } catch (error) {
-      console.error('Error revealing card author:', error);
+      logger.error({ err: error }, 'failed to reveal card author');
     }
   });
 

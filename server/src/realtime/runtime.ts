@@ -1,9 +1,26 @@
 import '../config/env';
+import crypto from 'crypto';
 import { Server, Socket } from 'socket.io';
-import { Room, User, Card, Mood, Phase, RetroTemplate } from '../types';
+import {
+  Room,
+  User,
+  Card,
+  Mood,
+  Phase,
+  RetroTemplate,
+  ChatMessage,
+  DiscussionNavigationState,
+  FacilitatorAnnouncement,
+  SprintVipState,
+  WhiteboardPoint,
+  WhiteboardStroke
+} from '../types';
 import { normalizeRoomFeatures } from '../utils/roomFeatures';
 import { RoomCache } from '../services/RoomCache';
 import { RoomService } from '../services/RoomService';
+import { readRoomRuntime, StoredRoomRuntime, writeRoomRuntime } from '../services/RoomRuntimeStore';
+import { logger } from '../utils/logger';
+import { clearRoomVersion } from './roomSync';
 
 export let io: Server = undefined as unknown as Server;
 export const bindIo = (server: Server): void => {
@@ -103,7 +120,7 @@ export const allowDiscussionBurst = (roomId: string, userName: string): boolean 
 
 export const emitDiscussionBurst = (roomId: string, emoji: string, userName: string): void => {
   io.to(roomId).emit('discussion-burst', {
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    id: crypto.randomUUID(),
     emoji,
     userName
   });
@@ -217,51 +234,12 @@ export interface RoomTimerSession {
   phase: Phase;
   durationSeconds: number;
   endAt: number;
-  interval: NodeJS.Timeout;
+  timeout: NodeJS.Timeout;
 }
 
 export interface RetroRatingRoomState {
   votes: Map<string, 1 | 2 | 3 | 4 | 5>;
   resultsVisible: boolean;
-}
-
-export interface FacilitatorAnnouncement {
-  userId: string;
-  userName: string;
-  selectedAt: number;
-}
-
-export interface DiscussionNavigationState {
-  unviewedCardIds: string[];
-  viewedCardIds: string[];
-}
-
-export interface SprintVipState {
-  vipUserName?: string;
-  voteCount: number;
-  myVote?: string;
-}
-
-export interface ChatMessage {
-  id: string;
-  roomId: string;
-  userName: string;
-  text: string;
-  timestamp: number;
-}
-
-export interface WhiteboardPoint {
-  x: number;
-  y: number;
-}
-
-export interface WhiteboardStroke {
-  id: string;
-  userId: string;
-  color: string;
-  width: number;
-  tool: 'pen' | 'eraser';
-  points: WhiteboardPoint[];
 }
 
 export const roomTimers = new Map<string, RoomTimerSession>();
@@ -351,6 +329,14 @@ export const getRemainingSeconds = (endAt: number): number => {
   return Math.max(0, Math.ceil((endAt - Date.now()) / 1000));
 };
 
+const timerPayload = (session: RoomTimerSession) => ({
+  phase: session.phase,
+  durationSeconds: session.durationSeconds,
+  remainingSeconds: getRemainingSeconds(session.endAt),
+  running: true,
+  endAt: session.endAt
+});
+
 export const emitTimerResetToRoom = (roomId: string): void => {
   io.to(roomId).emit('timer-updated', {
     durationSeconds: 0,
@@ -360,12 +346,7 @@ export const emitTimerResetToRoom = (roomId: string): void => {
 };
 
 export const emitTimerToRoom = (roomId: string, session: RoomTimerSession): void => {
-  io.to(roomId).emit('timer-updated', {
-    phase: session.phase,
-    durationSeconds: session.durationSeconds,
-    remainingSeconds: getRemainingSeconds(session.endAt),
-    running: true
-  });
+  io.to(roomId).emit('timer-updated', timerPayload(session));
 };
 
 export const emitTimerToSocket = (socket: Socket, roomId: string): void => {
@@ -379,22 +360,91 @@ export const emitTimerToSocket = (socket: Socket, roomId: string): void => {
     return;
   }
 
-  socket.emit('timer-updated', {
-    phase: session.phase,
-    durationSeconds: session.durationSeconds,
-    remainingSeconds: getRemainingSeconds(session.endAt),
-    running: true
-  });
+  socket.emit('timer-updated', timerPayload(session));
 };
 
-export const clearRoomTimer = (roomId: string, emitReset = true): void => {
+export const clearRoomTimer = (roomId: string, emitReset = true, persist = true): void => {
   const session = roomTimers.get(roomId);
   if (session) {
-    clearInterval(session.interval);
+    clearTimeout(session.timeout);
     roomTimers.delete(roomId);
   }
   if (emitReset) {
     emitTimerResetToRoom(roomId);
+  }
+  if (persist) void persistRoomEphemeral(roomId);
+};
+
+export const startRoomTimer = (
+  roomId: string,
+  phase: Phase,
+  durationSeconds: number,
+  endAt: number
+): void => {
+  clearRoomTimer(roomId, false, false);
+  const timeout = setTimeout(() => {
+    const active = roomTimers.get(roomId);
+    if (!active || active.endAt !== endAt) return;
+    io.to(roomId).emit('timer-updated', {
+      phase: active.phase,
+      durationSeconds: active.durationSeconds,
+      remainingSeconds: 0,
+      running: false,
+      endAt: active.endAt
+    });
+    clearTimeout(active.timeout);
+    roomTimers.delete(roomId);
+    void persistRoomEphemeral(roomId);
+  }, Math.max(0, endAt - Date.now()));
+  const session: RoomTimerSession = { phase, durationSeconds, endAt, timeout };
+  roomTimers.set(roomId, session);
+  emitTimerToRoom(roomId, session);
+  void persistRoomEphemeral(roomId);
+};
+
+const hydratedRooms = new Set<string>();
+
+export const persistRoomEphemeral = async (roomId: string): Promise<void> => {
+  const timer = roomTimers.get(roomId);
+  const rating = roomRetroRatings.get(roomId);
+  const facilitator = roomFacilitators.get(roomId);
+  const discussion = roomDiscussionNavigation.get(roomId);
+  const state: StoredRoomRuntime = {
+    timer: timer
+      ? { phase: timer.phase, durationSeconds: timer.durationSeconds, endAt: timer.endAt }
+      : null,
+    rating: rating
+      ? { votes: Array.from(rating.votes.entries()), resultsVisible: rating.resultsVisible }
+      : null,
+    facilitator: facilitator ?? null,
+    discussion: discussion ?? null
+  };
+  await writeRoomRuntime(roomId, state);
+};
+
+export const hydrateRoomEphemeral = async (roomId: string): Promise<void> => {
+  if (hydratedRooms.has(roomId)) return;
+  hydratedRooms.add(roomId);
+  try {
+    const stored = await readRoomRuntime(roomId);
+    if (stored.rating && !roomRetroRatings.has(roomId)) {
+      roomRetroRatings.set(roomId, {
+        votes: new Map(stored.rating.votes),
+        resultsVisible: stored.rating.resultsVisible
+      });
+    }
+    if (stored.facilitator && !roomFacilitators.has(roomId)) {
+      roomFacilitators.set(roomId, stored.facilitator);
+    }
+    if (stored.discussion && !roomDiscussionNavigation.has(roomId)) {
+      roomDiscussionNavigation.set(roomId, stored.discussion);
+    }
+    if (stored.timer && stored.timer.endAt > Date.now() && !roomTimers.has(roomId)) {
+      startRoomTimer(roomId, stored.timer.phase, stored.timer.durationSeconds, stored.timer.endAt);
+    }
+  } catch (error) {
+    hydratedRooms.delete(roomId);
+    logger.error({ err: error, roomId }, 'failed to hydrate room runtime');
   }
 };
 
@@ -628,7 +678,7 @@ export const persistUserLeave = async (
     discussionBurstTimestamps.delete(roomId);
     cancelPendingDeparturesForRoom(roomId);
     RoomCache.invalidate(roomId);
-    console.log('Room is empty:', roomId);
+    logger.info({ roomId }, 'room is empty');
   } else {
     io.to(roomId).emit('user-left', user);
     io.to(roomId).emit('state-updated', {
@@ -669,11 +719,11 @@ export const schedulePendingUserDeparture = (user: User, roomId: string): void =
     if (hasRoomPresence(roomId, user.name)) {
       return;
     }
-    console.log('Disconnect grace elapsed, removing user from room:', {
+    logger.info({
       roomId,
       userName: user.name,
       graceMs: USER_DISCONNECT_GRACE_MS
-    });
+    }, 'disconnect grace elapsed, removing user from room');
     void persistUserLeave(user, roomId, { requireAbsent: true });
   }, USER_DISCONNECT_GRACE_MS);
   pendingUserDepartures.set(key, timeout);
@@ -716,7 +766,7 @@ export const resolveSocketActor = async (socket: Socket, currentUser: User | nul
 };
 
 export function clearRoomRuntimeState(roomId: string, emitTimerReset = false): void {
-  clearRoomTimer(roomId, emitTimerReset);
+  clearRoomTimer(roomId, emitTimerReset, false);
   roomChats.delete(roomId);
   roomWhiteboards.delete(roomId);
   roomRetroRatings.delete(roomId);
@@ -727,4 +777,7 @@ export function clearRoomRuntimeState(roomId: string, emitTimerReset = false): v
   roomSprintVipVotes.delete(roomId);
   roomArkanoidScores.delete(roomId);
   cancelPendingDeparturesForRoom(roomId);
+  hydratedRooms.delete(roomId);
+  clearRoomVersion(roomId);
+  void persistRoomEphemeral(roomId);
 }

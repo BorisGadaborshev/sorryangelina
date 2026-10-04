@@ -1,5 +1,6 @@
 import { Socket } from 'socket.io';
-import { on } from '../on';
+import { on, rejectAction } from '../on';
+import { logger } from '../../utils/logger';
 import { RealtimeSession } from '../session';
 import { DISCUSSION_BURST_EMOJIS } from '../../types';
 import { RoomService } from '../../services/RoomService';
@@ -11,6 +12,7 @@ import {
   getRoomFeatures,
   io,
   normalizeDiscussionNavigation,
+  persistRoomEphemeral,
   resolveSocketActor,
   roomDiscussionNavigation,
   roomRaisedHands
@@ -46,8 +48,10 @@ export function registerDiscussionHandlers(socket: Socket, session: RealtimeSess
 
       roomDiscussionNavigation.set(actor.roomId, normalized);
       io.to(actor.roomId).emit('discussion-navigation', normalized);
+      await persistRoomEphemeral(actor.roomId);
     } catch (error) {
-      console.error('Error updating discussion navigation:', error);
+      logger.error({ err: error }, 'failed to update discussion navigation');
+      rejectAction(socket, 'Не удалось обновить обсуждение');
     }
   });
 
@@ -64,7 +68,7 @@ export function registerDiscussionHandlers(socket: Socket, session: RealtimeSess
       if (!room || room.phase !== 'discussion' || !getRoomFeatures(room).discussionActionsEnabled) return;
       emitDiscussionBurst(actor.roomId, emoji, actor.name);
     } catch (error) {
-      console.error('Error sending discussion burst:', error);
+      logger.error({ err: error }, 'error sending discussion burst');
     }
   });
 
@@ -93,7 +97,7 @@ export function registerDiscussionHandlers(socket: Socket, session: RealtimeSess
       }
       emitDiscussionHands(actor.roomId);
     } catch (error) {
-      console.error('Error toggling discussion hand:', error);
+      logger.error({ err: error }, 'error toggling discussion hand');
     }
   });
 

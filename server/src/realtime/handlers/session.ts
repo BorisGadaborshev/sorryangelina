@@ -1,13 +1,15 @@
 import { Socket } from 'socket.io';
-import { on } from '../on';
+import { logger } from '../../utils/logger';
+import { on, rejectAction } from '../on';
 import { RealtimeSession } from '../session';
-import { Room, User, isRetroTemplateId } from '../../types';
+import { User, isRetroTemplateId } from '../../types';
 import { RoomService } from '../../services/RoomService';
 import { TeamService } from '../../services/TeamService';
 import { BUILTIN_TEAM_ID } from '../../services/TeamService';
 import { assertNoProfanity, ContentModerationError } from '../../services/ContentModeration';
-import { assertCardSlotAvailable, assertCreationSlotAvailable, UsageLimitError } from '../../services/UsageLimits';
+import { assertCreationSlotAvailable, UsageLimitError } from '../../services/UsageLimits';
 import { eventAuth } from '../socketAuth';
+import { currentRoomVersion } from '../roomSync';
 import {
   addRoomPresence,
   adjustConnectionCount,
@@ -17,6 +19,7 @@ import {
   emitArkanoidScoresToSocket,
   emitDiscussionHandsToSocket,
   emitDiscussionNavigationToSocket,
+  hydrateRoomEphemeral,
   emitFacilitatorToSocket,
   emitRetroRatingStateToRoom,
   emitRetroRatingStateToSocket,
@@ -30,6 +33,18 @@ import {
 } from '../runtime';
 
 export function registerSessionHandlers(socket: Socket, session: RealtimeSession): void {
+  on(socket, 'sync-room', async () => {
+    if (!session.currentUser?.roomId) return;
+    const room = await RoomService.getRoom(session.currentUser.roomId);
+    if (!room) return;
+    socket.emit('state-updated', {
+      cards: room.cards,
+      phase: room.phase,
+      users: room.users,
+      version: currentRoomVersion(room.id)
+    });
+  });
+
   on(socket, 'restore-session', async ({ roomId, userId, username, token }) => {
     const auth = eventAuth(socket, token);
     if (!auth) {
@@ -46,7 +61,7 @@ export function registerSessionHandlers(socket: Socket, session: RealtimeSession
       );
       
       if (!room || !user) {
-        console.log('Failed to restore session:', { roomId, userId });
+        logger.debug({ roomId, userId }, 'session restore failed');
         socket.emit('session-expired');
         return;
       }
@@ -63,7 +78,7 @@ export function registerSessionHandlers(socket: Socket, session: RealtimeSession
       socket.data.roomId = roomId;
       addRoomPresence(roomId, user.name, socket.id);
       
-      console.log('Session restored successfully:', { roomId, userId: session.currentUser.id });
+      logger.debug({ roomId, userId: session.currentUser.id }, 'session restored');
       socket.emit('room-joined', { 
         room, 
         state: { 
@@ -78,6 +93,7 @@ export function registerSessionHandlers(socket: Socket, session: RealtimeSession
         phase: room.phase,
         users: room.users
       });
+      await hydrateRoomEphemeral(roomId);
       emitTimerToSocket(socket, roomId);
       socket.emit('chat-history', { messages: roomChats.get(roomId) || [] });
       socket.emit('whiteboard-history', { strokes: roomWhiteboards.get(roomId) || [] });
@@ -88,7 +104,7 @@ export function registerSessionHandlers(socket: Socket, session: RealtimeSession
       emitFacilitatorToSocket(socket, roomId, room);
       emitDiscussionHandsToSocket(socket, roomId);
     } catch (error) {
-      console.error('Error restoring session:', error);
+      logger.error({ err: error }, 'error restoring session');
       socket.emit('session-expired');
     }
   });
@@ -97,11 +113,11 @@ export function registerSessionHandlers(socket: Socket, session: RealtimeSession
   on(socket, 'create-room', async ({ roomId, password, username, token, teamId, template }) => {
     const auth = eventAuth(socket, token);
     if (!auth) {
-      socket.emit('error', 'Unauthorized: token is invalid or expired');
+      rejectAction(socket, 'Unauthorized: token is invalid or expired');
       return;
     }
     if (username && auth.name !== username) {
-      socket.emit('error', 'Unauthorized: token does not match user');
+      rejectAction(socket, 'Unauthorized: token does not match user');
       return;
     }
     const effectiveUsername = auth.name;
@@ -109,24 +125,24 @@ export function registerSessionHandlers(socket: Socket, session: RealtimeSession
     try {
       const teamRole = await TeamService.getUserRole(normalizedTeamId, effectiveUsername);
       if (!teamRole) {
-        socket.emit('error', 'Join the team before creating a room');
+        rejectAction(socket, 'Join the team before creating a room');
         return;
       }
 
       const existingRoom = await RoomService.getRoom(roomId);
       if (existingRoom) {
-        console.log('Room already exists:', roomId);
-        socket.emit('error', 'Room already exists');
+        logger.debug({ roomId }, 'room already exists');
+        rejectAction(socket, 'Room already exists');
         return;
       }
 
       if (typeof template !== 'undefined' && !isRetroTemplateId(template)) {
-        socket.emit('error', 'Unknown retro template');
+        rejectAction(socket, 'Unknown retro template');
         return;
       }
 
       if (typeof roomId !== 'string' || !roomId.trim()) {
-        socket.emit('error', 'Room name is required');
+        rejectAction(socket, 'Room name is required');
         return;
       }
 
@@ -150,7 +166,7 @@ export function registerSessionHandlers(socket: Socket, session: RealtimeSession
       };
       addRoomPresence(roomId, effectiveUsername, socket.id);
       
-      console.log('Room created successfully:', roomId);
+      logger.info({ roomId }, 'room created');
       socket.emit('room-joined', { 
         room, 
         state: { 
@@ -160,6 +176,7 @@ export function registerSessionHandlers(socket: Socket, session: RealtimeSession
         },
         userId: socket.id
       });
+      await hydrateRoomEphemeral(roomId);
       emitTimerToSocket(socket, roomId);
       socket.emit('chat-history', { messages: roomChats.get(roomId) || [] });
       socket.emit('whiteboard-history', { strokes: roomWhiteboards.get(roomId) || [] });
@@ -171,9 +188,9 @@ export function registerSessionHandlers(socket: Socket, session: RealtimeSession
         ? error.message
         : null;
       if (!limitMessage) {
-        console.error('Error creating room:', error);
+        logger.error({ err: error }, 'error creating room');
       }
-      socket.emit('error', limitMessage ?? 'Failed to create room');
+      rejectAction(socket, limitMessage ?? 'Failed to create room');
     }
   });
 
@@ -181,38 +198,38 @@ export function registerSessionHandlers(socket: Socket, session: RealtimeSession
   on(socket, 'join-room', async ({ roomId, password, username, token }) => {
     const auth = eventAuth(socket, token);
     if (!auth) {
-      socket.emit('error', 'Unauthorized: token is invalid or expired');
+      rejectAction(socket, 'Unauthorized: token is invalid or expired');
       return;
     }
     if (username && auth.name !== username) {
-      socket.emit('error', 'Unauthorized: token does not match user');
+      rejectAction(socket, 'Unauthorized: token does not match user');
       return;
     }
     const effectiveUsername = auth.name;
     if (roomPasswordRetryAfterMs(socket.id) > 0) {
-      socket.emit('error', 'Too many invalid passwords');
+      rejectAction(socket, 'Too many invalid passwords');
       return;
     }
     try {
       const isValid = await RoomService.validatePassword(roomId, password);
       if (!isValid) {
-        console.log('Invalid password for room:', roomId);
+        logger.info({ roomId }, 'invalid room password');
         const lockedForMs = registerInvalidRoomPassword(socket.id);
-        socket.emit('error', lockedForMs > 0 ? 'Too many invalid passwords' : 'Invalid password');
+        rejectAction(socket, lockedForMs > 0 ? 'Too many invalid passwords' : 'Invalid password');
         return;
       }
       clearRoomPasswordAttempts(socket.id);
 
       const existingRoom = await RoomService.getRoom(roomId);
       if (!existingRoom) {
-        socket.emit('error', 'Room not found');
+        rejectAction(socket, 'Room not found');
         return;
       }
       const teamRole = existingRoom.teamId
         ? await TeamService.getUserRole(existingRoom.teamId, effectiveUsername)
         : null;
       if (existingRoom.teamId && !teamRole) {
-        socket.emit('error', 'Join the team before joining a room');
+        rejectAction(socket, 'Join the team before joining a room');
         return;
       }
 
@@ -233,7 +250,7 @@ export function registerSessionHandlers(socket: Socket, session: RealtimeSession
 
       const room = await RoomService.getRoom(roomId);
       if (!room) {
-        socket.emit('error', 'Room not found');
+        rejectAction(socket, 'Room not found');
         return;
       }
 
@@ -258,6 +275,7 @@ export function registerSessionHandlers(socket: Socket, session: RealtimeSession
         },
         userId: user.id
       });
+      await hydrateRoomEphemeral(roomId);
       emitTimerToSocket(socket, roomId);
       socket.emit('chat-history', { messages: roomChats.get(roomId) || [] });
       socket.emit('whiteboard-history', { strokes: roomWhiteboards.get(roomId) || [] });
@@ -279,8 +297,8 @@ export function registerSessionHandlers(socket: Socket, session: RealtimeSession
       await emitRetroRatingStateToRoom(roomId);
       await emitSprintVipStateToRoom(roomId);
     } catch (error) {
-      console.error('Error joining room:', error);
-      socket.emit('error', 'Failed to join room');
+      logger.error({ err: error }, 'error joining room');
+      rejectAction(socket, 'Failed to join room');
     }
   });
 
@@ -294,7 +312,7 @@ export function registerSessionHandlers(socket: Socket, session: RealtimeSession
       await handleUserLeavingRoom(socket, leavingUser);
       socket.emit('left-room');
     } catch (error) {
-      console.error('Error handling leave-room:', error);
+      logger.error({ err: error }, 'error handling leave-room');
     }
   });
 
@@ -302,8 +320,7 @@ export function registerSessionHandlers(socket: Socket, session: RealtimeSession
   on(socket, 'disconnect', (reason) => {
     const connectionCount = adjustConnectionCount(-1);
     clearRoomPasswordAttempts(socket.id);
-    console.log(`Client disconnected (${connectionCount} total):`, socket.id);
-    console.log('Disconnect reason:', reason);
+    logger.debug({ socketId: socket.id, connections: connectionCount, reason }, 'client disconnected');
     
     if (!session.currentUser) return;
 
@@ -312,12 +329,12 @@ export function registerSessionHandlers(socket: Socket, session: RealtimeSession
       session.currentUser = null;
       handleUserDisconnect(socket, disconnectedUser);
     } catch (error) {
-      console.error('Error handling disconnect:', error);
+      logger.error({ err: error }, 'error handling disconnect');
     }
   });
 
 
   on(socket, 'error', (error) => {
-    console.error('Socket error for client:', socket.id, error);
+    logger.error({ err: error, socketId: socket.id }, 'socket error');
   });
 }

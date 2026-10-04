@@ -13,7 +13,9 @@ const loadEnvFile = (filename: string, override: boolean): void => {
 // Production takes variables from the process (systemd) and must not
 // pick up a developer machine's .env.local. Local dev loads .env, then
 // lets .env.local override it.
-if (process.env.NODE_ENV === 'production') {
+if (process.env.NODE_ENV === 'test') {
+  // Vitest passes DATABASE_URL itself. Do not replace it with a developer .env.
+} else if (process.env.NODE_ENV === 'production') {
   loadEnvFile('.env', false);
 } else {
   loadEnvFile('.env', false);

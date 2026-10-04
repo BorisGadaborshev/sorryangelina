@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { logger } from '../../utils/logger';
 import { BUILTIN_TEAM_ID, TeamService } from '../../services/TeamService';
 import { AccountService } from '../../services/AccountService';
 import { RoomService } from '../../services/RoomService';
@@ -13,7 +14,7 @@ roomsRouter.get('/', async (_req, res) => {
     const rooms = await RoomService.getAvailableRoomSummaries(BUILTIN_TEAM_ID);
     res.json(rooms);
   } catch (error) {
-    console.error('Error getting rooms:', error);
+    logger.error({ err: error }, 'error getting rooms');
     res.status(500).json({ error: 'Failed to get rooms' });
   }
 });
@@ -42,7 +43,7 @@ roomsRouter.delete('/:roomId', requireAuth, async (req, res) => {
     clearRoomRuntimeState(roomId, false);
     res.json({ message: 'Room deleted successfully' });
   } catch (error) {
-    console.error('Error deleting room via API:', error);
+    logger.error({ err: error }, 'error deleting room via API');
     res.status(500).json({ error: 'Failed to delete room' });
   }
 });

@@ -1,12 +1,15 @@
+import crypto from 'crypto';
 import { Socket } from 'socket.io';
-import { on } from '../on';
+import { on, rejectAction } from '../on';
 import { RealtimeSession } from '../session';
-import { Room } from '../../types';
 import { AccountService } from '../../services/AccountService';
 import { RoomService } from '../../services/RoomService';
-import { replaceBackgroundImage, replaceCardImage } from '../../services/ImageStore';
+import { replaceBackgroundImage } from '../../services/ImageStore';
+import { ContentModerationError } from '../../services/ContentModeration';
+import { logger } from '../../utils/logger';
+import { isRoomAdmin, moderateRoomText } from '../access';
+import { ChatMessage } from '../../types';
 import {
-  ChatMessage,
   appendChatMessage,
   cancelPendingUserDeparture,
   clearRoomRuntimeState,
@@ -42,7 +45,7 @@ export function registerExtrasHandlers(socket: Socket, session: RealtimeSession)
       }
 
       if (!room.users.some((user) => user.name === targetName)) {
-        socket.emit('error', 'Участник не найден');
+        rejectAction(socket, 'Участник не найден');
         return;
       }
 
@@ -55,8 +58,8 @@ export function registerExtrasHandlers(socket: Socket, session: RealtimeSession)
       roomSprintVipVotes.set(session.currentUser.roomId, votes);
       await emitSprintVipStateToRoom(session.currentUser.roomId);
     } catch (error) {
-      console.error('Error voting sprint VIP:', error);
-      socket.emit('error', 'Не удалось проголосовать за VIP спринта');
+      logger.error({ err: error }, 'error voting sprint VIP');
+      rejectAction(socket, 'Не удалось проголосовать за VIP спринта');
     }
   });
 
@@ -81,7 +84,7 @@ export function registerExtrasHandlers(socket: Socket, session: RealtimeSession)
     if (!session.currentUser?.roomId) return;
     const safeMood = normalizeMood(mood);
     if (!safeMood) {
-      socket.emit('error', 'Invalid mood');
+      rejectAction(socket, 'Invalid mood');
       return;
     }
 
@@ -98,8 +101,8 @@ export function registerExtrasHandlers(socket: Socket, session: RealtimeSession)
         users: room.users
       });
     } catch (error) {
-      console.error('Error updating user mood:', error);
-      socket.emit('error', 'Failed to update user mood');
+      logger.error({ err: error }, 'failed to update user mood');
+      rejectAction(socket, 'Failed to update user mood');
     }
   });
 
@@ -110,9 +113,18 @@ export function registerExtrasHandlers(socket: Socket, session: RealtimeSession)
     if (!room || !getRoomFeatures(room).chatEnabled) return;
     const normalized = typeof text === 'string' ? text.trim() : '';
     if (!normalized) return;
+    try {
+      await moderateRoomText(room, normalized);
+    } catch (error) {
+      if (error instanceof ContentModerationError) {
+        rejectAction(socket, error.message);
+        return;
+      }
+      throw error;
+    }
 
     const message: ChatMessage = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      id: crypto.randomUUID(),
       roomId: session.currentUser.roomId,
       userName: session.currentUser.name,
       text: normalized.slice(0, 500),
@@ -156,8 +168,7 @@ export function registerExtrasHandlers(socket: Socket, session: RealtimeSession)
     try {
       const room = await RoomService.getRoom(actorRoomId);
       if (!room) return;
-      const isAdmin = room.users.some((user) => user.name === actorName && user.role === 'admin');
-      if (!isAdmin) return;
+      if (!isRoomAdmin(room, actorName)) return;
 
       const nextBackground = await replaceBackgroundImage(actorRoomId, backgroundImage);
       const updatedRoom = await RoomService.updateRoomFeatures(actorRoomId, { backgroundImage: nextBackground });
@@ -165,7 +176,7 @@ export function registerExtrasHandlers(socket: Socket, session: RealtimeSession)
 
       io.to(actorRoomId).emit('room-background-updated', { backgroundImage: updatedRoom.features.backgroundImage });
     } catch (error) {
-      console.error('Error updating room background:', error);
+      logger.error({ err: error }, 'failed to update room background');
     }
   });
 
@@ -181,7 +192,7 @@ export function registerExtrasHandlers(socket: Socket, session: RealtimeSession)
         session.currentUser.name
       );
       if (!updatedRoom) {
-        socket.emit('error', 'Не удалось передать права администратора');
+        rejectAction(socket, 'Не удалось передать права администратора');
         return;
       }
 
@@ -191,8 +202,8 @@ export function registerExtrasHandlers(socket: Socket, session: RealtimeSession)
         users: updatedRoom.users
       });
     } catch (error) {
-      console.error('Error transferring room admin:', error);
-      socket.emit('error', 'Не удалось передать права администратора');
+      logger.error({ err: error }, 'error transferring room admin');
+      rejectAction(socket, 'Не удалось передать права администратора');
     }
   });
 
@@ -206,7 +217,7 @@ export function registerExtrasHandlers(socket: Socket, session: RealtimeSession)
 
       const actor = room.users.find((user) => user.id === session.currentUser?.id || user.name === session.currentUser?.name);
       if (!actor || actor.role !== 'admin') {
-        socket.emit('error', 'Только администратор может исключать участников');
+        rejectAction(socket, 'Только администратор может исключать участников');
         return;
       }
 
@@ -234,32 +245,32 @@ export function registerExtrasHandlers(socket: Socket, session: RealtimeSession)
       await emitRetroRatingStateToRoom(roomId);
       await emitSprintVipStateToRoom(roomId);
     } catch (error) {
-      console.error('Error kicking user:', error);
-      socket.emit('error', 'Не удалось исключить участника');
+      logger.error({ err: error }, 'error kicking user');
+      rejectAction(socket, 'Не удалось исключить участника');
     }
   });
 
 
   on(socket, 'delete-room', async () => {
     if (!session.currentUser?.roomId) {
-      socket.emit('error', 'Room not found');
+      rejectAction(socket, 'Room not found');
       return;
     }
 
     try {
       const room = await RoomService.getRoom(session.currentUser.roomId);
       if (!room) {
-        socket.emit('error', 'Room not found');
+        rejectAction(socket, 'Room not found');
         return;
       }
 
       const isOwner = room.owner === session.currentUser.name;
       if (!isOwner) {
-        socket.emit('error', 'Only room creator can delete the room');
+        rejectAction(socket, 'Only room creator can delete the room');
         return;
       }
       if (socket.data.authType === 'guest' && await AccountService.hasAccount(room.owner)) {
-        socket.emit('error', 'Это имя занято, войдите с паролем');
+        rejectAction(socket, 'Это имя занято, войдите с паролем');
         return;
       }
 
@@ -271,8 +282,8 @@ export function registerExtrasHandlers(socket: Socket, session: RealtimeSession)
       io.in(roomId).socketsLeave(roomId);
       session.currentUser = null;
     } catch (error) {
-      console.error('Error deleting room:', error);
-      socket.emit('error', 'Failed to delete room');
+      logger.error({ err: error }, 'error deleting room');
+      rejectAction(socket, 'Failed to delete room');
     }
   });
 

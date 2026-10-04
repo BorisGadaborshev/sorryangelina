@@ -3,6 +3,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { pool } from '../config/database';
 import { RoomCache } from './RoomCache';
+import { logger } from '../utils/logger';
 
 export const IMAGE_TTL_MS = 2 * 60 * 60 * 1000;
 export const IMAGE_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
@@ -83,7 +84,7 @@ const deleteFileIfExists = async (fileName: string | null): Promise<void> => {
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code !== 'ENOENT') {
-      console.error('Failed to delete image file:', fileName, error);
+      logger.error({ err: error, fileName }, 'failed to delete image file');
     }
   }
 };
@@ -248,7 +249,7 @@ const deleteOrphanFiles = async (): Promise<void> => {
         await deleteFileIfExists(fileName);
       }
     } catch (error) {
-      console.error('Failed to inspect upload file:', fileName, error);
+      logger.error({ err: error, fileName }, 'failed to inspect upload file');
     }
   }
 };

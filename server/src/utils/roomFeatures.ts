@@ -1,30 +1,4 @@
-import { isDislikeIconId, isLikeIconId, MAX_VOTE_LIMIT, MIN_VOTE_LIMIT, RoomFeatures, VoteLimit } from '../types';
-
-export const DEFAULT_ROOM_FEATURES: RoomFeatures = {
-  mediaEnabled: true,
-  reactionsEnabled: true,
-  commentsEnabled: true,
-  moveCardsEnabled: false,
-  membersCanAddCards: true,
-  anonymousEnabled: true,
-  hideCardTextDuringCreation: true,
-  likesPerUser: 3,
-  dislikesPerUser: 3,
-  likeIcon: 'peach',
-  dislikeIcon: 'eggplant',
-  dislikesEnabled: true,
-  musicEnabled: true,
-  retroRatingEnabled: true,
-  sprintVipEnabled: true,
-  drawingEnabled: true,
-  arkanoidEnabled: true,
-  cardEditingEnabled: true,
-  chatEnabled: true,
-  readyEnabled: true,
-  facilitatorEnabled: false,
-  discussionActionsEnabled: true,
-  backgroundImage: ''
-};
+import { DEFAULT_ROOM_FEATURES, isDislikeIconId, isLikeIconId, MAX_VOTE_LIMIT, MIN_VOTE_LIMIT, RoomFeatures, VoteLimit } from '../types';
 
 const MAX_BACKGROUND_IMAGE_LENGTH = 3 * 1024 * 1024;
 
@@ -91,6 +65,7 @@ export const normalizeRoomFeatures = (raw?: Partial<RoomFeatures> & { votesPerUs
     readyEnabled: raw?.readyEnabled ?? DEFAULT_ROOM_FEATURES.readyEnabled,
     facilitatorEnabled: raw?.facilitatorEnabled ?? DEFAULT_ROOM_FEATURES.facilitatorEnabled,
     discussionActionsEnabled: raw?.discussionActionsEnabled ?? DEFAULT_ROOM_FEATURES.discussionActionsEnabled,
+    contentModerationEnabled: raw?.contentModerationEnabled ?? DEFAULT_ROOM_FEATURES.contentModerationEnabled,
     backgroundImage: normalizeBackgroundImage(raw?.backgroundImage)
   };
 };

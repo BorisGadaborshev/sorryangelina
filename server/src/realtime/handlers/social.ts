@@ -1,7 +1,11 @@
 import { Socket } from 'socket.io';
-import { on } from '../on';
+import { on, rejectAction } from '../on';
 import { RealtimeSession } from '../session';
 import { RoomService } from '../../services/RoomService';
+import { ContentModerationError } from '../../services/ContentModeration';
+import { logger } from '../../utils/logger';
+import { moderateRoomText } from '../access';
+import { bumpRoomVersion } from '../roomSync';
 import {
   canInteractWithCardSocial,
   getRoomFeatures,
@@ -17,6 +21,7 @@ export function registerSocialHandlers(socket: Socket, session: RealtimeSession)
       if (!room || !canInteractWithCardSocial(room.phase)) return;
       if (!getRoomFeatures(room).commentsEnabled) return;
       if (typeof cardId !== 'string' || typeof text !== 'string') return;
+      await moderateRoomText(room, text);
 
       const result = await RoomService.addCardComment(
         session.currentUser.roomId,
@@ -31,9 +36,14 @@ export function registerSocialHandlers(socket: Socket, session: RealtimeSession)
         cardId,
         comment: result.comment
       });
+      bumpRoomVersion(session.currentUser.roomId);
     } catch (error) {
-      console.error('Error adding card comment:', error);
-      socket.emit('error', 'Failed to add card comment');
+      if (error instanceof ContentModerationError) {
+        rejectAction(socket, error.message);
+        return;
+      }
+      logger.error({ err: error }, 'failed to add card comment');
+      rejectAction(socket, 'Failed to add card comment');
     }
   });
 
@@ -46,6 +56,7 @@ export function registerSocialHandlers(socket: Socket, session: RealtimeSession)
       if (!room || !canInteractWithCardSocial(room.phase)) return;
       if (!getRoomFeatures(room).commentsEnabled) return;
       if (typeof cardId !== 'string' || typeof commentId !== 'string' || typeof text !== 'string') return;
+      await moderateRoomText(room, text);
 
       const comment = await RoomService.updateCardComment(
         session.currentUser.roomId,
@@ -57,9 +68,14 @@ export function registerSocialHandlers(socket: Socket, session: RealtimeSession)
       if (!comment) return;
 
       io.to(session.currentUser.roomId).emit('card-comment-updated', { cardId, comment });
+      bumpRoomVersion(session.currentUser.roomId);
     } catch (error) {
-      console.error('Error updating card comment:', error);
-      socket.emit('error', 'Failed to update card comment');
+      if (error instanceof ContentModerationError) {
+        rejectAction(socket, error.message);
+        return;
+      }
+      logger.error({ err: error }, 'failed to update card comment');
+      rejectAction(socket, 'Failed to update card comment');
     }
   });
 
@@ -86,9 +102,10 @@ export function registerSocialHandlers(socket: Socket, session: RealtimeSession)
         cardId,
         reactions: updatedCard.reactions || []
       });
+      bumpRoomVersion(session.currentUser.roomId);
     } catch (error) {
-      console.error('Error toggling card reaction:', error);
-      socket.emit('error', 'Failed to toggle card reaction');
+      logger.error({ err: error }, 'failed to toggle card reaction');
+      rejectAction(socket, 'Failed to toggle card reaction');
     }
   });
 

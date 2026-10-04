@@ -80,7 +80,7 @@ export const verifyAuthToken = (token?: string): AuthTokenPayload | null => {
       return null;
     }
     return payload;
-  } catch (error) {
+  } catch {
     return null;
   }
 };

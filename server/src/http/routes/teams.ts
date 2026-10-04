@@ -1,4 +1,5 @@
 import { Response, Router } from 'express';
+import { logger } from '../../utils/logger';
 import { BUILTIN_TEAM_ID, TeamService } from '../../services/TeamService';
 import { AccountService } from '../../services/AccountService';
 import { RoomService } from '../../services/RoomService';
@@ -32,7 +33,7 @@ teamsRouter.get('/', async (_req, res) => {
     const teams = await TeamService.getAllTeams();
     res.json(teams);
   } catch (error) {
-    console.error('Error getting teams:', error);
+    logger.error({ err: error }, 'error getting teams');
     res.status(500).json({ error: 'Failed to get teams' });
   }
 });
@@ -61,7 +62,7 @@ teamsRouter.post('/', requireAuth, async (req, res) => {
     });
     res.status(201).json(team);
   } catch (error) {
-    console.error('Error creating team:', error);
+    logger.error({ err: error }, 'error creating team');
     res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to create team' });
   }
 });
@@ -75,7 +76,7 @@ teamsRouter.post('/:teamId/unlock', authRateLimit, async (req, res) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to unlock team';
     if (message !== 'Team password is required' && message !== 'Invalid team password') {
-      console.error('Error unlocking team:', error);
+      logger.error({ err: error }, 'error unlocking team');
     }
     const status = message === 'Team not found' ? 404 : 400;
     res.status(status).json({ error: message });
@@ -95,7 +96,7 @@ teamsRouter.post('/:teamId/join', authRateLimit, requireAuth, async (req, res) =
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to join team';
     if (message !== 'Team password is required') {
-      console.error('Error joining team:', error);
+      logger.error({ err: error }, 'error joining team');
     }
     res.status(400).json({ error: message });
   }
@@ -120,7 +121,7 @@ teamsRouter.get('/:teamId', requireAuth, async (req, res) => {
     }
     res.json(team);
   } catch (error) {
-    console.error('Error getting team:', error);
+    logger.error({ err: error }, 'error getting team');
     res.status(500).json({ error: 'Failed to get team' });
   }
 });
@@ -140,7 +141,7 @@ teamsRouter.delete('/:teamId/members', requireAuth, async (req, res) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to remove member';
     const status = message === 'Team not found' ? 404 : message.includes('Только админ команды') ? 403 : 400;
-    console.error('Error removing team member:', error);
+    logger.error({ err: error }, 'error removing team member');
     res.status(status).json({ error: message });
   }
 });
@@ -160,7 +161,7 @@ teamsRouter.post('/:teamId/members/reset-password', requireAuth, async (req, res
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to reset password';
     const status = message === 'Team not found' ? 404 : message.includes('Только админ команды') ? 403 : 400;
-    console.error('Error resetting member password:', error);
+    logger.error({ err: error }, 'error resetting member password');
     res.status(status).json({ error: message });
   }
 });
@@ -180,7 +181,7 @@ teamsRouter.post('/:teamId/password', requireAuth, async (req, res) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to update team password';
     const status = message === 'Team not found' ? 404 : message.includes('Только админ команды') ? 403 : 400;
-    console.error('Error updating team password:', error);
+    logger.error({ err: error }, 'error updating team password');
     res.status(status).json({ error: message });
   }
 });
@@ -204,7 +205,7 @@ teamsRouter.get('/:teamId/members', async (req, res) => {
     const members = await TeamService.getTeamRosterNames(req.params.teamId);
     res.json({ members });
   } catch (error) {
-    console.error('Error getting team members:', error);
+    logger.error({ err: error }, 'error getting team members');
     res.status(500).json({ error: 'Failed to get team members' });
   }
 });
@@ -220,7 +221,7 @@ teamsRouter.get('/:teamId/rooms', async (req, res) => {
     const rooms = await RoomService.getAvailableRoomSummaries(req.params.teamId);
     res.json(rooms);
   } catch (error) {
-    console.error('Error getting team rooms:', error);
+    logger.error({ err: error }, 'error getting team rooms');
     res.status(500).json({ error: 'Failed to get team rooms' });
   }
 });
