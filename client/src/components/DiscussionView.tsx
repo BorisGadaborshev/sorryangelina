@@ -6,7 +6,7 @@ import NavigateBefore from '@mui/icons-material/NavigateBefore';
 import NavigateNext from '@mui/icons-material/NavigateNext';
 import { useTheme } from '@mui/material/styles';
 import { RetroStore } from '../store/RetroStore';
-import { Card as CardType, DISCUSSION_BURST_EMOJIS, DiscussionNavigationState, getCardTextSegments, getColumnColorStyles } from '../types';
+import { Card as CardType, DISCUSSION_BURST_OPTIONS, DiscussionNavigationState, getCardTextSegments, getColumnColorStyles } from '../types';
 import RetroCard from './RetroCard';
 import { VoteIcon } from './VoteIcon';
 import { safeMediaSrc } from '../utils/media';
@@ -450,7 +450,7 @@ const DiscussionView: React.FC<Props> = observer(({ store }) => {
                   p: 1
                 }}
               >
-                {DISCUSSION_BURST_EMOJIS.map(({ emoji, label }) => (
+                {DISCUSSION_BURST_OPTIONS.map(({ emoji, label }) => (
                   <Tooltip key={emoji} title={label}>
                     <IconButton
                       aria-label={label}

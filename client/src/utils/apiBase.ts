@@ -1,5 +1,5 @@
 export const getApiBase = (): string => {
-  const configured = (process.env.REACT_APP_API_BASE || '').trim().replace(/\/$/, '');
+  const configured = (import.meta.env.VITE_API_BASE || '').trim().replace(/\/$/, '');
   if (configured) return configured;
-  return process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3001';
+  return import.meta.env.PROD ? '' : 'http://localhost:3001';
 };

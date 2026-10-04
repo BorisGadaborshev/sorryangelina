@@ -1,4 +1,5 @@
 import { io, Socket } from 'socket.io-client';
+import { isPhaseTimerDuration, type ClientToServerEvents, type ServerToClientEvents } from '@sorryangelina/shared';
 import { RetroStore } from '../store/RetroStore';
 import { Room, RoomState, User, Card, CardComment, CardReaction, FacilitatorAnnouncement, DiscussionBurst, DiscussionHand, DiscussionNavigationState, Phase, PhaseTimerState, ChatMessage, Mood, RetroRatingState, RoomFeatures, SprintVipState, ArkanoidScoreEntry, WhiteboardStroke, CreateRoomOptions, ColumnColorId } from '../types';
 import { getApiBase } from '../utils/apiBase';
@@ -8,8 +9,10 @@ import { readStoredSession, TabSession } from './session';
 
 type ResumeKind = 'hide' | 'online' | 'bfcache';
 
+export type AppSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
+
 export class SocketService {
-  private socket: Socket;
+  private socket: AppSocket;
   private store: RetroStore;
   private isRestoringSession = false;
   private restorePromise: Promise<void> | null = null;
@@ -21,6 +24,7 @@ export class SocketService {
   private overlayTimer: number | null = null;
   private pendingResume: ResumeKind | null = null;
   private connectErrorStreak = 0;
+  private roomVersion = 0;
   private static readonly SHORT_AWAY_MS = 15000;
   private static readonly RESUME_DEBOUNCE_MS = 300;
   private static readonly RESTORE_TIMEOUT_MS = 5000;
@@ -121,6 +125,7 @@ export class SocketService {
       });
     }
 
+    this.roomVersion = 0;
     this.store.setRoom(room);
     this.store.updateState(state);
     this.store.setRejoinRequired(false);
@@ -198,6 +203,15 @@ export class SocketService {
 
     this.socket.on('state-updated', (state: RoomState) => {
       this.store.updateState(state);
+      if (typeof state.version === 'number') this.roomVersion = state.version;
+    });
+
+    this.socket.on('room-version', ({ version }: { version?: number }) => {
+      if (typeof version !== 'number') return;
+      if (this.roomVersion > 0 && version > this.roomVersion + 1) {
+        this.socket.emit('sync-room');
+      }
+      this.roomVersion = version;
     });
 
     this.socket.on('user-joined', (user: User) => {
@@ -687,6 +701,7 @@ export class SocketService {
   }
 
   setPhaseTimer(durationSeconds: number): void {
+    if (!isPhaseTimerDuration(durationSeconds)) return;
     this.socket.emit('set-phase-timer', { durationSeconds });
   }
 

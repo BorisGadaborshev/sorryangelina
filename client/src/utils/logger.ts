@@ -1,4 +1,4 @@
-const debugEnabled = process.env.NODE_ENV === 'development';
+const debugEnabled = import.meta.env.DEV;
 
 export const log = {
   debug: (...args: unknown[]): void => {

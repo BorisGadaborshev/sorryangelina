@@ -1,6 +1,7 @@
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { ThemeProvider, createTheme, CssBaseline, Box, CircularProgress } from '@mui/material';
 import { RetroStore } from './store/RetroStore';
+import { RetroStoreProvider } from './store/StoreContext';
 import { observer } from 'mobx-react-lite';
 import ErrorBoundary from './components/ErrorBoundary';
 
@@ -11,9 +12,8 @@ type ThemePreference = 'system' | 'light' | 'dark';
 type ThemeMode = 'light' | 'dark';
 const THEME_PREF_KEY = 'themePreference';
 
-const store = new RetroStore();
-
 const App = observer(() => {
+  const [store] = useState(() => new RetroStore());
   const [themePreference, setThemePreference] = useState<ThemePreference>(() => {
     const saved = localStorage.getItem(THEME_PREF_KEY);
     if (saved === 'light' || saved === 'dark' || saved === 'system') {
@@ -70,17 +70,19 @@ const App = observer(() => {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <ErrorBoundary title="Приложение не удалось показать">
-        <Suspense fallback={(
-          <Box sx={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <CircularProgress />
-          </Box>
-        )}>
-          {store.hasBoardSession ? (
-            <Board store={store} themeMode={themeMode} onToggleTheme={handleToggleTheme} />
-          ) : (
-            <Login store={store} />
-          )}
-        </Suspense>
+        <RetroStoreProvider store={store}>
+          <Suspense fallback={(
+            <Box sx={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <CircularProgress />
+            </Box>
+          )}>
+            {store.hasBoardSession ? (
+              <Board store={store} themeMode={themeMode} onToggleTheme={handleToggleTheme} />
+            ) : (
+              <Login store={store} />
+            )}
+          </Suspense>
+        </RetroStoreProvider>
       </ErrorBoundary>
     </ThemeProvider>
   );
