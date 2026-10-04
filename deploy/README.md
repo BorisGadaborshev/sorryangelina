@@ -85,17 +85,9 @@ sudo chown -R www-data:www-data /var/www/sorryangelina
 # Build application
 cd /var/www/sorryangelina
 
-# Build client
-cd client
-sudo -u www-data npm install --production
+# Install workspace dependencies, then build shared types, server, and client
+sudo -u www-data npm ci -w shared -w server -w client
 sudo -u www-data npm run build
-cd ..
-
-# Build server
-cd server
-sudo -u www-data npm install --production
-sudo -u www-data npm run build
-cd ..
 ```
 
 ### 4. Configure nginx
@@ -179,8 +171,8 @@ sudo systemctl reload nginx
 # Update application
 cd /var/www/sorryangelina
 git pull origin main
-cd client && npm run build
-cd ../server && npm run build
+npm ci -w shared -w server -w client
+npm run build
 sudo systemctl restart sorryangelina
 ```
 
