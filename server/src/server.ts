@@ -53,8 +53,7 @@ const io = new Server(httpServer, {
 
 attachRealtime(io);
 
-app.get('*', (req, res) => {
-  console.log('Serving index.html for path:', req.path);
+app.get('*', (_req, res) => {
   res.sendFile(path.join(clientBuildPath, 'index.html'));
 });
 

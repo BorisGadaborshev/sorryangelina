@@ -17,14 +17,13 @@ import {
 } from '../runtime';
 
 export function registerCardsHandlers(socket: Socket, session: RealtimeSession): void {
-  on(socket, 'add-card', async ({ text, type, column, imageUrl }) => {
+  on(socket, 'add-card', async ({ text, column, imageUrl }) => {
     if (!session.currentUser) return;
     const actorName = session.currentUser.name;
     const actorRoomId = session.currentUser.roomId;
-    const actorId = session.currentUser.id;
 
     try {
-      console.log('Received add-card event:', { text, type, column, imageUrl, userId: actorId });
+      console.log('Received add-card:', { roomId: actorRoomId, column });
       const room = await RoomService.getRoom(actorRoomId);
       const template = getRetroTemplate(room?.template);
       const targetColumn = Number(column);
@@ -61,7 +60,6 @@ export function registerCardsHandlers(socket: Socket, session: RealtimeSession):
 
       const updatedRoom = await RoomService.addCard(actorRoomId, card);
       if (updatedRoom) {
-        console.log('Broadcasting card-added to room:', actorRoomId);
         io.to(actorRoomId).emit('card-added', card);
         io.to(actorRoomId).emit('state-updated', {
           cards: updatedRoom.cards,
@@ -332,12 +330,6 @@ export function registerCardsHandlers(socket: Socket, session: RealtimeSession):
         }
       }
       if (!actor?.roomId || !actor.name) {
-        console.log('Ready state update ignored: session not resolved', {
-          hasToken: typeof token === 'string',
-          payloadRoomId,
-          socketRoomId: socket.data.roomId,
-          socketUserName: socket.data.userName
-        });
         return;
       }
 
@@ -351,12 +343,6 @@ export function registerCardsHandlers(socket: Socket, session: RealtimeSession):
         socket.emit('error', 'Отметка готовности отключена в настройках комнаты');
         return;
       }
-
-      console.log('Received ready state update:', {
-        userId: actor.id,
-        userName: actor.name,
-        isReady
-      });
 
       const room = await RoomService.updateUserReadyState(actor.roomId, actor.id, isReady, actor.name);
       if (room) {

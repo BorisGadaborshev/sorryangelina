@@ -48,12 +48,6 @@ export function registerPhaseHandlers(socket: Socket, session: RealtimeSession):
       }
     }
 
-    console.log('Phase change requested:', {
-      userId: actor.id,
-      userName: actor.name,
-      phase
-    });
-
     try {
       const updatedRoom = await RoomService.updatePhase(actor.roomId, phase, actor.id, actor.name);
       if (!updatedRoom) {
@@ -63,7 +57,6 @@ export function registerPhaseHandlers(socket: Socket, session: RealtimeSession):
 
       let sortedCards = updatedRoom.cards;
       if (phase === 'discussion') {
-        console.log('Sorting cards for discussion phase');
         sortedCards = getSortedCards(updatedRoom.cards);
       }
 

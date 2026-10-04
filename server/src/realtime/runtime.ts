@@ -10,6 +10,41 @@ export const bindIo = (server: Server): void => {
   io = server;
 };
 
+const MAX_ROOM_PASSWORD_FAILURES = 5;
+const ROOM_PASSWORD_LOCK_MS = 60_000;
+
+type RoomPasswordAttempt = {
+  failures: number;
+  lockedUntil: number;
+};
+
+const roomPasswordAttempts = new Map<string, RoomPasswordAttempt>();
+
+export const roomPasswordRetryAfterMs = (socketId: string): number => {
+  const attempt = roomPasswordAttempts.get(socketId);
+  if (!attempt) return 0;
+  return Math.max(0, attempt.lockedUntil - Date.now());
+};
+
+export const registerInvalidRoomPassword = (socketId: string): number => {
+  const now = Date.now();
+  const attempt = roomPasswordAttempts.get(socketId) ?? { failures: 0, lockedUntil: 0 };
+  if (attempt.lockedUntil > now) {
+    return attempt.lockedUntil - now;
+  }
+  attempt.failures += 1;
+  if (attempt.failures >= MAX_ROOM_PASSWORD_FAILURES) {
+    attempt.failures = 0;
+    attempt.lockedUntil = now + ROOM_PASSWORD_LOCK_MS;
+  }
+  roomPasswordAttempts.set(socketId, attempt);
+  return Math.max(0, attempt.lockedUntil - now);
+};
+
+export const clearRoomPasswordAttempts = (socketId: string): void => {
+  roomPasswordAttempts.delete(socketId);
+};
+
 // Helper function to get sorted cards by votes
 export const getSortedCards = (cards: Card[]): Card[] => {
   return [...cards].sort((a, b) => ((b.likes?.length || 0) + (b.dislikes?.length || 0)) - ((a.likes?.length || 0) + (a.dislikes?.length || 0)));

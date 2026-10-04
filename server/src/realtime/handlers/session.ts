@@ -11,6 +11,9 @@ import { eventAuth } from '../socketAuth';
 import {
   addRoomPresence,
   adjustConnectionCount,
+  clearRoomPasswordAttempts,
+  registerInvalidRoomPassword,
+  roomPasswordRetryAfterMs,
   emitArkanoidScoresToSocket,
   emitDiscussionHandsToSocket,
   emitDiscussionNavigationToSocket,
@@ -186,13 +189,19 @@ export function registerSessionHandlers(socket: Socket, session: RealtimeSession
       return;
     }
     const effectiveUsername = auth.name;
+    if (roomPasswordRetryAfterMs(socket.id) > 0) {
+      socket.emit('error', 'Too many invalid passwords');
+      return;
+    }
     try {
       const isValid = await RoomService.validatePassword(roomId, password);
       if (!isValid) {
         console.log('Invalid password for room:', roomId);
-        socket.emit('error', 'Invalid password');
+        const lockedForMs = registerInvalidRoomPassword(socket.id);
+        socket.emit('error', lockedForMs > 0 ? 'Too many invalid passwords' : 'Invalid password');
         return;
       }
+      clearRoomPasswordAttempts(socket.id);
 
       const existingRoom = await RoomService.getRoom(roomId);
       if (!existingRoom) {
@@ -292,6 +301,7 @@ export function registerSessionHandlers(socket: Socket, session: RealtimeSession
 
   on(socket, 'disconnect', (reason) => {
     const connectionCount = adjustConnectionCount(-1);
+    clearRoomPasswordAttempts(socket.id);
     console.log(`Client disconnected (${connectionCount} total):`, socket.id);
     console.log('Disconnect reason:', reason);
     

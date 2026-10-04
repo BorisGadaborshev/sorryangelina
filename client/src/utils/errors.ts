@@ -1,5 +1,6 @@
 const SERVER_ERROR_MESSAGES: Record<string, string> = {
   'Invalid password': 'Неверный пароль комнаты',
+  'Too many invalid passwords': 'Слишком много неверных паролей, попробуйте через минуту',
   'Unauthorized: token is invalid or expired': 'Сессия истекла. Войдите снова',
   'Unauthorized: token does not match user': 'Сессия не совпадает с пользователем',
   'Room already exists': 'Комната с таким именем уже есть',
