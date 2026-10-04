@@ -224,7 +224,8 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store, isMergeDropTa
   const showReactions = features.reactionsEnabled;
   const showComments = features.commentsEnabled;
   const showDislikes = features.dislikesEnabled;
-  const showAuthor = !features.anonymousEnabled && Boolean(card.createdBy);
+  const showAuthorClaim = Boolean(card.authorRevealed && card.createdBy);
+  const showAuthor = !showAuthorClaim && !features.anonymousEnabled && Boolean(card.createdBy);
   const comments = card.comments || [];
   const commentCount = comments.length;
 
@@ -394,6 +395,22 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store, isMergeDropTa
                   </Box>
                 ) : (
                   <CardBodyText text={card.text} />
+                )}
+                {showAuthorClaim && (
+                  <Typography
+                    variant="caption"
+                    sx={{
+                      display: 'inline-flex',
+                      mt: 0.75,
+                      px: 0.9,
+                      py: 0.25,
+                      borderRadius: 999,
+                      fontWeight: 700,
+                      bgcolor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.72)'
+                    }}
+                  >
+                    Автор: {card.createdBy}
+                  </Typography>
                 )}
                 {showAuthor && (
                   <Typography variant="caption" sx={{ opacity: 0.7, display: 'block', mt: 0.5 }}>

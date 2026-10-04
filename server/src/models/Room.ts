@@ -116,8 +116,8 @@ export const RoomModel = {
       'select id, name, role, is_ready, mood from room_users where room_id=$1 order by joined_at asc nulls last, name asc',
       [where.id]
     );
-    const cardsRes = await pool.query('select id, text, type, created_by, column_index, origin_column, image_url from cards where room_id=$1', [where.id]);
-    const cardRows = cardsRes.rows as Array<{ id: string; text: string; type: Card['type']; created_by: string; column_index: number; origin_column: number | null; image_url: string | null }>;
+    const cardsRes = await pool.query('select id, text, type, created_by, column_index, origin_column, image_url, author_revealed from cards where room_id=$1', [where.id]);
+    const cardRows = cardsRes.rows as Array<{ id: string; text: string; type: Card['type']; created_by: string; column_index: number; origin_column: number | null; image_url: string | null; author_revealed: boolean }>;
     const votesRes = await pool.query('select card_id, user_id, vote from card_votes where card_id = any($1::text[])', [cardRows.map((r) => r.id)]);
     const cardIdToVotes = new Map<string, { likes: string[]; dislikes: string[] }>();
     for (const v of votesRes.rows as Array<{ card_id: string; user_id: string; vote: 'like' | 'dislike' }>) {
@@ -136,7 +136,8 @@ export const RoomModel = {
       dislikes: cardIdToVotes.get(r.id)?.dislikes || [],
       column: r.column_index,
       originColumn: r.origin_column ?? undefined,
-      imageUrl: r.image_url ?? undefined
+      imageUrl: r.image_url ?? undefined,
+      authorRevealed: Boolean(r.author_revealed)
     })));
     return {
       id: roomRow.id,
@@ -364,7 +365,8 @@ export const RoomModel = {
           typeof update.$set['cards.$.column'] !== 'undefined' ||
           typeof update.$set['cards.$.type'] !== 'undefined' ||
           typeof update.$set['cards.$.originColumn'] !== 'undefined' ||
-          typeof update.$set['cards.$.imageUrl'] !== 'undefined'
+          typeof update.$set['cards.$.imageUrl'] !== 'undefined' ||
+          typeof update.$set['cards.$.authorRevealed'] !== 'undefined'
         ) {
           const cardId = filter['cards.id'];
           const text = update.$set['cards.$.text'];
@@ -372,6 +374,7 @@ export const RoomModel = {
           const type = update.$set['cards.$.type'];
           const originColumn = update.$set['cards.$.originColumn'];
           const imageUrl = update.$set['cards.$.imageUrl'];
+          const authorRevealed = update.$set['cards.$.authorRevealed'];
           if (typeof text !== 'undefined') {
             await client.query('update cards set text=$1 where id=$2 and room_id=$3', [text, cardId, roomId]);
           }
@@ -386,6 +389,9 @@ export const RoomModel = {
           }
           if (typeof imageUrl !== 'undefined') {
             await client.query('update cards set image_url=$1 where id=$2 and room_id=$3', [imageUrl || null, cardId, roomId]);
+          }
+          if (typeof authorRevealed !== 'undefined') {
+            await client.query('update cards set author_revealed=$1 where id=$2 and room_id=$3', [Boolean(authorRevealed), cardId, roomId]);
           }
         }
         if (update.$set['users.$[].isReady'] === false || update.$set['users.$[].is_ready'] === false) {

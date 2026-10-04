@@ -1,6 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { RetroStore } from '../store/RetroStore';
-import { Room, RoomState, User, Card, CardComment, CardReaction, FacilitatorAnnouncement, DiscussionNavigationState, Phase, PhaseTimerState, ChatMessage, Mood, RetroRatingState, RoomFeatures, SprintVipState, ArkanoidScoreEntry, WhiteboardStroke, CreateRoomOptions, ColumnColorId } from '../types';
+import { Room, RoomState, User, Card, CardComment, CardReaction, FacilitatorAnnouncement, DiscussionBurst, DiscussionHand, DiscussionNavigationState, Phase, PhaseTimerState, ChatMessage, Mood, RetroRatingState, RoomFeatures, SprintVipState, ArkanoidScoreEntry, WhiteboardStroke, CreateRoomOptions, ColumnColorId } from '../types';
 
 export class SocketService {
   private socket: Socket;
@@ -263,6 +263,14 @@ export class SocketService {
 
     this.socket.on('discussion-navigation', (state: DiscussionNavigationState) => {
       this.store.setDiscussionNavigation(state);
+    });
+
+    this.socket.on('discussion-hands', ({ hands }: { hands?: DiscussionHand[] }) => {
+      this.store.setDiscussionHands(hands || []);
+    });
+
+    this.socket.on('discussion-burst', (burst: DiscussionBurst) => {
+      this.store.addDiscussionBurst(burst);
     });
 
     this.socket.on('column-titles-updated', ({ titles }: { titles: string[] }) => {
@@ -663,6 +671,18 @@ export class SocketService {
 
   toggleCardReaction(cardId: string, emoji: string): void {
     this.socket.emit('toggle-card-reaction', { cardId, emoji });
+  }
+
+  sendDiscussionBurst(emoji: string): void {
+    this.socket.emit('discussion-burst', { emoji });
+  }
+
+  toggleDiscussionHand(): void {
+    this.socket.emit('toggle-discussion-hand');
+  }
+
+  setCardAuthorReveal(cardId: string, revealed: boolean): void {
+    this.socket.emit('set-card-author-reveal', { cardId, revealed });
   }
 
   async changePhase(phase: Phase): Promise<void> {

@@ -22,6 +22,7 @@ export const DEFAULT_ROOM_FEATURES: RoomFeatures = {
   chatEnabled: true,
   readyEnabled: true,
   facilitatorEnabled: false,
+  discussionActionsEnabled: true,
   backgroundImage: ''
 };
 
@@ -89,6 +90,7 @@ export const normalizeRoomFeatures = (raw?: Partial<RoomFeatures> & { votesPerUs
     chatEnabled: raw?.chatEnabled ?? DEFAULT_ROOM_FEATURES.chatEnabled,
     readyEnabled: raw?.readyEnabled ?? DEFAULT_ROOM_FEATURES.readyEnabled,
     facilitatorEnabled: raw?.facilitatorEnabled ?? DEFAULT_ROOM_FEATURES.facilitatorEnabled,
+    discussionActionsEnabled: raw?.discussionActionsEnabled ?? DEFAULT_ROOM_FEATURES.discussionActionsEnabled,
     backgroundImage: normalizeBackgroundImage(raw?.backgroundImage)
   };
 };

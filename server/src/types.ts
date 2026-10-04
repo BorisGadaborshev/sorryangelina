@@ -180,6 +180,7 @@ export interface RoomFeatures {
   chatEnabled: boolean;
   readyEnabled: boolean;
   facilitatorEnabled: boolean;
+  discussionActionsEnabled: boolean;
   backgroundImage: string;
 }
 
@@ -211,6 +212,9 @@ export interface CardReaction {
 export const CARD_REACTION_EMOJIS = ['👍', '👎', '👏', '❤️', '🔥', '🎉', '🥰', '😨', '😂'] as const;
 export type CardReactionEmoji = typeof CARD_REACTION_EMOJIS[number];
 
+export const DISCUSSION_BURST_EMOJIS = ['😂', '😭', '😠', '👍', '👎', '😮', '🤮', '👏', '❤️', '🔥', '🎉', '🥰'] as const;
+export type DiscussionBurstEmoji = typeof DISCUSSION_BURST_EMOJIS[number];
+
 export const CARD_TEXT_SEGMENT_SEPARATOR = '\u001e';
 
 export const getCardTextSegments = (text: string): string[] => {
@@ -239,6 +243,7 @@ export interface Card {
   imageUrl?: string;
   comments?: CardComment[];
   reactions?: CardReaction[];
+  authorRevealed?: boolean;
 }
 
 // Интерфейс для комнаты в базе данных

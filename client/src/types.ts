@@ -223,6 +223,7 @@ export interface RoomFeatures {
   chatEnabled: boolean;
   readyEnabled: boolean;
   facilitatorEnabled: boolean;
+  discussionActionsEnabled: boolean;
   backgroundImage: string;
 }
 
@@ -248,6 +249,7 @@ export const DEFAULT_ROOM_FEATURES: RoomFeatures = {
   chatEnabled: true,
   readyEnabled: true,
   facilitatorEnabled: false,
+  discussionActionsEnabled: true,
   backgroundImage: ''
 };
 
@@ -283,6 +285,21 @@ export interface CardReaction {
 export const CARD_REACTION_EMOJIS = ['👍', '👎', '👏', '❤️', '🔥', '🎉', '🥰', '😨', '😂'] as const;
 export type CardReactionEmoji = typeof CARD_REACTION_EMOJIS[number];
 
+export const DISCUSSION_BURST_EMOJIS = [
+  { emoji: '😂', label: 'Смех' },
+  { emoji: '😭', label: 'Плач' },
+  { emoji: '😠', label: 'Злость' },
+  { emoji: '👍', label: 'Палец вверх' },
+  { emoji: '👎', label: 'Палец вниз' },
+  { emoji: '😮', label: 'Удивление' },
+  { emoji: '🤮', label: 'Рвота' },
+  { emoji: '👏', label: 'Аплодисменты' },
+  { emoji: '❤️', label: 'Сердце' },
+  { emoji: '🔥', label: 'Огонь' },
+  { emoji: '🎉', label: 'Праздник' },
+  { emoji: '🥰', label: 'Умиление' }
+] as const;
+
 export const CARD_TEXT_SEGMENT_SEPARATOR = '\u001e';
 const CARD_TEXT_EDIT_SEPARATOR = /\n-{3,}\n/;
 
@@ -315,6 +332,17 @@ export interface Card {
   imageUrl?: string;
   comments?: CardComment[];
   reactions?: CardReaction[];
+  authorRevealed?: boolean;
+}
+
+export interface DiscussionBurst {
+  id: string;
+  emoji: string;
+  userName: string;
+}
+
+export interface DiscussionHand {
+  userName: string;
 }
 
 const flattenMarkdownLine = (text: string): string => text.replace(/\s+/g, ' ').trim();

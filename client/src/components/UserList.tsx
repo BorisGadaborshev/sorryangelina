@@ -306,6 +306,22 @@ const UserList: React.FC<UserListProps> = observer(({
                     👑
                   </Typography>
                 )}
+                {currentPhase === 'discussion' && store.discussionHands.includes(user.name) && (
+                  <Typography
+                    component="span"
+                    title="Поднял руку"
+                    sx={{
+                      position: 'absolute',
+                      top: -8,
+                      right: -10,
+                      fontSize: 16,
+                      lineHeight: 1,
+                      zIndex: 1
+                    }}
+                  >
+                    ✋
+                  </Typography>
+                )}
                 <Avatar
                   sx={{
                     bgcolor: moodMeta?.color ?? (onlineUsers.includes(user.id) ? 'success.main' : 'grey.400'),

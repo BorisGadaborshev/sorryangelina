@@ -29,6 +29,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import ChatIcon from '@mui/icons-material/Chat';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import MicIcon from '@mui/icons-material/Mic';
+import EmojiEmotionsIcon from '@mui/icons-material/EmojiEmotions';
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
@@ -505,6 +506,15 @@ const RoomSettingsSidebar: React.FC<Props> = observer(({ store, open, onClose, t
                 tooltip="Случайно выбрать ведущего на этапе обсуждения"
                 icon={<MicIcon fontSize="inherit" />}
                 onClick={() => toggleFeature('facilitatorEnabled')}
+                showTooltip={showTooltips}
+                disabled={!canEditFeatures}
+              />
+              <FeatureToggle
+                active={features.discussionActionsEnabled}
+                label="Жесты"
+                tooltip="На этапе обсуждения показывать кнопки реакций, поднятой руки и отметки «Я автор»"
+                icon={<EmojiEmotionsIcon fontSize="inherit" />}
+                onClick={() => toggleFeature('discussionActionsEnabled')}
                 showTooltip={showTooltips}
                 disabled={!canEditFeatures}
               />

@@ -2,7 +2,7 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server, Socket } from 'socket.io';
 import cors from 'cors';
-import { Room, User, Card, RoomState, Mood, Phase, RoomFeatures, RetroTemplate, getCardTypeByColumn, getRetroTemplate, isRetroTemplateId } from './types';
+import { Room, User, Card, RoomState, Mood, Phase, RoomFeatures, RetroTemplate, DISCUSSION_BURST_EMOJIS, getCardTypeByColumn, getRetroTemplate, isRetroTemplateId } from './types';
 import { normalizeRoomFeatures } from './utils/roomFeatures';
 import bcrypt from 'bcryptjs';
 import { RoomService } from './services/RoomService';
@@ -375,6 +375,8 @@ app.delete('/api/rooms/:roomId', async (req, res) => {
     roomRetroRatings.delete(roomId);
     roomFacilitators.delete(roomId);
     roomDiscussionNavigation.delete(roomId);
+    roomRaisedHands.delete(roomId);
+    discussionBurstTimestamps.delete(roomId);
     roomSprintVipVotes.delete(roomId);
     roomArkanoidScores.delete(roomId);
     cancelPendingDeparturesForRoom(roomId);
@@ -523,6 +525,50 @@ const ensureDiscussionNavigation = (roomId: string, room: Room): DiscussionNavig
   const initial = buildDiscussionNavigation(room.cards);
   roomDiscussionNavigation.set(roomId, initial);
   return initial;
+};
+
+const discussionHandsPayload = (roomId: string) => ({
+  hands: Array.from(roomRaisedHands.get(roomId)?.keys() ?? []).map((userName) => ({ userName }))
+});
+
+const emitDiscussionHands = (roomId: string): void => {
+  io.to(roomId).emit('discussion-hands', discussionHandsPayload(roomId));
+};
+
+const emitDiscussionHandsToSocket = (socket: Socket, roomId: string): void => {
+  socket.emit('discussion-hands', discussionHandsPayload(roomId));
+};
+
+const clearRaisedHand = (roomId: string, userName: string): boolean => {
+  const hands = roomRaisedHands.get(roomId);
+  if (!hands?.delete(userName)) return false;
+  if (hands.size === 0) roomRaisedHands.delete(roomId);
+  return true;
+};
+
+const allowDiscussionBurst = (roomId: string, userName: string): boolean => {
+  const now = Date.now();
+  let byUser = discussionBurstTimestamps.get(roomId);
+  if (!byUser) {
+    byUser = new Map();
+    discussionBurstTimestamps.set(roomId, byUser);
+  }
+  const recent = (byUser.get(userName) || []).filter((timestamp) => now - timestamp < 1000);
+  if (recent.length >= 4) {
+    byUser.set(userName, recent);
+    return false;
+  }
+  recent.push(now);
+  byUser.set(userName, recent);
+  return true;
+};
+
+const emitDiscussionBurst = (roomId: string, emoji: string, userName: string): void => {
+  io.to(roomId).emit('discussion-burst', {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    emoji,
+    userName
+  });
 };
 
 const emitDiscussionNavigationToSocket = (socket: Socket, roomId: string, room?: Room): void => {
@@ -681,6 +727,8 @@ const roomWhiteboards = new Map<string, WhiteboardStroke[]>();
 const roomRetroRatings = new Map<string, RetroRatingRoomState>();
 const roomFacilitators = new Map<string, FacilitatorAnnouncement>();
 const roomDiscussionNavigation = new Map<string, DiscussionNavigationState>();
+const roomRaisedHands = new Map<string, Map<string, string>>();
+const discussionBurstTimestamps = new Map<string, Map<string, number[]>>();
 const roomSprintVipVotes = new Map<string, Map<string, string>>();
 const roomArkanoidScores = new Map<string, Map<string, { userName: string; score: number; cardsBroken: number }>>();
 const roomUserSocketPresence = new Map<string, Map<string, Set<string>>>();
@@ -1025,10 +1073,16 @@ const persistUserLeave = async (
     });
   }
 
+  if (clearRaisedHand(roomId, user.name)) {
+    emitDiscussionHands(roomId);
+  }
+
   if (updatedRoom.users.length === 0) {
     roomSprintVipVotes.delete(roomId);
     roomArkanoidScores.delete(roomId);
     roomUserSocketPresence.delete(roomId);
+    roomRaisedHands.delete(roomId);
+    discussionBurstTimestamps.delete(roomId);
     cancelPendingDeparturesForRoom(roomId);
     console.log('Room is empty:', roomId);
   } else {
@@ -1184,6 +1238,7 @@ io.on('connection', (socket) => {
       emitArkanoidScoresToSocket(socket, roomId);
       emitDiscussionNavigationToSocket(socket, roomId, room);
       emitFacilitatorToSocket(socket, roomId, room);
+      emitDiscussionHandsToSocket(socket, roomId);
     } catch (error) {
       console.error('Error restoring session:', error);
       socket.emit('session-expired');
@@ -1363,6 +1418,7 @@ io.on('connection', (socket) => {
       emitArkanoidScoresToSocket(socket, roomId);
       emitDiscussionNavigationToSocket(socket, roomId, room);
       emitFacilitatorToSocket(socket, roomId, room);
+      emitDiscussionHandsToSocket(socket, roomId);
       if (!existingUser) {
         socket.to(roomId).emit('user-joined', user);
       } else {
@@ -1970,6 +2026,8 @@ io.on('connection', (socket) => {
         roomDiscussionNavigation.delete(actor.roomId);
         roomFacilitators.delete(actor.roomId);
       }
+      roomRaisedHands.delete(actor.roomId);
+      emitDiscussionHands(actor.roomId);
 
       io.to(actor.roomId).emit('phase-changed', {
         phase: roomState.phase,
@@ -2105,6 +2163,77 @@ io.on('connection', (socket) => {
       io.to(actor.roomId).emit('discussion-navigation', normalized);
     } catch (error) {
       console.error('Error updating discussion navigation:', error);
+    }
+  });
+
+  socket.on('discussion-burst', async ({ emoji }) => {
+    const actor = await resolveSocketActor(socket, currentUser);
+    if (!actor?.roomId || typeof emoji !== 'string') return;
+    currentUser = actor;
+    if (!(DISCUSSION_BURST_EMOJIS as readonly string[]).includes(emoji)) return;
+    if (!allowDiscussionBurst(actor.roomId, actor.name)) return;
+
+    try {
+      const room = await RoomService.getRoom(actor.roomId);
+      if (!room || room.phase !== 'discussion' || !getRoomFeatures(room).discussionActionsEnabled) return;
+      emitDiscussionBurst(actor.roomId, emoji, actor.name);
+    } catch (error) {
+      console.error('Error sending discussion burst:', error);
+    }
+  });
+
+  socket.on('toggle-discussion-hand', async () => {
+    const actor = await resolveSocketActor(socket, currentUser);
+    if (!actor?.roomId) return;
+    currentUser = actor;
+
+    try {
+      const room = await RoomService.getRoom(actor.roomId);
+      if (!room || room.phase !== 'discussion' || !getRoomFeatures(room).discussionActionsEnabled) return;
+
+      let hands = roomRaisedHands.get(actor.roomId);
+      if (!hands) {
+        hands = new Map();
+        roomRaisedHands.set(actor.roomId, hands);
+      }
+
+      if (hands.has(actor.name)) {
+        hands.delete(actor.name);
+        if (hands.size === 0) roomRaisedHands.delete(actor.roomId);
+      } else {
+        hands.set(actor.name, actor.name);
+        emitDiscussionBurst(actor.roomId, '✋', actor.name);
+      }
+      emitDiscussionHands(actor.roomId);
+    } catch (error) {
+      console.error('Error toggling discussion hand:', error);
+    }
+  });
+
+  socket.on('set-card-author-reveal', async ({ cardId, revealed }) => {
+    const actor = await resolveSocketActor(socket, currentUser);
+    if (!actor?.roomId || typeof cardId !== 'string' || typeof revealed !== 'boolean') return;
+    currentUser = actor;
+
+    try {
+      const room = await RoomService.getRoom(actor.roomId);
+      if (!room || room.phase !== 'discussion' || !getRoomFeatures(room).discussionActionsEnabled) return;
+      const card = room.cards.find((currentCard) => currentCard.id === cardId);
+      if (!card || card.createdBy !== actor.name) return;
+
+      const nextRevealed = revealed;
+      if (Boolean(card.authorRevealed) === nextRevealed) return;
+
+      const updatedRoom = await RoomService.updateCard(actor.roomId, cardId, { authorRevealed: nextRevealed });
+      const updatedCard = updatedRoom?.cards.find((currentCard) => currentCard.id === cardId);
+      if (!updatedCard) return;
+
+      io.to(actor.roomId).emit('card-updated', updatedCard);
+      if (nextRevealed && allowDiscussionBurst(actor.roomId, actor.name)) {
+        emitDiscussionBurst(actor.roomId, '✍️', actor.name);
+      }
+    } catch (error) {
+      console.error('Error revealing card author:', error);
     }
   });
 
@@ -2305,6 +2434,10 @@ io.on('connection', (socket) => {
           roomFacilitators.delete(actorRoomId);
           io.to(actorRoomId).emit('facilitator-selected', null);
         }
+        if (!updatedRoom.features.discussionActionsEnabled) {
+          roomRaisedHands.delete(actorRoomId);
+          emitDiscussionHands(actorRoomId);
+        }
       }
     } catch (error) {
       console.error('Error updating room features:', error);
@@ -2444,6 +2577,8 @@ io.on('connection', (socket) => {
       roomRetroRatings.delete(roomId);
       roomFacilitators.delete(roomId);
       roomDiscussionNavigation.delete(roomId);
+      roomRaisedHands.delete(roomId);
+      discussionBurstTimestamps.delete(roomId);
       roomSprintVipVotes.delete(roomId);
       roomArkanoidScores.delete(roomId);
       cancelPendingDeparturesForRoom(roomId);

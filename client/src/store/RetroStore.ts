@@ -1,5 +1,5 @@
 import { makeAutoObservable, runInAction } from 'mobx';
-import { ArkanoidScoreEntry, AuthProfile, Card, CardComment, CardReaction, ChatMessage, ColumnColorId, ColumnKind, DEFAULT_COLUMN_COLORS, DEFAULT_COLUMN_TITLES, DEFAULT_ROOM_FEATURES, DiscussionNavigationState, FacilitatorAnnouncement, Mood, Phase, PhaseTimerState, RetroRatingState, RetroTemplate, RetroTemplateId, Room, RoomFeatures, RoomState, SprintVipState, Team, User, WhiteboardStroke, getCardTypeByColumn, getColumnCount, getRetroTemplate, getTemplateColumn, normalizeColumnColors } from '../types';
+import { ArkanoidScoreEntry, AuthProfile, Card, CardComment, CardReaction, ChatMessage, ColumnColorId, ColumnKind, DEFAULT_COLUMN_COLORS, DEFAULT_COLUMN_TITLES, DEFAULT_ROOM_FEATURES, DiscussionBurst, DiscussionHand, DiscussionNavigationState, FacilitatorAnnouncement, Mood, Phase, PhaseTimerState, RetroRatingState, RetroTemplate, RetroTemplateId, Room, RoomFeatures, RoomState, SprintVipState, Team, User, WhiteboardStroke, getCardTypeByColumn, getColumnCount, getRetroTemplate, getTemplateColumn, normalizeColumnColors } from '../types';
 import { Socket } from 'socket.io-client';
 import { SocketService } from '../services/socket';
 
@@ -43,6 +43,8 @@ export class RetroStore {
   facilitatorAnnouncement: FacilitatorAnnouncement | null = null;
   isFacilitatorDialogOpen = false;
   discussionNavigation: DiscussionNavigationState | null = null;
+  discussionHands: string[] = [];
+  discussionBursts: DiscussionBurst[] = [];
   template: RetroTemplateId = 'classic';
   columnTitles: string[] = [...DEFAULT_COLUMN_TITLES];
   columnColors: ColumnColorId[] = [...DEFAULT_COLUMN_COLORS];
@@ -378,6 +380,21 @@ export class RetroStore {
     });
   }
 
+  setDiscussionHands(hands: DiscussionHand[]) {
+    runInAction(() => {
+      this.discussionHands = hands
+        .map((hand) => hand.userName?.trim())
+        .filter((name): name is string => Boolean(name));
+    });
+  }
+
+  addDiscussionBurst(burst: DiscussionBurst) {
+    if (!burst?.id || !burst.emoji) return;
+    runInAction(() => {
+      this.discussionBursts = [...this.discussionBursts, burst].slice(-40);
+    });
+  }
+
   setSprintVip(state: SprintVipState) {
     runInAction(() => {
       this.sprintVip = state;
@@ -429,6 +446,8 @@ export class RetroStore {
     runInAction(() => {
       this.room = room;
       if (room) {
+        this.discussionHands = [];
+        this.discussionBursts = [];
         this.applyBoardColumns(room.template, room.columnTitles, room.columnColors);
         if (this.room) {
           this.room = { ...this.room, template: this.template };
@@ -484,6 +503,8 @@ export class RetroStore {
         this.facilitatorAnnouncement = null;
         this.isFacilitatorDialogOpen = false;
         this.discussionNavigation = null;
+        this.discussionHands = [];
+        this.discussionBursts = [];
         this.template = 'classic';
         this.columnTitles = [...DEFAULT_COLUMN_TITLES];
         this.columnColors = [...DEFAULT_COLUMN_COLORS];
@@ -513,6 +534,8 @@ export class RetroStore {
         this.discussionNavigation = null;
         this.facilitatorAnnouncement = null;
         this.isFacilitatorDialogOpen = false;
+        this.discussionHands = [];
+        this.discussionBursts = [];
       }
     });
   }
@@ -545,6 +568,8 @@ export class RetroStore {
         this.discussionNavigation = null;
         this.facilitatorAnnouncement = null;
         this.isFacilitatorDialogOpen = false;
+        this.discussionHands = [];
+        this.discussionBursts = [];
       }
       this.users = this.normalizeUsers(state.users);
       if (this.currentUser) {

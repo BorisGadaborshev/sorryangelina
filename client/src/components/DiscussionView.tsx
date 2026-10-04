@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { observer } from 'mobx-react-lite';
-import { Box, Paper, Typography, IconButton, Tooltip } from '@mui/material';
+import { keyframes } from '@emotion/react';
+import { Box, Paper, Typography, IconButton, Tooltip, Button, Popover, useMediaQuery } from '@mui/material';
 import { NavigateBefore, NavigateNext } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import { RetroStore } from '../store/RetroStore';
-import { Card as CardType, DiscussionNavigationState, getCardTextSegments, getColumnColorStyles } from '../types';
+import { Card as CardType, DISCUSSION_BURST_EMOJIS, DiscussionNavigationState, getCardTextSegments, getColumnColorStyles } from '../types';
 import RetroCard from './RetroCard';
 import { VoteIcon } from './VoteIcon';
 import { resolveMediaUrl } from '../utils/media';
@@ -13,7 +14,22 @@ interface Props {
   store: RetroStore;
 }
 
-const formatFacilitatorShortName = (fullName: string): string => {
+const discussionFloat = keyframes`
+  0% { transform: translate3d(0, 24px, 0) scale(0.35); opacity: 0; }
+  14% { transform: translate3d(0, 0, 0) scale(1.12); opacity: 1; }
+  100% { transform: translate3d(var(--drift), -460px, 0) scale(0.92); opacity: 0; }
+`;
+
+interface FloatingEmoji {
+  id: string;
+  emoji: string;
+  left: number;
+  duration: number;
+  drift: number;
+  size: number;
+}
+
+const formatPersonShortName = (fullName: string): string => {
   const parts = fullName.trim().split(/\s+/).filter(Boolean);
   if (parts.length <= 1) return fullName.trim();
   const [surname, ...rest] = parts;
@@ -25,6 +41,85 @@ const formatFacilitatorShortName = (fullName: string): string => {
   return initials ? `${surname} ${initials}` : surname;
 };
 
+const RaisedHandsCorner: React.FC<{ names: string[] }> = ({ names }) => {
+  const theme = useTheme();
+  const isMobile = useMediaQuery('(max-width:600px)');
+  const containerRef = useRef<HTMLDivElement>(null);
+  const measureRef = useRef<HTMLSpanElement>(null);
+  const [useShortNames, setUseShortNames] = useState(false);
+  const fullLabel = names.join(', ');
+  const shortLabel = names.map(formatPersonShortName).join(', ');
+
+  useEffect(() => {
+    const container = containerRef.current;
+    const measure = measureRef.current;
+    if (!container || !measure || names.length === 0) {
+      setUseShortNames(false);
+      return;
+    }
+
+    const update = () => {
+      setUseShortNames(measure.scrollWidth > container.clientWidth + 1);
+    };
+
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [fullLabel, isMobile, names.length]);
+
+  if (names.length === 0) return null;
+
+  return (
+    <Tooltip title={fullLabel}>
+      <Box
+        ref={containerRef}
+        sx={{
+          position: 'absolute',
+          zIndex: 6,
+          top: 8,
+          right: 12,
+          left: isMobile ? 12 : 'auto',
+          width: isMobile ? 'auto' : 'max-content',
+          maxWidth: isMobile ? 'none' : '46%',
+          textAlign: isMobile ? 'center' : 'right',
+          pointerEvents: 'auto'
+        }}
+      >
+        <Typography
+          component="span"
+          ref={measureRef}
+          variant="body2"
+          sx={{
+            position: 'absolute',
+            visibility: 'hidden',
+            whiteSpace: 'nowrap',
+            pointerEvents: 'none',
+            fontWeight: 700
+          }}
+        >
+          ✋ {fullLabel}
+        </Typography>
+        <Typography
+          variant="body2"
+          sx={{
+            fontWeight: 700,
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            px: 1,
+            py: 0.4,
+            borderRadius: 999,
+            bgcolor: theme.palette.mode === 'dark' ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.86)'
+          }}
+        >
+          ✋ {useShortNames ? shortLabel : fullLabel}
+        </Typography>
+      </Box>
+    </Tooltip>
+  );
+};
+
 const DiscussionView: React.FC<Props> = observer(({ store }) => {
   const carouselSize = 3;
   const sortedCards = store.sortedCards;
@@ -34,14 +129,22 @@ const DiscussionView: React.FC<Props> = observer(({ store }) => {
   const showDislikes = features.dislikesEnabled;
   const showReactions = features.reactionsEnabled;
   const showComments = features.commentsEnabled;
+  const showDiscussionActions = features.discussionActionsEnabled;
   const facilitatorName = store.facilitatorAnnouncement?.userName?.trim() || '';
   const facilitatorShortName = useMemo(
-    () => (facilitatorName ? formatFacilitatorShortName(facilitatorName) : ''),
+    () => (facilitatorName ? formatPersonShortName(facilitatorName) : ''),
     [facilitatorName]
   );
   const facilitatorLabelRef = useRef<HTMLDivElement>(null);
   const facilitatorMeasureRef = useRef<HTMLSpanElement>(null);
   const [useShortFacilitatorName, setUseShortFacilitatorName] = useState(false);
+  const [reactionAnchorEl, setReactionAnchorEl] = useState<HTMLElement | null>(null);
+  const [particles, setParticles] = useState<FloatingEmoji[]>([]);
+  const seenBurstIds = useRef(new Set<string>());
+  const burstsPrimed = useRef(false);
+  const bursts = store.discussionBursts;
+  const myName = store.currentUser?.name || '';
+  const handRaised = myName ? store.discussionHands.includes(myName) : false;
 
   useEffect(() => {
     const container = facilitatorLabelRef.current;
@@ -60,6 +163,35 @@ const DiscussionView: React.FC<Props> = observer(({ store }) => {
     observer.observe(container);
     return () => observer.disconnect();
   }, [facilitatorName]);
+
+  useEffect(() => {
+    if (!burstsPrimed.current) {
+      bursts.forEach((burst) => seenBurstIds.current.add(burst.id));
+      burstsPrimed.current = true;
+      return;
+    }
+
+    const fresh = bursts.filter((burst) => !seenBurstIds.current.has(burst.id));
+    if (fresh.length === 0) return;
+
+    const spawned: FloatingEmoji[] = [];
+    fresh.forEach((burst) => {
+      seenBurstIds.current.add(burst.id);
+      const count = burst.emoji === '✋' || burst.emoji === '✍️' ? 1 : 4;
+      for (let index = 0; index < count; index += 1) {
+        spawned.push({
+          id: `${burst.id}-${index}`,
+          emoji: burst.emoji,
+          left: 8 + Math.random() * 84,
+          duration: 2300 + Math.random() * 1200,
+          drift: Math.round((Math.random() - 0.5) * 110),
+          size: count === 1 ? 64 : 32 + Math.round(Math.random() * 26)
+        });
+      }
+    });
+
+    setParticles((current) => [...current, ...spawned].slice(-48));
+  }, [bursts]);
 
   const navigation = useMemo<DiscussionNavigationState>(() => {
     const availableIds = sortedCards.map((card) => card.id);
@@ -145,27 +277,58 @@ const DiscussionView: React.FC<Props> = observer(({ store }) => {
   if (!currentCard) {
     return (
       <Box sx={{
+        position: 'relative',
         display: 'flex',
         justifyContent: 'center',
         alignItems: 'center',
         height: '100%',
         width: '100%'
       }}>
+        {showDiscussionActions && <RaisedHandsCorner names={store.discussionHands} />}
         <Typography variant="h6">Все карточки просмотрены</Typography>
       </Box>
     );
   }
 
+  const isCurrentCardAuthor = Boolean(myName && currentCard.createdBy === myName);
+  const authorRevealed = Boolean(currentCard.authorRevealed);
+
   return (
     <Box sx={{
+      position: 'relative',
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'center',
       justifyContent: 'center',
       width: '100%',
       height: '100%',
+      overflow: 'hidden',
       p: 3
     }}>
+      {showDiscussionActions && <RaisedHandsCorner names={store.discussionHands} />}
+      <Box aria-hidden sx={{ pointerEvents: 'none', position: 'absolute', inset: 0, zIndex: 4, overflow: 'hidden' }}>
+        {particles.map((particle) => (
+          <Box
+            key={particle.id}
+            onAnimationEnd={() => {
+              setParticles((current) => current.filter((item) => item.id !== particle.id));
+            }}
+            style={{
+              left: `${particle.left}%`,
+              fontSize: particle.size,
+              ['--drift' as string]: `${particle.drift}px`
+            }}
+            sx={{
+              position: 'absolute',
+              bottom: '8%',
+              lineHeight: 1,
+              animation: `${discussionFloat} ${particle.duration}ms ease-out forwards`
+            }}
+          >
+            {particle.emoji}
+          </Box>
+        ))}
+      </Box>
       <Box sx={{
         maxWidth: '800px',
         width: '100%',
@@ -238,7 +401,133 @@ const DiscussionView: React.FC<Props> = observer(({ store }) => {
           <RetroCard card={currentCard} index={0} store={store} />
         </Box>
 
-        <Box sx={{ width: '100%', maxWidth: '900px' }}>
+        {showDiscussionActions && <Box sx={{ order: 2, width: '100%', maxWidth: '720px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1.25 }}>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: 1 }}>
+            <Tooltip title="Реакции">
+              <Button
+                aria-label="Реакции"
+                aria-expanded={Boolean(reactionAnchorEl)}
+                onClick={(event) => setReactionAnchorEl(event.currentTarget)}
+                sx={{
+                  minWidth: 48,
+                  minHeight: 40,
+                  px: 1.25,
+                  borderRadius: '10px',
+                  fontSize: 22,
+                  lineHeight: 1,
+                  color: '#fff',
+                  backgroundImage: 'linear-gradient(135deg, #766dff 0%, #5b54e8 100%)',
+                  boxShadow: '0 4px 12px rgba(92, 84, 232, 0.3)',
+                  '&:hover': {
+                    color: '#fff',
+                    backgroundImage: 'linear-gradient(135deg, #827aff 0%, #655df0 100%)'
+                  }
+                }}
+              >
+                😊
+              </Button>
+            </Tooltip>
+            <Popover
+              open={Boolean(reactionAnchorEl)}
+              anchorEl={reactionAnchorEl}
+              onClose={() => setReactionAnchorEl(null)}
+              anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+              transformOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+            >
+              <Box
+                sx={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(4, 1fr)',
+                  gap: 0.5,
+                  p: 1
+                }}
+              >
+                {DISCUSSION_BURST_EMOJIS.map(({ emoji, label }) => (
+                  <Tooltip key={emoji} title={label}>
+                    <IconButton
+                      aria-label={label}
+                      onClick={() => {
+                        store.socketService?.sendDiscussionBurst(emoji);
+                        setReactionAnchorEl(null);
+                      }}
+                      sx={{
+                        width: 44,
+                        height: 44,
+                        fontSize: 24
+                      }}
+                    >
+                      {emoji}
+                    </IconButton>
+                  </Tooltip>
+                ))}
+              </Box>
+            </Popover>
+            <Tooltip title={handRaised ? 'Отпустить руку' : 'Поднять руку'}>
+              <Button
+                aria-label={handRaised ? 'Отпустить руку' : 'Поднять руку'}
+                aria-pressed={handRaised}
+                onClick={() => store.socketService?.toggleDiscussionHand()}
+                sx={{
+                  minWidth: 48,
+                  minHeight: 40,
+                  px: 1.25,
+                  borderRadius: '10px',
+                  fontSize: 22,
+                  lineHeight: 1,
+                  color: handRaised ? '#1f1f1f' : '#fff',
+                  backgroundImage: handRaised
+                    ? 'linear-gradient(135deg, #ffd56a 0%, #f0a202 100%)'
+                    : 'linear-gradient(135deg, #766dff 0%, #5b54e8 100%)',
+                  boxShadow: handRaised
+                    ? '0 4px 12px rgba(240, 162, 2, 0.28)'
+                    : '0 4px 12px rgba(92, 84, 232, 0.3)',
+                  '&:hover': {
+                    color: handRaised ? '#1f1f1f' : '#fff',
+                    backgroundImage: handRaised
+                      ? 'linear-gradient(135deg, #ffe08a 0%, #f5b020 100%)'
+                      : 'linear-gradient(135deg, #827aff 0%, #655df0 100%)'
+                  }
+                }}
+              >
+                ✋
+              </Button>
+            </Tooltip>
+            {isCurrentCardAuthor && (
+              <Tooltip title={authorRevealed ? 'Скрыть, что вы автор' : 'Я автор'}>
+                <Button
+                  aria-label={authorRevealed ? 'Скрыть, что вы автор' : 'Я автор'}
+                  aria-pressed={authorRevealed}
+                  onClick={() => store.socketService?.setCardAuthorReveal(currentCard.id, !authorRevealed)}
+                  sx={{
+                    minWidth: 48,
+                    minHeight: 40,
+                    px: 1.25,
+                    borderRadius: '10px',
+                    fontSize: 22,
+                    lineHeight: 1,
+                    color: '#fff',
+                    backgroundImage: authorRevealed
+                      ? 'linear-gradient(135deg, #38c976 0%, #22a95c 100%)'
+                      : 'linear-gradient(135deg, #5c6b7a 0%, #3d4b59 100%)',
+                    boxShadow: authorRevealed
+                      ? '0 4px 12px rgba(34, 169, 92, 0.28)'
+                      : '0 4px 12px rgba(61, 75, 89, 0.28)',
+                    '&:hover': {
+                      color: '#fff',
+                      backgroundImage: authorRevealed
+                        ? 'linear-gradient(135deg, #42d580 0%, #29b866 100%)'
+                        : 'linear-gradient(135deg, #6b7b8b 0%, #4a5968 100%)'
+                    }
+                  }}
+                >
+                  ✍️
+                </Button>
+              </Tooltip>
+            )}
+          </Box>
+        </Box>}
+
+        <Box sx={{ order: 1, width: '100%', maxWidth: '900px' }}>
           <Typography variant="subtitle2" sx={{ mb: 1.5 }}>
             Остальные карточки
           </Typography>
@@ -305,6 +594,11 @@ const DiscussionView: React.FC<Props> = observer(({ store }) => {
                     />
                   )}
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.25 }}>
+                    {card.authorRevealed && card.createdBy && (
+                      <Typography variant="caption" sx={{ fontWeight: 700 }}>
+                        Автор: {card.createdBy}
+                      </Typography>
+                    )}
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
                         <VoteIcon type="like" id={features.likeIcon} size={14} />

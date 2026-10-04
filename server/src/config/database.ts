@@ -108,6 +108,7 @@ export const connectDB = async (): Promise<void> => {
     alter table rooms add column if not exists features jsonb;
     alter table rooms add column if not exists template text not null default 'classic';
     alter table cards add column if not exists origin_column integer;
+    alter table cards add column if not exists author_revealed boolean not null default false;
     alter table rooms drop constraint if exists rooms_phase_check;
     alter table rooms add constraint rooms_phase_check check (phase in ('creation','voting','discussion','roadmap','rating'));
 
