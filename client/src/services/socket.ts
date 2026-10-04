@@ -1,6 +1,12 @@
 import { io, Socket } from 'socket.io-client';
 import { RetroStore } from '../store/RetroStore';
 import { Room, RoomState, User, Card, CardComment, CardReaction, FacilitatorAnnouncement, DiscussionBurst, DiscussionHand, DiscussionNavigationState, Phase, PhaseTimerState, ChatMessage, Mood, RetroRatingState, RoomFeatures, SprintVipState, ArkanoidScoreEntry, WhiteboardStroke, CreateRoomOptions, ColumnColorId } from '../types';
+import { getApiBase } from '../utils/apiBase';
+import { log } from '../utils/logger';
+import { classifyServerError, mapServerError, SessionError } from '../utils/errors';
+import { readStoredSession, TabSession } from './session';
+
+type ResumeKind = 'hide' | 'online' | 'bfcache';
 
 export class SocketService {
   private socket: Socket;
@@ -10,18 +16,23 @@ export class SocketService {
   private restoredSocketId: string | null = null;
   private sessionSyncRequired = false;
   private lastSessionSyncAt = 0;
-  private static readonly SESSION_SYNC_COOLDOWN_MS = 1500;
+  private hiddenAt = 0;
+  private resumeTimer: number | null = null;
+  private overlayTimer: number | null = null;
+  private pendingResume: ResumeKind | null = null;
+  private connectErrorStreak = 0;
+  private static readonly SHORT_AWAY_MS = 15000;
+  private static readonly RESUME_DEBOUNCE_MS = 300;
+  private static readonly RESTORE_TIMEOUT_MS = 5000;
+  private static readonly OVERLAY_DELAY_MS = 1500;
 
   constructor(store: RetroStore) {
-    console.log('Initializing socket connection...');
+    log.debug('Initializing socket connection...');
     this.store = store;
-    
-    const isProd = process.env.NODE_ENV === 'production';
-    const serverUrl = isProd
-      ? window.location.origin
-      : 'http://localhost:3001';
 
-    // Initialize socket with updated configuration
+    const apiBase = getApiBase();
+    const serverUrl = apiBase || window.location.origin;
+
     this.socket = io(serverUrl, {
       path: '/socket.io',
       transports: ['websocket', 'polling'],
@@ -32,163 +43,180 @@ export class SocketService {
       reconnectionDelayMax: 5000,
       timeout: 20000,
       withCredentials: true,
-      forceNew: true,
-      autoConnect: false
+      autoConnect: false,
+      auth: (callback) => {
+        callback({ token: this.store.authProfile?.token || '' });
+      }
     });
-    
+
     this.store.setSocket(this.socket);
-    
-    // Setup enhanced connection handling
+
     this.socket.on('connect', () => {
-      console.log('Socket connected successfully:', this.socket.id);
+      log.debug('Socket connected:', this.socket.id);
+      this.connectErrorStreak = 0;
+      if (this.socket.recovered && this.store.canRenderBoard) {
+        this.restoredSocketId = this.socket.id ?? null;
+        this.sessionSyncRequired = false;
+        this.clearReconnecting();
+        return;
+      }
       void this.attemptSessionRestore();
     });
 
     this.socket.io.on('reconnect', () => {
-      console.log('Socket reconnected');
+      log.debug('Socket reconnected');
       this.sessionSyncRequired = true;
-      void this.attemptSessionRestore();
+      this.restoredSocketId = null;
     });
 
-    this.socket.on('connect_error', (error) => {
-      console.error('Socket connection error:', error);
+    this.socket.on('connect_error', () => {
+      this.connectErrorStreak += 1;
+      if (this.connectErrorStreak < 3) return;
+      this.store.setConnectionStatus('offline');
       this.store.setError('Не удалось подключиться к серверу. Попробуйте ещё раз.');
-      
-      // Try to reconnect with polling if websocket fails
-      const transport = this.socket.io?.opts?.transports?.[0];
-      if (transport === 'websocket' && this.socket.io?.opts?.transports) {
-        console.log('Retrying with polling transport...');
-        this.socket.io.opts.transports = ['polling', 'websocket'];
-        this.socket.connect();
-      }
     });
 
     this.socket.on('disconnect', (reason) => {
-      console.log('Socket disconnected:', reason);
+      log.debug('Socket disconnected:', reason);
+      if (reason === 'io client disconnect') return;
 
-      if (reason === 'io client disconnect') {
-        return;
-      }
-
-      this.store.persistBoardState();
+      this.store.flushBoardState();
       this.sessionSyncRequired = true;
       this.restoredSocketId = null;
+      this.store.setConnectionStatus('reconnecting');
       if (!this.store.canRenderBoard) {
         this.store.setReconnecting(true);
       }
     });
 
     this.bindLifecycleHandlers();
-
     this.setupListeners();
-    
-    // Start the connection
-    console.log('Starting initial connection...');
+    log.debug('Starting initial connection...');
     this.socket.connect();
+  }
+
+  private activeSession(): TabSession | null {
+    const roomId = this.store.room?.id;
+    const username = this.store.currentUser?.name || this.store.authProfile?.name;
+    const userId = this.store.currentUser?.id || readStoredSession()?.userId;
+    if (roomId && username && userId) {
+      return { roomId, userId, username };
+    }
+    return readStoredSession();
+  }
+
+  private applyJoined({ room, state, userId }: { room: Room; state: RoomState; userId?: string }): void {
+    const authName = this.store.authProfile?.name;
+    const user = (userId ? room.users.find((entry) => entry.id === userId) : undefined)
+      || (authName ? room.users.find((entry) => entry.name === authName) : undefined);
+
+    if (user) {
+      this.store.setCurrentUser({
+        id: user.id,
+        name: user.name,
+        roomId: room.id,
+        role: user.role,
+        mood: user.mood,
+        isReady: user.isReady
+      });
+    }
+
+    this.store.setRoom(room);
+    this.store.updateState(state);
+    this.store.setRejoinRequired(false);
+    this.store.setError(null);
+    this.clearReconnecting();
+    this.sessionSyncRequired = false;
+    this.lastSessionSyncAt = Date.now();
+    this.restoredSocketId = this.socket.id ?? null;
+  }
+
+  private markReconnecting(): void {
+    if (!this.store.canRenderBoard) {
+      this.store.setConnectionStatus('reconnecting');
+      this.store.setReconnecting(true);
+      return;
+    }
+    if (this.overlayTimer != null) return;
+    this.overlayTimer = window.setTimeout(() => {
+      this.overlayTimer = null;
+      if (this.restoredSocketId === this.socket.id && !this.sessionSyncRequired && this.socket.connected) return;
+      this.store.setConnectionStatus('reconnecting');
+      this.store.setReconnecting(true);
+    }, SocketService.OVERLAY_DELAY_MS);
+  }
+
+  private clearReconnecting(): void {
+    if (this.overlayTimer != null) {
+      window.clearTimeout(this.overlayTimer);
+      this.overlayTimer = null;
+    }
+    this.store.setReconnecting(false);
+    this.store.setConnectionStatus('online');
+  }
+
+  private forceReconnect(): void {
+    this.sessionSyncRequired = true;
+    this.restoredSocketId = null;
+    this.markReconnecting();
+    if (this.socket.connected) {
+      this.socket.disconnect();
+    }
+    this.socket.connect();
+  }
+
+  private leaveRoomLocally(message: string): void {
+    this.sessionSyncRequired = false;
+    this.store.setRejoinRequired(false);
+    this.store.setError(message);
+    this.store.setRoom(null);
+    this.clearReconnecting();
   }
 
   private setupListeners(): void {
     this.socket.on('error', (error: string) => {
-      console.error('Server error:', error);
-      this.store.setError(error);
+      log.debug('Server error:', error);
+      this.store.setError(mapServerError(error));
     });
 
     this.socket.on('kicked', () => {
-      this.sessionSyncRequired = false;
-      this.store.setError('Вас исключили из комнаты');
-      this.store.setRoom(null);
-      this.store.clearSession();
+      this.leaveRoomLocally('Вас исключили из комнаты');
+    });
+
+    this.socket.on('user-kicked', () => {
+      this.leaveRoomLocally('Вы были исключены из комнаты администратором');
+    });
+
+    this.socket.on('room-deleted', () => {
+      this.leaveRoomLocally('Комната была удалена администратором');
     });
 
     this.socket.on('room-joined', ({ room, state, userId }: { room: Room; state: RoomState; userId: string }) => {
-      console.log('Room joined event received - FULL DATA:', {
-        room,
-        state,
-        userId,
-        roomUsers: room.users,
-        firstUser: room.users[0]
-      });
-      
-      const savedUsername = localStorage.getItem('username');
-      
-      if (savedUsername) {
-        const userToUpdate = room.users.find(u => u.name === savedUsername);
-        if (userToUpdate) {
-          console.log('Found user to restore - FULL USER:', userToUpdate);
-          localStorage.setItem('userId', userToUpdate.id);
-          localStorage.setItem('username', userToUpdate.name);
-          this.store.setCurrentUser({
-            id: userToUpdate.id,
-            name: userToUpdate.name,
-            roomId: room.id,
-            role: userToUpdate.role,
-            mood: userToUpdate.mood,
-            isReady: userToUpdate.isReady
-          });
-        }
-      } else if (userId) {
-        // Новое подключение: сохраняем новый ID
-        localStorage.setItem('userId', userId);
-        // Находим пользователя по socket ID
-        const userToUpdate = room.users.find(u => u.id === userId);
-        if (userToUpdate) {
-          console.log('Setting new user - FULL USER:', userToUpdate);
-          localStorage.setItem('username', userToUpdate.name);
-          // Устанавливаем текущего пользователя сразу
-          this.store.setCurrentUser({
-            id: userToUpdate.id,
-            name: userToUpdate.name,
-            roomId: room.id,
-            role: userToUpdate.role,
-            mood: userToUpdate.mood,
-            isReady: userToUpdate.isReady
-          });
-        }
-      }
-
-      console.log('Final room state with roles:', room.users.map(u => ({ 
-        id: u.id,
-        name: u.name,
-        role: u.role,
-        roomId: u.roomId
-      })));
-      
-      this.store.setRoom(room);
-      this.store.updateState(state);
-      this.store.setError(null);
-      this.store.setReconnecting(false);
-      this.sessionSyncRequired = false;
-      this.lastSessionSyncAt = Date.now();
-      this.restoredSocketId = this.socket.id ?? null;
+      log.debug('Room joined:', room.id, userId);
+      this.applyJoined({ room, state, userId });
     });
 
     this.socket.on('state-updated', (state: RoomState) => {
-      console.log('State update received:', state);
       this.store.updateState(state);
     });
 
     this.socket.on('user-joined', (user: User) => {
-      console.log('User joined:', user);
       this.store.addUser(user);
     });
 
     this.socket.on('user-left', (user: User) => {
-      console.log('User left:', user);
       this.store.removeUser(user.id);
     });
 
     this.socket.on('card-added', (card: Card) => {
-      console.log('Card added:', card);
       this.store.addCard(card);
     });
 
     this.socket.on('card-updated', (card: Card) => {
-      console.log('Card updated:', card);
       this.store.updateCard(card);
     });
 
     this.socket.on('card-deleted', (cardId: string) => {
-      console.log('Card deleted:', cardId);
       this.store.deleteCard(cardId);
     });
 
@@ -197,12 +225,10 @@ export class SocketService {
     });
 
     this.socket.on('card-moved', ({ cardId, column, originColumn }: { cardId: string; column: number; originColumn?: number }) => {
-      console.log('Card moved:', { cardId, column, originColumn });
       this.store.moveCard(cardId, column, originColumn);
     });
 
     this.socket.on('card-voted', ({ cardId, likes, dislikes }: { cardId: string; likes: string[]; dislikes: string[] }) => {
-      console.log('Card voted:', { cardId, likes, dislikes });
       this.store.updateVotes(cardId, likes, dislikes);
       this.store.clearVoteError();
     });
@@ -224,7 +250,6 @@ export class SocketService {
     });
 
     this.socket.on('phase-changed', ({ phase, cards }: { phase: Phase; cards: Card[] }) => {
-      console.log('Phase changed:', { phase, cards });
       this.store.setPhase(phase);
       this.store.setCards(cards);
     });
@@ -299,81 +324,101 @@ export class SocketService {
     this.socket.on('arkanoid-scores', ({ scores }: { scores?: ArkanoidScoreEntry[] }) => {
       this.store.setArkanoidScores(scores || []);
     });
-
-    this.socket.on('user-kicked', () => {
-      console.log('You have been kicked from the room');
-      this.store.setRoom(null);
-      this.store.setError('Вы были исключены из комнаты администратором');
-    });
-
-    this.socket.on('room-deleted', () => {
-      console.log('Room has been deleted');
-      this.store.setRoom(null);
-      this.store.setError('Комната была удалена администратором');
-    });
   }
 
   private bindLifecycleHandlers(): void {
-    const resumeSession = () => {
-      const hasSession = Boolean(
-        localStorage.getItem('roomId') &&
-        localStorage.getItem('username') &&
-        this.store.authProfile?.token
-      );
-      if (!hasSession) return;
-
-      this.sessionSyncRequired = true;
-      if (!this.store.canRenderBoard) {
-        this.store.hydrateBoardFromCache();
+    const scheduleResume = (kind: ResumeKind) => {
+      if (kind === 'online' || kind === 'bfcache') {
+        this.pendingResume = kind;
+      } else if (!this.pendingResume) {
+        this.pendingResume = 'hide';
       }
-      void this.attemptSessionRestore();
+      if (this.resumeTimer != null) window.clearTimeout(this.resumeTimer);
+      this.resumeTimer = window.setTimeout(() => {
+        this.resumeTimer = null;
+        void this.handleResume();
+      }, SocketService.RESUME_DEBOUNCE_MS);
     };
 
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') {
-        resumeSession();
+      if (document.visibilityState === 'hidden') {
+        this.hiddenAt = Date.now();
+        this.store.flushBoardState();
+        return;
       }
+      scheduleResume('hide');
     });
 
     window.addEventListener('pageshow', (event) => {
-      if (event.persisted) {
-        resumeSession();
-      }
+      if (event.persisted) scheduleResume('bfcache');
     });
 
     window.addEventListener('focus', () => {
-      if (document.visibilityState === 'visible') {
-        resumeSession();
+      if (document.visibilityState !== 'visible' || !this.hiddenAt) return;
+      scheduleResume('hide');
+    });
+
+    window.addEventListener('offline', () => {
+      this.store.setConnectionStatus('offline');
+    });
+
+    window.addEventListener('online', () => {
+      scheduleResume('online');
+    });
+
+    window.addEventListener('storage', (event) => {
+      if (event.key === 'authProfile' && !event.newValue) {
+        this.store.clearAuthProfile();
       }
     });
   }
 
-  private async attemptSessionRestore(): Promise<void> {
-    const roomId = localStorage.getItem('roomId');
-    const userId = localStorage.getItem('userId');
-    const username = localStorage.getItem('username');
-    const token = this.store.authProfile?.token;
+  private async handleResume(): Promise<void> {
+    const kind = this.pendingResume;
+    this.pendingResume = null;
+    const away = this.hiddenAt ? Date.now() - this.hiddenAt : 0;
+    this.hiddenAt = 0;
 
-    if (!roomId || !userId || !username || !token) {
+    const token = this.store.authProfile?.token;
+    const session = this.activeSession();
+    if (!session || !token) return;
+
+    if (!this.store.canRenderBoard) {
+      this.store.hydrateBoardFromCache();
+    }
+
+    if (!this.socket.connected || kind === 'online' || kind === 'bfcache') {
+      if (!this.socket.connected) {
+        this.forceReconnect();
+        return;
+      }
+    }
+
+    if (this.socket.connected && kind === 'hide' && away < SocketService.SHORT_AWAY_MS) {
       return;
     }
+
+    this.sessionSyncRequired = true;
+    await this.attemptSessionRestore();
+  }
+
+  private async attemptSessionRestore(): Promise<void> {
+    const session = this.activeSession();
+    const token = this.store.authProfile?.token;
+    if (!session || !token) return;
 
     const now = Date.now();
     const thisSocketNeedsRestore = this.restoredSocketId !== this.socket.id;
     if (
       !thisSocketNeedsRestore &&
       !this.sessionSyncRequired &&
-      now - this.lastSessionSyncAt < SocketService.SESSION_SYNC_COOLDOWN_MS
+      now - this.lastSessionSyncAt < 1500
     ) {
       return;
     }
 
-    const hasCachedBoard = this.store.canRenderBoard;
-
     if (!this.socket.connected) {
-      if (!hasCachedBoard) {
-        this.store.setReconnecting(true);
-      }
+      this.markReconnecting();
       this.socket.connect();
       return;
     }
@@ -383,7 +428,7 @@ export class SocketService {
     }
 
     this.isRestoringSession = true;
-    this.restorePromise = this.runSessionRestore(roomId, userId, username, token, hasCachedBoard);
+    this.restorePromise = this.runSessionRestore(session, token);
     try {
       await this.restorePromise;
     } finally {
@@ -392,39 +437,47 @@ export class SocketService {
     }
   }
 
-  private async runSessionRestore(
-    roomId: string,
-    userId: string,
-    username: string,
-    token: string,
-    hasCachedBoard: boolean
-  ): Promise<void> {
-    if (!hasCachedBoard) {
-      this.store.setReconnecting(true);
-    }
-
+  private async runSessionRestore(session: TabSession, token: string): Promise<void> {
+    this.markReconnecting();
     try {
-      await this.restoreSession(roomId, userId, username, token);
-      this.store.setError(null);
-      this.store.setReconnecting(false);
-      this.lastSessionSyncAt = Date.now();
-      this.restoredSocketId = this.socket.id ?? null;
+      await this.restoreSession(session.roomId, session.userId, session.username, token);
+      this.clearReconnecting();
     } catch (error) {
-      console.error('Failed to restore session after reconnect:', error);
+      const code = error instanceof SessionError ? error.code : 'other';
+      if (code === 'timeout') {
+        this.sessionSyncRequired = true;
+        window.setTimeout(() => this.forceReconnect(), 0);
+        return;
+      }
+      if (code !== 'expired') {
+        this.sessionSyncRequired = true;
+        if (!this.store.canRenderBoard) {
+          this.store.setConnectionStatus('offline');
+        }
+        return;
+      }
+
       try {
-        const roomPassword = sessionStorage.getItem('roomPassword') || '';
-        await this.joinRoom(roomId, roomPassword, username, token);
-        this.store.setError(null);
-        this.store.setReconnecting(false);
-        this.sessionSyncRequired = false;
-        this.lastSessionSyncAt = Date.now();
-        this.restoredSocketId = this.socket.id ?? null;
+        await this.joinRoom(session.roomId, '', session.username, token);
+        this.clearReconnecting();
       } catch (joinError) {
-        console.error('Rejoin failed after restore error:', joinError);
+        const joinCode = joinError instanceof SessionError ? joinError.code : 'other';
+        if (joinCode === 'password') {
+          this.store.setError(null);
+          this.store.setRejoinRequired(true);
+          this.clearReconnecting();
+          return;
+        }
+        if (joinCode === 'auth') {
+          this.store.clearAuthProfile();
+          return;
+        }
         this.sessionSyncRequired = true;
         if (!this.store.room) {
           this.store.clearSession();
           this.store.setReconnecting(false);
+        } else {
+          this.clearReconnecting();
         }
       }
     }
@@ -441,48 +494,39 @@ export class SocketService {
       const maxAttempts = 3;
       const attemptConnection = () => {
         if (attemptCount >= maxAttempts) {
-          reject(new Error('Failed to establish connection after multiple attempts'));
+          reject(new SessionError('Не удалось подключиться к серверу', 'other'));
           return;
         }
 
-        attemptCount++;
-        console.log(`Connection attempt ${attemptCount}/${maxAttempts}`);
-
-        const timeout = setTimeout(() => {
+        attemptCount += 1;
+        const timeout = window.setTimeout(() => {
           this.socket.off('connect', handleConnect);
           this.socket.off('connect_error', handleError);
-          
           if (attemptCount < maxAttempts) {
-            console.log('Connection attempt timed out, retrying...');
             attemptConnection();
           } else {
-            reject(new Error('Connection timeout'));
+            reject(new SessionError('Не удалось подключиться к серверу', 'timeout'));
           }
         }, 5000);
 
         const handleConnect = () => {
-          console.log('Connection established successfully');
-          clearTimeout(timeout);
+          window.clearTimeout(timeout);
           this.socket.off('connect_error', handleError);
           resolve();
         };
 
-        const handleError = (error: Error) => {
-          console.error('Connection error:', error);
-          clearTimeout(timeout);
+        const handleError = () => {
+          window.clearTimeout(timeout);
           this.socket.off('connect', handleConnect);
-          
           if (attemptCount < maxAttempts) {
-            console.log('Retrying connection after error...');
-            setTimeout(attemptConnection, 1000);
+            window.setTimeout(attemptConnection, 1000);
           } else {
-            reject(error);
+            reject(new SessionError('Не удалось подключиться к серверу', 'other'));
           }
         };
 
         this.socket.once('connect', handleConnect);
         this.socket.once('connect_error', handleError);
-        
         if (!this.socket.connected) {
           this.socket.connect();
         }
@@ -492,152 +536,92 @@ export class SocketService {
     });
   }
 
+  private waitForRoom(roomId: string, timeoutMs: number, listenForExpired: boolean): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        cleanup();
+        reject(new SessionError('timeout', 'timeout'));
+      }, timeoutMs);
+
+      const handleSuccess = ({ room }: { room: Room }) => {
+        if (room?.id !== roomId) return;
+        cleanup();
+        resolve();
+      };
+
+      const handleExpired = () => {
+        cleanup();
+        reject(new SessionError('session-expired', 'expired'));
+      };
+
+      const handleError = (error: string) => {
+        cleanup();
+        const code = classifyServerError(error);
+        reject(new SessionError(mapServerError(error), code === 'other' ? 'other' : code));
+      };
+
+      const cleanup = () => {
+        window.clearTimeout(timeout);
+        this.socket.off('room-joined', handleSuccess);
+        this.socket.off('session-expired', handleExpired);
+        if (!listenForExpired) this.socket.off('error', handleError);
+      };
+
+      this.socket.on('room-joined', handleSuccess);
+      if (listenForExpired) {
+        this.socket.once('session-expired', handleExpired);
+      } else {
+        this.socket.once('error', handleError);
+      }
+    });
+  }
+
   async createRoom(roomId: string, password: string | undefined, username: string, token: string, options?: CreateRoomOptions): Promise<void> {
-    console.log('Attempting to create room:', roomId);
+    log.debug('Attempting to create room:', roomId);
     try {
       await this.ensureConnection();
-      
-      return new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          this.socket.off('room-joined', handleSuccess);
-          this.socket.off('error', handleError);
-          reject(new Error('Room creation timeout'));
-        }, 20000);
-
-        const handleError = (error: string) => {
-          clearTimeout(timeout);
-          this.socket.off('room-joined', handleSuccess);
-          this.socket.off('error', handleError);
-          reject(new Error(error));
-        };
-
-        const handleSuccess = ({ room, state, userId }: { room: Room; state: RoomState; userId: string }) => {
-          console.log('Room creation success - FULL DATA:', {
-            room,
-            state,
-            userId,
-            roomUsers: room.users,
-            firstUser: room.users[0]
-          });
-          
-          clearTimeout(timeout);
-          this.socket.off('room-joined', handleSuccess);
-          this.socket.off('error', handleError);
-          
-          // Находим пользователя в комнате
-          const currentUser = room.users.find(u => u.id === userId);
-          if (currentUser) {
-            console.log('Setting current user after room creation - FULL USER:', currentUser);
-            localStorage.setItem('userId', userId);
-            localStorage.setItem('roomId', room.id);
-            localStorage.setItem('username', username);
-            // Устанавливаем текущего пользователя до установки комнаты
-            this.store.setCurrentUser({
-              id: currentUser.id,
-              name: currentUser.name,
-              roomId: room.id,
-              role: currentUser.role || 'user',
-              mood: currentUser.mood,
-              isReady: currentUser.isReady
-            });
-          }
-
-          this.store.setRoom(room);
-          this.store.updateState(state);
-          resolve();
-        };
-
-        this.socket.once('error', handleError);
-        this.socket.once('room-joined', handleSuccess);
-        this.socket.emit('create-room', { roomId, password, username, token, ...options });
-      });
+      const pending = this.waitForRoom(roomId, 20000, false);
+      this.socket.emit('create-room', { roomId, password, username, token, ...options });
+      await pending;
     } catch (error) {
-      console.error('Failed to connect to server:', error);
-      throw new Error('Не удалось подключиться к серверу');
+      log.error('Failed to create room:', error);
+      if (error instanceof SessionError) throw error;
+      throw new SessionError('Не удалось подключиться к серверу', 'other');
     }
   }
 
   async joinRoom(roomId: string, password: string, username: string, token: string): Promise<void> {
-    console.log('Attempting to join room:', roomId);
+    log.debug('Attempting to join room:', roomId);
     try {
       await this.ensureConnection();
-      
-      return new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          this.socket.off('room-joined', handleSuccess);
-          this.socket.off('error', handleError);
-          reject(new Error('Room join timeout'));
-        }, 10000);
-
-        const handleError = (error: string) => {
-          clearTimeout(timeout);
-          this.socket.off('room-joined', handleSuccess);
-          this.socket.off('error', handleError);
-          reject(new Error(error));
-        };
-
-        const handleSuccess = ({ room, state, userId }: { room: Room; state: RoomState; userId: string }) => {
-          console.log('Room join success:', { room, state, userId });
-          clearTimeout(timeout);
-          this.socket.off('room-joined', handleSuccess);
-          this.socket.off('error', handleError);
-          
-          // Находим пользователя в комнате
-          const currentUser = room.users.find(u => u.id === userId);
-          if (currentUser) {
-            console.log('Setting current user after joining:', { name: currentUser.name, role: currentUser.role });
-            localStorage.setItem('userId', userId);
-            localStorage.setItem('roomId', room.id);
-            localStorage.setItem('username', username);
-            // Устанавливаем текущего пользователя до установки комнаты
-            this.store.setCurrentUser(currentUser);
-          }
-          
-          this.store.setRoom(room);
-          this.store.updateState(state);
-          resolve();
-        };
-
-        this.socket.once('error', handleError);
-        this.socket.once('room-joined', handleSuccess);
-        this.socket.emit('join-room', { roomId, password, username, token });
-      });
+      const pending = this.waitForRoom(roomId, 10000, false);
+      this.socket.emit('join-room', { roomId, password, username, token });
+      await pending;
     } catch (error) {
-      console.error('Failed to connect to server:', error);
-      throw new Error('Не удалось подключиться к серверу');
+      log.error('Failed to join room:', error);
+      if (error instanceof SessionError) throw error;
+      throw new SessionError('Не удалось подключиться к серверу', 'other');
     }
   }
 
   addCard(text: string, type: 'liked' | 'disliked' | 'suggestion', column: number, imageUrl?: string): void {
     const currentUser = this.store.currentUser;
-    if (!currentUser) {
-      console.error('Cannot add card: no current user');
-      return;
-    }
+    if (!currentUser) return;
     if (!this.store.canAddCards(column)) return;
     if (this.store.isCardLimitReached) {
       this.store.setError(this.store.cardLimitMessage);
       return;
     }
-    console.log('Adding card with user:', currentUser);
     this.socket.emit('add-card', { text, type, column, imageUrl });
   }
 
   updateCard(cardId: string, text: string, imageUrl?: string): void {
-    const currentUser = this.store.currentUser;
-    if (!currentUser) {
-      console.error('Cannot update card: no current user');
-      return;
-    }
+    if (!this.store.currentUser) return;
     this.socket.emit('update-card', { cardId, text, imageUrl });
   }
 
   deleteCard(cardId: string): void {
-    const currentUser = this.store.currentUser;
-    if (!currentUser) {
-      console.error('Cannot delete card: no current user');
-      return;
-    }
+    if (!this.store.currentUser) return;
     this.socket.emit('delete-card', { cardId });
   }
 
@@ -657,7 +641,6 @@ export class SocketService {
   }
 
   voteCard(cardId: string, voteType: 'like' | 'dislike'): void {
-    console.log('Voting for card:', { cardId, voteType });
     this.socket.emit('vote-card', { cardId, voteType });
   }
 
@@ -686,16 +669,14 @@ export class SocketService {
   }
 
   async changePhase(phase: Phase): Promise<void> {
-    console.log('Changing phase to:', phase);
     this.socket.emit('change-phase', { phase });
   }
 
   async updateReadyState(isReady: boolean): Promise<void> {
-    console.log('Updating ready state:', isReady);
     try {
       await this.ensureConnection();
     } catch (error) {
-      console.error('Failed to connect before ready state update:', error);
+      log.error('Failed to connect before ready state update:', error);
       return;
     }
     this.socket.emit('update-ready-state', {
@@ -780,82 +761,23 @@ export class SocketService {
   }
 
   async restoreSession(roomId: string, userId: string, username: string, token?: string): Promise<void> {
-    console.log('Attempting to restore session:', { roomId, userId, username });
+    log.debug('Attempting to restore session:', { roomId, userId });
     try {
       await this.ensureConnection();
-      
-      return new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          this.socket.off('room-joined', handleSuccess);
-          this.socket.off('session-expired', handleExpired);
-          this.socket.off('error', handleError);
-          reject(new Error('Session restore timeout'));
-        }, 10000);
-
-        const handleExpired = () => {
-          clearTimeout(timeout);
-          this.socket.off('room-joined', handleSuccess);
-          this.socket.off('session-expired', handleExpired);
-          this.socket.off('error', handleError);
-          this.sessionSyncRequired = true;
-          reject(new Error('Session expired'));
-        };
-
-        const handleError = (error: string) => {
-          clearTimeout(timeout);
-          this.socket.off('room-joined', handleSuccess);
-          this.socket.off('session-expired', handleExpired);
-          this.socket.off('error', handleError);
-          reject(new Error(error));
-        };
-
-        const handleSuccess = ({ room, state }: { room: Room; state: RoomState }) => {
-          console.log('Session restore success:', { room, state });
-          clearTimeout(timeout);
-          this.socket.off('room-joined', handleSuccess);
-          this.socket.off('session-expired', handleExpired);
-          this.socket.off('error', handleError);
-
-          const restoredUser = room.users.find(u => u.name === username);
-          if (restoredUser) {
-            localStorage.setItem('userId', restoredUser.id);
-            localStorage.setItem('username', restoredUser.name);
-            this.store.setCurrentUser({
-              id: restoredUser.id,
-              name: restoredUser.name,
-              roomId: room.id,
-              role: restoredUser.role,
-              mood: restoredUser.mood,
-              isReady: restoredUser.isReady
-            });
-          }
-
-          this.store.setRoom(room);
-          this.store.updateState(state);
-          this.store.setReconnecting(false);
-          this.sessionSyncRequired = false;
-          this.lastSessionSyncAt = Date.now();
-          this.restoredSocketId = this.socket.id ?? null;
-          resolve();
-        };
-
-        this.socket.once('error', handleError);
-        this.socket.once('room-joined', handleSuccess);
-        this.socket.once('session-expired', handleExpired);
-        this.socket.emit('restore-session', { roomId, userId, username, token });
-      });
+      const pending = this.waitForRoom(roomId, SocketService.RESTORE_TIMEOUT_MS, true);
+      this.socket.emit('restore-session', { roomId, userId, username, token });
+      await pending;
     } catch (error) {
-      console.error('Failed to connect to server:', error);
-      throw new Error('Не удалось подключиться к серверу');
+      log.error('Failed to restore session:', error);
+      if (error instanceof SessionError) throw error;
+      throw new SessionError('Не удалось подключиться к серверу', 'other');
     }
   }
 
   disconnect(): void {
-    console.log('Disconnecting socket');
     this.socket.disconnect();
   }
 
-  // Новые методы для управления комнатой и пользователями
   deleteRoom() {
     if (!this.socket || !this.store.isAdmin) return;
     this.socket.emit('delete-room');
@@ -879,4 +801,4 @@ export class SocketService {
     this.store.setCurrentUser(null);
     this.store.setRoom(null);
   }
-} 
+}

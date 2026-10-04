@@ -5,6 +5,7 @@ module.exports = function setupProxy(app) {
     target: 'http://localhost:3001',
     changeOrigin: true
   });
+  app.use('/api', proxy);
+  app.use('/socket.io', proxy);
   app.use('/uploads', proxy);
-  app.use('/api/uploads', proxy);
 };

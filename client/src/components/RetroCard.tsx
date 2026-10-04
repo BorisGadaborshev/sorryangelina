@@ -2,11 +2,18 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { observer } from 'mobx-react-lite';
 import { Card as CardType, CARD_REACTION_EMOJIS, cardTextToEditorValue, editorValueToCardText, getCardTextSegments, getColumnColorStyles } from '../types';
 import { Card, CardContent, Typography, IconButton, TextField, Box, Tooltip, Alert, Button, Menu, MenuItem, ListItemIcon, ListItemText, Popover, Divider } from '@mui/material';
-import { Delete, Edit, MoreVert, Check, Close, ChatBubbleOutline, AddReaction, VisibilityOff } from '@mui/icons-material';
+import Delete from '@mui/icons-material/Delete';
+import Edit from '@mui/icons-material/Edit';
+import MoreVert from '@mui/icons-material/MoreVert';
+import Check from '@mui/icons-material/Check';
+import Close from '@mui/icons-material/Close';
+import ChatBubbleOutline from '@mui/icons-material/ChatBubbleOutline';
+import AddReaction from '@mui/icons-material/AddReaction';
+import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import { useTheme } from '@mui/material/styles';
 import { ARKANOID_HITS_TO_BREAK, RetroStore } from '../store/RetroStore';
 import { getDislikeIconLabel, getLikeIconLabel, VoteIcon } from './VoteIcon';
-import { fileToImageDataUrl, IMAGE_FILE_ACCEPT, resolveMediaUrl } from '../utils/media';
+import { fileToImageDataUrl, IMAGE_FILE_ACCEPT, safeMediaSrc } from '../utils/media';
 
 interface Props {
   card: CardType;
@@ -37,6 +44,58 @@ const formatCommentAuthorName = (fullName: string): string => {
     .join('');
   return initials ? `${surname} ${initials}` : surname;
 };
+
+const ArkanoidCardFx = observer(({ store, cardId }: { store: RetroStore; cardId: string }) => {
+  if (!store.arkanoidActive) return null;
+  const hits = store.arkanoidHits.get(cardId) || 0;
+  if (hits <= 0) return null;
+  const broken = hits >= ARKANOID_HITS_TO_BREAK;
+  return (
+    <>
+      <Box
+        aria-hidden
+        sx={{
+          position: 'absolute',
+          inset: 0,
+          zIndex: 2,
+          pointerEvents: 'none',
+          opacity: broken ? 0.42 : 1,
+          outline: broken ? '2px dashed rgba(90, 90, 90, 0.85)' : '2px solid rgba(225, 29, 72, 0.8)',
+          outlineOffset: -2,
+          filter: broken ? 'grayscale(0.75)' : undefined
+        }}
+      />
+      <ArkanoidCracks hits={hits} />
+      {!broken && (
+        <Box
+          aria-hidden
+          sx={{
+            position: 'absolute',
+            right: 8,
+            bottom: 8,
+            zIndex: 3,
+            display: 'flex',
+            gap: '3px',
+            pointerEvents: 'none'
+          }}
+        >
+          {Array.from({ length: ARKANOID_HITS_TO_BREAK }, (_, pip) => (
+            <Box
+              key={pip}
+              sx={{
+                width: 7,
+                height: 7,
+                borderRadius: '50%',
+                bgcolor: pip < hits ? '#e11d48' : 'rgba(0,0,0,0.16)',
+                boxShadow: '0 0 0 1px rgba(255,255,255,0.75)'
+              }}
+            />
+          ))}
+        </Box>
+      )}
+    </>
+  );
+});
 
 const ArkanoidCracks: React.FC<{ hits: number }> = ({ hits }) => {
   if (hits <= 0) return null;
@@ -229,9 +288,6 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store, isMergeDropTa
   const comments = card.comments || [];
   const commentCount = comments.length;
 
-  const arkanoidHits = store.arkanoidActive ? (store.arkanoidHits[card.id] || 0) : 0;
-  const arkanoidBroken = arkanoidHits >= ARKANOID_HITS_TO_BREAK;
-
   const groupedReactions = useMemo(() => {
     const groups = new Map<string, { emoji: string; count: number; reactedByMe: boolean }>();
     (card.reactions || []).forEach((reaction) => {
@@ -257,48 +313,15 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store, isMergeDropTa
         color: cardColor && theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.92)' : 'inherit',
         position: 'relative',
         overflow: 'hidden',
-        opacity: arkanoidBroken ? 0.42 : 1,
-        filter: arkanoidBroken ? 'grayscale(0.75)' : undefined,
-        outline: arkanoidBroken
-          ? '2px dashed rgba(90, 90, 90, 0.85)'
-          : arkanoidHits > 0
-            ? '2px solid rgba(225, 29, 72, 0.8)'
-            : isMergeDropTarget
-              ? `3px solid ${theme.palette.primary.main}`
-              : '3px solid transparent',
+        outline: isMergeDropTarget
+          ? `3px solid ${theme.palette.primary.main}`
+          : '3px solid transparent',
         outlineOffset: -2,
-        transition: 'outline-color 0.15s ease, opacity 0.2s ease, filter 0.2s ease'
+        transition: 'outline-color 0.15s ease'
       }}
     >
-      <ArkanoidCracks hits={arkanoidHits} />
-      {arkanoidHits > 0 && !arkanoidBroken && (
-        <Box
-          aria-hidden
-          sx={{
-            position: 'absolute',
-            right: 8,
-            bottom: 8,
-            zIndex: 3,
-            display: 'flex',
-            gap: '3px',
-            pointerEvents: 'none'
-          }}
-        >
-          {Array.from({ length: ARKANOID_HITS_TO_BREAK }, (_, pip) => (
-            <Box
-              key={pip}
-              sx={{
-                width: 7,
-                height: 7,
-                borderRadius: '50%',
-                bgcolor: pip < arkanoidHits ? '#e11d48' : 'rgba(0,0,0,0.16)',
-                boxShadow: '0 0 0 1px rgba(255,255,255,0.75)'
-              }}
-            />
-          ))}
-        </Box>
-      )}
-      <CardContent sx={{ pb: '4px !important', '&:last-child': { pb: '4px' }, opacity: arkanoidBroken ? 0.55 : 1 }}>
+      <ArkanoidCardFx store={store} cardId={card.id} />
+      <CardContent sx={{ pb: '4px !important', '&:last-child': { pb: '4px' } }}>
         {showOriginBadge && originDefinition && (
           <Box
             sx={{
@@ -349,10 +372,10 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store, isMergeDropTa
                     {imagePickError}
                   </Typography>
                 )}
-                {imageUrl.trim() && (
+                {safeMediaSrc(imageUrl) && (
                   <Box
                     component="img"
-                    src={resolveMediaUrl(imageUrl.trim())}
+                    src={safeMediaSrc(imageUrl)}
                     alt="preview"
                     sx={{
                       maxWidth: '100%',
@@ -458,10 +481,10 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store, isMergeDropTa
               }}
             />
 
-            {features.mediaEnabled && !isTextHidden && card.imageUrl && !imageLoadError && (
+            {features.mediaEnabled && !isTextHidden && safeMediaSrc(card.imageUrl) && !imageLoadError && (
               <Box
                 component="img"
-                src={resolveMediaUrl(card.imageUrl)}
+                src={safeMediaSrc(card.imageUrl)}
                 alt="card"
                 onError={() => setImageLoadError(true)}
                 sx={{
@@ -474,7 +497,7 @@ const RetroCard: React.FC<Props> = observer(({ card, index, store, isMergeDropTa
                 }}
               />
             )}
-            {features.mediaEnabled && !isTextHidden && card.imageUrl && imageLoadError && (
+            {features.mediaEnabled && !isTextHidden && safeMediaSrc(card.imageUrl) && imageLoadError && (
               <Typography variant="caption" color="error" sx={{ mt: 1, display: 'block' }}>
                 Не удалось загрузить изображение по этой ссылке
               </Typography>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { lazy, Suspense, useState } from 'react';
 import { observer } from 'mobx-react-lite';
 import {
   Box,
@@ -44,14 +44,15 @@ import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import WallpaperIcon from '@mui/icons-material/Wallpaper';
 import { RetroStore } from '../store/RetroStore';
 import { ACCENT_GRADIENT, ACCENT_GRADIENT_HOVER, ACCENT_SHADOW } from './readyButtonStyles';
-import AboutAppDialog from './AboutAppDialog';
-import BackgroundImageDialog from './BackgroundImageDialog';
 import { DislikeIconId, LikeIconId, MAX_VOTE_LIMIT, MIN_VOTE_LIMIT, RoomFeatures } from '../types';
 import {
   DISLIKE_ICON_OPTIONS,
   LIKE_ICON_OPTIONS,
   VoteIcon
 } from './VoteIcon';
+
+const AboutAppDialog = lazy(() => import('./AboutAppDialog'));
+const BackgroundImageDialog = lazy(() => import('./BackgroundImageDialog'));
 
 interface Props {
   store: RetroStore;
@@ -614,13 +615,21 @@ const RoomSettingsSidebar: React.FC<Props> = observer(({ store, open, onClose, t
         </DialogActions>
       </Dialog>
 
-      <AboutAppDialog open={isAboutOpen} onClose={() => setIsAboutOpen(false)} />
-      <BackgroundImageDialog
-        open={isBackgroundDialogOpen}
-        currentValue={features.backgroundImage}
-        onClose={() => setIsBackgroundDialogOpen(false)}
-        onSave={(value) => store.requestRoomBackgroundUpdate(value)}
-      />
+      {isAboutOpen && (
+        <Suspense fallback={null}>
+          <AboutAppDialog open onClose={() => setIsAboutOpen(false)} />
+        </Suspense>
+      )}
+      {isBackgroundDialogOpen && (
+        <Suspense fallback={null}>
+          <BackgroundImageDialog
+            open
+            currentValue={features.backgroundImage}
+            onClose={() => setIsBackgroundDialogOpen(false)}
+            onSave={(value) => store.requestRoomBackgroundUpdate(value)}
+          />
+        </Suspense>
+      )}
 
       <Dialog open={isDeleteDialogOpen} onClose={() => setIsDeleteDialogOpen(false)}>
         <DialogTitle>Удалить комнату?</DialogTitle>

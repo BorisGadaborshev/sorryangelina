@@ -44,13 +44,6 @@ const normalizeVelocity = (vx: number, vy: number, speed: number) => {
   return { vx: nextVx, vy: nextVy };
 };
 
-export const JoystickIcon: React.FC = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-    <circle cx="12" cy="5.5" r="3.15" />
-    <path d="M11 8.4h2V15h-2z" />
-    <path d="M4.6 19.4c.45-2.7 3.15-4.5 7.4-4.5s6.95 1.8 7.4 4.5c.12.58-.35 1.1-.96 1.1H5.56c-.61 0-1.08-.52-.96-1.1z" />
-  </svg>
-);
 
 const ArkanoidGame: React.FC<Props> = observer(({ store }) => {
   const fieldRef = useRef<HTMLDivElement | null>(null);
@@ -105,7 +98,15 @@ const ArkanoidGame: React.FC<Props> = observer(({ store }) => {
     const sim = simRef.current;
     const keys = keysRef.current;
 
+    let brickCache: Brick[] = [];
+    let brickCacheAt = 0;
+    const invalidateBricks = () => {
+      brickCacheAt = 0;
+    };
+
     const bricksInView = (): Brick[] => {
+      const now = performance.now();
+      if (brickCacheAt && now - brickCacheAt < 120) return brickCache;
       const currentField = fieldRef.current;
       if (!currentField) return [];
       const width = currentField.clientWidth;
@@ -115,7 +116,7 @@ const ArkanoidGame: React.FC<Props> = observer(({ store }) => {
       const nodes = currentField.parentElement?.querySelectorAll<HTMLElement>('[data-arkanoid-card]') ?? [];
       nodes.forEach((node) => {
         const id = node.dataset.arkanoidCard;
-        if (!id || (store.arkanoidHits[id] || 0) >= ARKANOID_HITS_TO_BREAK) return;
+        if (!id || (store.arkanoidHits.get(id) || 0) >= ARKANOID_HITS_TO_BREAK) return;
         const rect = node.getBoundingClientRect();
         const left = rect.left - origin.left;
         const top = rect.top - origin.top;
@@ -125,6 +126,8 @@ const ArkanoidGame: React.FC<Props> = observer(({ store }) => {
         if (right - left < 8 || bottom - top < 8) return;
         bricks.push({ id, left, top, right, bottom });
       });
+      brickCache = bricks;
+      brickCacheAt = now;
       return bricks;
     };
 
@@ -189,6 +192,8 @@ const ArkanoidGame: React.FC<Props> = observer(({ store }) => {
 
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('resize', invalidateBricks);
+    window.addEventListener('scroll', invalidateBricks, true);
     field?.addEventListener('pointermove', onPointerMove);
     field?.addEventListener('pointerdown', onPointerDown);
     field?.addEventListener('pointerleave', onPointerLeave);
@@ -300,12 +305,13 @@ const ArkanoidGame: React.FC<Props> = observer(({ store }) => {
             sim.y = fromAbove || !fromBelow ? brick.top - BALL_RADIUS - 0.6 : brick.bottom + BALL_RADIUS + 0.6;
           }
           const hits = store.recordArkanoidHit(brick.id);
+          invalidateBricks();
           sim.speed = Math.min(MAX_SPEED, BASE_SPEED + store.arkanoidCardsBroken * 26);
           const velocity = normalizeVelocity(sim.vx, sim.vy, sim.speed);
           sim.vx = velocity.vx;
           sim.vy = velocity.vy;
           playTone(hits >= ARKANOID_HITS_TO_BREAK ? 880 : 520 + hits * 80, hits >= ARKANOID_HITS_TO_BREAK ? 0.09 : 0.045);
-          const cleared = sim.targets.size > 0 && Array.from(sim.targets).every((id) => (store.arkanoidHits[id] || 0) >= ARKANOID_HITS_TO_BREAK);
+          const cleared = sim.targets.size > 0 && Array.from(sim.targets).every((id) => (store.arkanoidHits.get(id) || 0) >= ARKANOID_HITS_TO_BREAK);
           if (cleared) {
             sim.launched = false;
             setGameStatus('won');
@@ -333,18 +339,33 @@ const ArkanoidGame: React.FC<Props> = observer(({ store }) => {
       placeActors(paddleWidth, paddleTop);
     };
 
+    let paused = document.hidden;
+    const onVisibility = () => {
+      paused = document.hidden;
+      last = performance.now();
+      if (!paused) invalidateBricks();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
     const loop = (now: number) => {
-      const dt = Math.min(0.032, (now - last) / 1000);
-      last = now;
-      step(dt);
+      if (!paused) {
+        const dt = Math.min(0.032, (now - last) / 1000);
+        last = now;
+        step(dt);
+      } else {
+        last = now;
+      }
       frame = window.requestAnimationFrame(loop);
     };
     frame = window.requestAnimationFrame(loop);
 
     return () => {
       window.cancelAnimationFrame(frame);
+      document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('resize', invalidateBricks);
+      window.removeEventListener('scroll', invalidateBricks, true);
       field?.removeEventListener('pointermove', onPointerMove);
       field?.removeEventListener('pointerdown', onPointerDown);
       field?.removeEventListener('pointerleave', onPointerLeave);

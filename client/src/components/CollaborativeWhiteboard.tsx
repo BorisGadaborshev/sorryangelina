@@ -51,14 +51,19 @@ const CollaborativeWhiteboard: React.FC<Props> = observer(({ store, enabled, too
     ctx.restore();
   }, []);
 
+  const drawnCountRef = useRef(0);
+  const strokesRef = useRef(store.whiteboardStrokes);
+  strokesRef.current = store.whiteboardStrokes;
+
   const redraw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
-    store.whiteboardStrokes.forEach((stroke) => drawStroke(ctx, stroke));
-  }, [drawStroke, store.whiteboardStrokes]);
+    strokesRef.current.forEach((stroke) => drawStroke(ctx, stroke));
+    drawnCountRef.current = strokesRef.current.length;
+  }, [drawStroke]);
 
   useEffect(() => {
     resizeCanvas();
@@ -72,8 +77,19 @@ const CollaborativeWhiteboard: React.FC<Props> = observer(({ store, enabled, too
   }, [redraw, resizeCanvas]);
 
   useEffect(() => {
-    redraw();
-  }, [redraw]);
+    const strokes = store.whiteboardStrokes;
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx) return;
+    if (strokes.length < drawnCountRef.current) {
+      redraw();
+      return;
+    }
+    for (let index = drawnCountRef.current; index < strokes.length; index += 1) {
+      drawStroke(ctx, strokes[index]);
+    }
+    drawnCountRef.current = strokes.length;
+  }, [drawStroke, redraw, store.whiteboardStrokes]);
 
   const getPoint = (event: React.MouseEvent<HTMLCanvasElement>): WhiteboardPoint | null => {
     const canvas = canvasRef.current;

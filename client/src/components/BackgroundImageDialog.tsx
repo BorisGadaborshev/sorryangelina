@@ -11,7 +11,7 @@ import {
   Typography
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
-import { fileToImageDataUrl, IMAGE_FILE_ACCEPT, resolveMediaUrl } from '../utils/media';
+import { fileToImageDataUrl, IMAGE_FILE_ACCEPT, safeMediaSrc } from '../utils/media';
 
 interface Props {
   open: boolean;
@@ -136,10 +136,10 @@ const BackgroundImageDialog: React.FC<Props> = ({ open, currentValue, onClose, o
             {error}
           </Typography>
         )}
-        {preview && (
+        {safeMediaSrc(preview) && (
           <Box
             component="img"
-            src={resolveMediaUrl(preview)}
+            src={safeMediaSrc(preview)}
             alt="Предпросмотр фона"
             referrerPolicy="no-referrer"
             onError={() => {

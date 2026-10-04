@@ -7,7 +7,7 @@ import { TeamService } from '../../services/TeamService';
 import { BUILTIN_TEAM_ID } from '../../services/TeamService';
 import { assertNoProfanity, ContentModerationError } from '../../services/ContentModeration';
 import { assertCardSlotAvailable, assertCreationSlotAvailable, UsageLimitError } from '../../services/UsageLimits';
-import { signAuthToken, verifyAuthToken } from '../../config/jwt';
+import { eventAuth } from '../socketAuth';
 import {
   addRoomPresence,
   adjustConnectionCount,
@@ -28,7 +28,7 @@ import {
 
 export function registerSessionHandlers(socket: Socket, session: RealtimeSession): void {
   on(socket, 'restore-session', async ({ roomId, userId, username, token }) => {
-    const auth = verifyAuthToken(token);
+    const auth = eventAuth(socket, token);
     if (!auth) {
       socket.emit('session-expired');
       return;
@@ -92,7 +92,7 @@ export function registerSessionHandlers(socket: Socket, session: RealtimeSession
 
 
   on(socket, 'create-room', async ({ roomId, password, username, token, teamId, template }) => {
-    const auth = verifyAuthToken(token);
+    const auth = eventAuth(socket, token);
     if (!auth) {
       socket.emit('error', 'Unauthorized: token is invalid or expired');
       return;
@@ -176,7 +176,7 @@ export function registerSessionHandlers(socket: Socket, session: RealtimeSession
 
 
   on(socket, 'join-room', async ({ roomId, password, username, token }) => {
-    const auth = verifyAuthToken(token);
+    const auth = eventAuth(socket, token);
     if (!auth) {
       socket.emit('error', 'Unauthorized: token is invalid or expired');
       return;

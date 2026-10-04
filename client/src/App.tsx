@@ -1,9 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { ThemeProvider, createTheme, CssBaseline } from '@mui/material';
+import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { ThemeProvider, createTheme, CssBaseline, Box, CircularProgress } from '@mui/material';
 import { RetroStore } from './store/RetroStore';
-import Login from './components/Login';
-import Board from './components/Board';
 import { observer } from 'mobx-react-lite';
+import ErrorBoundary from './components/ErrorBoundary';
+
+const Login = lazy(() => import('./components/Login'));
+const Board = lazy(() => import('./components/Board'));
 
 type ThemePreference = 'system' | 'light' | 'dark';
 type ThemeMode = 'light' | 'dark';
@@ -45,12 +47,6 @@ const App = observer(() => {
   );
 
   useEffect(() => {
-    return () => {
-      store.socket?.disconnect();
-    };
-  }, []);
-
-  useEffect(() => {
     const media = window.matchMedia('(prefers-color-scheme: dark)');
     const onChange = (event: MediaQueryListEvent) => {
       setSystemPrefersDark(event.matches);
@@ -70,16 +66,22 @@ const App = observer(() => {
     });
   };
 
-  console.log('App render, room state:', store.room);
-
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      {store.hasBoardSession ? (
-        <Board store={store} themeMode={themeMode} onToggleTheme={handleToggleTheme} />
-      ) : (
-        <Login store={store} />
-      )}
+      <ErrorBoundary title="Приложение не удалось показать">
+        <Suspense fallback={(
+          <Box sx={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <CircularProgress />
+          </Box>
+        )}>
+          {store.hasBoardSession ? (
+            <Board store={store} themeMode={themeMode} onToggleTheme={handleToggleTheme} />
+          ) : (
+            <Login store={store} />
+          )}
+        </Suspense>
+      </ErrorBoundary>
     </ThemeProvider>
   );
 });

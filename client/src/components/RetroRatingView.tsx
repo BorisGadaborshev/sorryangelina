@@ -439,29 +439,53 @@ const RetroRatingView: React.FC<Props> = observer(({ store }) => {
   const rating = store.retroRating;
   const isAdmin = store.currentUser?.role === 'admin';
   const canShowResults = isAdmin && rating.votesCount >= rating.totalCount && rating.totalCount > 0;
-  const statSections = buildRetroStatSections({
-    cards: store.cards,
-    users: store.users,
-    chatMessages: store.chatMessages,
-    columnTitles: store.columnTitles,
-    template: store.templateConfig,
-    anonymous: store.roomFeatures.anonymousEnabled,
-    dislikesEnabled: store.roomFeatures.dislikesEnabled,
-    commentsEnabled: store.roomFeatures.commentsEnabled,
-    reactionsEnabled: store.roomFeatures.reactionsEnabled,
-    chatEnabled: store.roomFeatures.chatEnabled,
-    sprintVipName: store.sprintVip.vipUserName,
-    sprintVipVotes: store.sprintVip.voteCount
-  });
-  if (store.roomFeatures.arkanoidEnabled) {
-    const arkanoidSection = buildArkanoidStatSection(store.arkanoidScores, {
-      userName: store.currentUser?.name,
-      score: store.arkanoidBestScore,
-      cardsBroken: store.arkanoidBestCardsBroken,
-      played: store.arkanoidHasPlayed
+  const statSections = useMemo(() => {
+    if (!rating.resultsVisible) return [];
+    const sections = buildRetroStatSections({
+      cards: store.cards,
+      users: store.users,
+      chatMessages: store.chatMessages,
+      columnTitles: store.columnTitles,
+      template: store.templateConfig,
+      anonymous: store.roomFeatures.anonymousEnabled,
+      dislikesEnabled: store.roomFeatures.dislikesEnabled,
+      commentsEnabled: store.roomFeatures.commentsEnabled,
+      reactionsEnabled: store.roomFeatures.reactionsEnabled,
+      chatEnabled: store.roomFeatures.chatEnabled,
+      sprintVipName: store.sprintVip.vipUserName,
+      sprintVipVotes: store.sprintVip.voteCount
     });
-    if (arkanoidSection) statSections.push(arkanoidSection);
-  }
+    if (store.roomFeatures.arkanoidEnabled) {
+      const arkanoidSection = buildArkanoidStatSection(store.arkanoidScores, {
+        userName: store.currentUser?.name,
+        score: store.arkanoidBestScore,
+        cardsBroken: store.arkanoidBestCardsBroken,
+        played: store.arkanoidHasPlayed
+      });
+      if (arkanoidSection) sections.push(arkanoidSection);
+    }
+    return sections;
+  }, [
+    rating.resultsVisible,
+    store.cards,
+    store.users,
+    store.chatMessages,
+    store.columnTitles,
+    store.templateConfig,
+    store.roomFeatures.anonymousEnabled,
+    store.roomFeatures.dislikesEnabled,
+    store.roomFeatures.commentsEnabled,
+    store.roomFeatures.reactionsEnabled,
+    store.roomFeatures.chatEnabled,
+    store.roomFeatures.arkanoidEnabled,
+    store.sprintVip.vipUserName,
+    store.sprintVip.voteCount,
+    store.arkanoidScores,
+    store.arkanoidBestScore,
+    store.arkanoidBestCardsBroken,
+    store.arkanoidHasPlayed,
+    store.currentUser?.name
+  ]);
   const hasCards = store.cards.length > 0;
 
   const handleSubmit = () => {

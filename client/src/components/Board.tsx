@@ -1,12 +1,11 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { observer } from 'mobx-react-lite';
-import { Box, AppBar, Toolbar, Typography, Button, CircularProgress, IconButton, Tooltip, Tabs, Tab, useMediaQuery, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, FormControl, Select, MenuItem, Menu, Divider, Snackbar, Alert } from '@mui/material';
+import { Box, AppBar, Toolbar, Typography, Button, CircularProgress, IconButton, Tooltip, Tabs, Tab, useMediaQuery, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, Menu, MenuItem, Snackbar, Alert, TextField } from '@mui/material';
 import { DragDropContext, DropResult } from '@hello-pangea/dnd';
 import SettingsIcon from '@mui/icons-material/Settings';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
-import MusicNoteIcon from '@mui/icons-material/MusicNote';
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import PersonIcon from '@mui/icons-material/Person';
@@ -21,17 +20,22 @@ import AccountTreeRoundedIcon from '@mui/icons-material/AccountTreeRounded';
 import RetroColumn from './RetroColumn';
 import UserList from './UserList';
 import { RetroStore } from '../store/RetroStore';
-import DiscussionView from './DiscussionView';
 import ChatTerminal from './ChatTerminal';
-import CollaborativeWhiteboard from './CollaborativeWhiteboard';
-import ArkanoidGame, { JoystickIcon } from './ArkanoidGame';
-import RetroRatingView from './RetroRatingView';
-import RoadmapView from './RoadmapView';
+import JoystickIcon from './JoystickIcon';
 import RoomSettingsSidebar from './RoomSettingsSidebar';
-import MusicPlayerWidget from './MusicPlayerWidget';
+import ErrorBoundary from './ErrorBoundary';
+import { ConnectionStatusLabel, PhaseTimerLabel, PhaseTimerMenuPanel, PhaseTimerWatcher, TimerMusicSlot } from './PhaseTimer';
 import { Mood, Phase, RetroTemplateId } from '../types';
 import { toCssBackgroundUrl } from '../utils/media';
 import { getReadyButtonSx } from './readyButtonStyles';
+import { readStoredSession } from '../services/session';
+import { mapServerError } from '../utils/errors';
+
+const DiscussionView = lazy(() => import('./DiscussionView'));
+const CollaborativeWhiteboard = lazy(() => import('./CollaborativeWhiteboard'));
+const ArkanoidGame = lazy(() => import('./ArkanoidGame'));
+const RetroRatingView = lazy(() => import('./RetroRatingView'));
+const RoadmapView = lazy(() => import('./RoadmapView'));
 
 interface Props {
   store: RetroStore;
@@ -63,6 +67,42 @@ const PHASE_OPTIONS: Array<{
   { value: 'roadmap', label: 'Дорожная карта', shortLabel: 'Карта', icon: AccountTreeRoundedIcon },
   { value: 'rating', label: 'Оценка ретро', shortLabel: 'Оценка', icon: AutoAwesomeRoundedIcon },
 ];
+
+const RoomRejoinDialog: React.FC<{
+  open: boolean;
+  password: string;
+  error: string | null;
+  busy: boolean;
+  onPasswordChange: (value: string) => void;
+  onSubmit: () => void;
+  onLeave: () => void;
+}> = ({ open, password, error, busy, onPasswordChange, onSubmit, onLeave }) => (
+  <Dialog open={open} maxWidth="xs" fullWidth>
+    <DialogTitle>Нужен пароль комнаты</DialogTitle>
+    <DialogContent>
+      <DialogContentText sx={{ mb: 2 }}>
+        Сессия комнаты истекла. Введите пароль, чтобы вернуться на доску.
+      </DialogContentText>
+      <TextField
+        autoFocus
+        fullWidth
+        type="password"
+        label="Пароль"
+        value={password}
+        onChange={(event) => onPasswordChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') onSubmit();
+        }}
+        error={Boolean(error)}
+        helperText={error || ' '}
+      />
+    </DialogContent>
+    <DialogActions>
+      <Button onClick={onLeave} disabled={busy}>Выйти</Button>
+      <Button variant="contained" onClick={onSubmit} disabled={busy}>Войти</Button>
+    </DialogActions>
+  </Dialog>
+);
 
 const getNextPhase = (phase: Phase, templateId: RetroTemplateId, retroRatingEnabled: boolean): Phase | null => {
   if (phase === 'creation') return 'voting';
@@ -143,9 +183,10 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   const [selectedMood, setSelectedMood] = useState<Mood | null>(null);
   const [isAllReadyModalOpen, setIsAllReadyModalOpen] = useState(false);
   const allReadyDismissedRef = useRef(false);
-  const previousTimerRef = useRef({ running: false, remainingSeconds: 0 });
-  const wasTimerRunningRef = useRef(false);
   const appliedSavedMoodRef = useRef<string | null>(null);
+  const [rejoinPassword, setRejoinPassword] = useState('');
+  const [rejoinError, setRejoinError] = useState<string | null>(null);
+  const [isRejoining, setIsRejoining] = useState(false);
   const [isMusicWidgetOpen, setIsMusicWidgetOpen] = useState(false);
   const [timerMusicVolume, setTimerMusicVolume] = useState(() => {
     const saved = localStorage.getItem('timerMusicVolume');
@@ -207,9 +248,13 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
     return translations[phase];
   };
 
-  const handleReadyStateChange = (isReady: boolean) => {
+  const handleReadyStateChange = useCallback((isReady: boolean) => {
     store.updateUserReadyState(isReady);
-  };
+  }, [store]);
+
+  const openTimerMusic = useCallback(() => {
+    setIsMusicWidgetOpen(true);
+  }, []);
 
   const playTimerEndSignal = useCallback(() => {
     const AudioContextConstructor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
@@ -232,12 +277,6 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
     oscillator.stop(audioContext.currentTime + 0.7);
     oscillator.onended = () => audioContext.close();
   }, [timerMusicVolume]);
-
-  const formatDuration = (seconds: number): string => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-  };
 
   const isTimerMenuOpen = Boolean(timerAnchorEl);
   const features = store.roomFeatures;
@@ -289,28 +328,10 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   }, [timerMusicVolume]);
 
   useEffect(() => {
-    if (store.phaseTimer.running && !wasTimerRunningRef.current && canPlayTimerMusic) {
-      setIsMusicWidgetOpen(true);
-    }
-    wasTimerRunningRef.current = store.phaseTimer.running;
-  }, [store.phaseTimer.running, canPlayTimerMusic]);
-
-  useEffect(() => {
     if (!canUseChat && isChatVisible) {
       setIsChatVisible(false);
     }
   }, [canUseChat, isChatVisible]);
-
-  useEffect(() => {
-    const previous = previousTimerRef.current;
-    if (previous.running && previous.remainingSeconds <= 1 && !store.phaseTimer.running && store.phaseTimer.remainingSeconds === 0) {
-      playTimerEndSignal();
-    }
-    previousTimerRef.current = {
-      running: store.phaseTimer.running,
-      remainingSeconds: store.phaseTimer.remainingSeconds
-    };
-  }, [store.phaseTimer.running, store.phaseTimer.remainingSeconds, playTimerEndSignal]);
 
   useEffect(() => {
     if (!canDrawOnBoard && isDrawEnabled) {
@@ -352,7 +373,42 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
     setIsMoodDialogOpen(false);
   };
 
+  const submitRejoin = async () => {
+    const session = readStoredSession();
+    const token = store.authProfile?.token;
+    const username = store.authProfile?.name;
+    const roomId = store.room?.id || session?.roomId;
+    if (!roomId || !token || !username) return;
+    setIsRejoining(true);
+    setRejoinError(null);
+    try {
+      await store.socketService?.joinRoom(roomId, rejoinPassword, username, token);
+      setRejoinPassword('');
+      store.setRejoinRequired(false);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Не удалось войти в комнату';
+      setRejoinError(mapServerError(message));
+    } finally {
+      setIsRejoining(false);
+    }
+  };
+
+  const rejoinDialog = (
+    <RoomRejoinDialog
+      open={store.rejoinRequired}
+      password={rejoinPassword}
+      error={rejoinError}
+      busy={isRejoining}
+      onPasswordChange={setRejoinPassword}
+      onSubmit={() => { void submitRejoin(); }}
+      onLeave={() => store.socketService?.leaveRoom()}
+    />
+  );
+
   if (!store.canRenderBoard) {
+    if (store.rejoinRequired) {
+      return rejoinDialog;
+    }
     if (!store.hasBoardSession && !store.hasCachedBoardState) {
       return (
         <Box sx={{
@@ -404,7 +460,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
         }}>
           {store.templateConfig.columns.map((column, columnIndex) => (
             <RetroColumn
-              key={`${column.title}-${columnIndex}`}
+              key={columnIndex}
               columnIndex={columnIndex}
               store={store}
               enableDragDrop={store.canUseCardDragDrop}
@@ -423,18 +479,29 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   };
 
   const renderContent = () => {
+    let phaseView: React.ReactNode;
     switch (store.phase) {
       case 'discussion':
-        return <DiscussionView store={store} />;
+        phaseView = <DiscussionView store={store} />;
+        break;
       case 'roadmap':
-        return <RoadmapView store={store} />;
+        phaseView = <RoadmapView store={store} />;
+        break;
       case 'rating':
-        return <RetroRatingView store={store} />;
+        phaseView = <RetroRatingView store={store} />;
+        break;
       case 'creation':
       case 'voting':
       default:
-        return renderColumns();
+        phaseView = renderColumns();
     }
+    return (
+      <ErrorBoundary title="Доску не удалось показать">
+        <Suspense fallback={<Box sx={{ display: 'flex', justifyContent: 'center', pt: 4 }}><CircularProgress size={28} /></Box>}>
+          {phaseView}
+        </Suspense>
+      </ErrorBoundary>
+    );
   };
 
   const leaveRoomButton = (
@@ -452,7 +519,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
 
   return (
     <Box sx={{ height: '100vh', maxHeight: '100vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-      {store.isReconnecting && !store.cards.length && (
+      {store.isReconnecting && (
         <Box sx={{
           px: 2,
           py: 0.75,
@@ -474,11 +541,10 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
           >
             {isCompactDesktop && !isMobile ? store.room?.id : `Комната: ${store.room?.id}`}
           </Typography>
+          <ConnectionStatusLabel store={store} />
           {isCompactDesktop && !isMobile && (
             <Box sx={{ display: 'flex', alignItems: 'center', mr: 1 }}>
-              <Typography variant="caption" sx={{ mr: 0.5, color: store.phaseTimer.running ? 'warning.main' : 'text.secondary', whiteSpace: 'nowrap' }}>
-                {formatDuration(store.phaseTimer.remainingSeconds)}
-              </Typography>
+              <PhaseTimerLabel store={store} />
               <Tooltip title="Таймер и музыка">
                 <IconButton size="small" onClick={(event) => setTimerAnchorEl(event.currentTarget)}>
                   <AccessTimeIcon fontSize="small" />
@@ -492,9 +558,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
 
             const timerControls = (
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, whiteSpace: 'nowrap' }}>
-                <Typography variant="caption" sx={{ color: store.phaseTimer.running ? 'warning.light' : 'text.secondary', whiteSpace: 'nowrap' }}>
-                  Таймер: {formatDuration(store.phaseTimer.remainingSeconds)}
-                </Typography>
+                <PhaseTimerLabel store={store} prefix="Таймер: " />
                 <Tooltip title="Таймер и музыка">
                   <IconButton size="small" onClick={(event) => setTimerAnchorEl(event.currentTarget)}>
                     <AccessTimeIcon fontSize="small" />
@@ -683,80 +747,30 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
             anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
             transformOrigin={{ vertical: 'top', horizontal: 'right' }}
           >
-            <Box sx={{ p: 1.5, minWidth: 260 }}>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                Осталось: {formatDuration(store.phaseTimer.remainingSeconds)}
-              </Typography>
-
-              {canPlayTimerMusic && (
-              <Box sx={{ mb: 1.5 }}>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  fullWidth
-                  startIcon={<MusicNoteIcon fontSize="small" />}
-                  onClick={() => {
-                    setIsMusicWidgetOpen(true);
-                    setTimerAnchorEl(null);
-                  }}
-                >
-                  Плеер музыки
-                </Button>
-              </Box>
-              )}
-
-              {store.currentUser?.role === 'admin' && (
-                <>
-                  <Divider sx={{ my: 1.5 }} />
-                  <FormControl size="small" fullWidth sx={{ mb: 1 }}>
-                    <Select
-                      value={selectedTimerSeconds}
-                      onChange={(event) => setSelectedTimerSeconds(Number(event.target.value))}
-                      sx={{ height: 32 }}
-                    >
-                      <MenuItem value={60}>1 минута</MenuItem>
-                      <MenuItem value={180}>3 минуты</MenuItem>
-                      <MenuItem value={300}>5 минут</MenuItem>
-                      <MenuItem value={600}>10 минут</MenuItem>
-                      <MenuItem value={900}>15 минут</MenuItem>
-                    </Select>
-                  </FormControl>
-                  <Box sx={{ display: 'flex', gap: 1 }}>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      fullWidth
-                      onClick={() => {
-                        store.socketService?.setPhaseTimer(selectedTimerSeconds);
-                        setTimerAnchorEl(null);
-                      }}
-                    >
-                      {store.phaseTimer.running ? 'Перезапуск' : 'Старт'}
-                    </Button>
-                    <Button
-                      size="small"
-                      color="error"
-                      fullWidth
-                      onClick={() => {
-                        store.socketService?.resetPhaseTimer();
-                        setTimerAnchorEl(null);
-                      }}
-                      disabled={!store.phaseTimer.running}
-                    >
-                      Сброс
-                    </Button>
-                  </Box>
-                </>
-              )}
-            </Box>
+            <PhaseTimerMenuPanel
+              store={store}
+              canPlayTimerMusic={canPlayTimerMusic}
+              selectedTimerSeconds={selectedTimerSeconds}
+              onSelectTimerSeconds={setSelectedTimerSeconds}
+              onOpenMusic={() => {
+                setIsMusicWidgetOpen(true);
+                setTimerAnchorEl(null);
+              }}
+              onClose={() => setTimerAnchorEl(null)}
+            />
           </Menu>
         </Toolbar>
       </AppBar>
-      <MusicPlayerWidget
+      <PhaseTimerWatcher
+        store={store}
+        canPlayTimerMusic={canPlayTimerMusic}
+        onTimerStart={openTimerMusic}
+        onTimerEnd={playTimerEndSignal}
+      />
+      <TimerMusicSlot
+        store={store}
         open={isMusicWidgetOpen}
         enabled={canPlayTimerMusic}
-        timerRunning={store.phaseTimer.running}
-        remainingLabel={formatDuration(store.phaseTimer.remainingSeconds)}
         volume={timerMusicVolume}
         onVolumeChange={setTimerMusicVolume}
         onClose={() => setIsMusicWidgetOpen(false)}
@@ -787,7 +801,6 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
               <Box sx={{ flexGrow: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
                 <UserList 
                   users={store.users}
-                  onlineUsers={store.users.map(u => u.id)}
                   currentUserId={currentUser.id}
                   currentPhase={store.phase}
                   onReadyStateChange={handleReadyStateChange}
@@ -825,7 +838,6 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
               <Box sx={{ flexGrow: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
                 <UserList 
                   users={store.users}
-                  onlineUsers={store.users.map(u => u.id)}
                   currentUserId={currentUser.id}
                   currentPhase={store.phase}
                   onReadyStateChange={handleReadyStateChange}
@@ -947,16 +959,24 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
               <Box sx={{ height: '100%', overflow: 'auto', overflowX: 'hidden' }}>
                 {renderContent()}
               </Box>
-              {canDrawOnBoard && (
-                <CollaborativeWhiteboard
-                  store={store}
-                  enabled={isDrawEnabled && !isArkanoidEnabled}
-                  tool={whiteboardTool}
-                  color={whiteboardColor}
-                />
+              {canDrawOnBoard && isDrawEnabled && !isArkanoidEnabled && (
+                <ErrorBoundary title="Доску для рисования не удалось показать">
+                  <Suspense fallback={null}>
+                    <CollaborativeWhiteboard
+                      store={store}
+                      enabled
+                      tool={whiteboardTool}
+                      color={whiteboardColor}
+                    />
+                  </Suspense>
+                </ErrorBoundary>
               )}
               {isArkanoidEnabled && canPlayArkanoid && (
-                <ArkanoidGame store={store} />
+                <ErrorBoundary title="Игру не удалось показать">
+                  <Suspense fallback={null}>
+                    <ArkanoidGame store={store} />
+                  </Suspense>
+                </ErrorBoundary>
               )}
             </Box>
             {canUseChat && isChatVisible && (
@@ -1114,6 +1134,8 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
           </Button>
         </DialogActions>
       </Dialog>
+
+      {rejoinDialog}
     </Box>
   );
 });

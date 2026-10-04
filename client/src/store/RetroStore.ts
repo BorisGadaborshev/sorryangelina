@@ -1,7 +1,9 @@
-import { makeAutoObservable, runInAction } from 'mobx';
+import { computed, IComputedValue, makeAutoObservable, runInAction } from 'mobx';
 import { ArkanoidScoreEntry, AuthProfile, Card, CardComment, CardReaction, ChatMessage, ColumnColorId, ColumnKind, DEFAULT_COLUMN_COLORS, DEFAULT_COLUMN_TITLES, DEFAULT_ROOM_FEATURES, DiscussionBurst, DiscussionHand, DiscussionNavigationState, FacilitatorAnnouncement, Mood, Phase, PhaseTimerState, RetroRatingState, RetroTemplate, RetroTemplateId, Room, RoomFeatures, RoomState, SprintVipState, Team, User, WhiteboardStroke, getCardTypeByColumn, getColumnCount, getRetroTemplate, getTemplateColumn, normalizeColumnColors } from '../types';
 import { Socket } from 'socket.io-client';
 import { SocketService } from '../services/socket';
+import { clearStoredSession, readStoredSession, writeTabSession } from '../services/session';
+import { log } from '../utils/logger';
 
 const BOARD_STATE_KEY = 'retroBoardState';
 const ARKANOID_STATS_KEY_PREFIX = 'arkanoidBest:';
@@ -24,6 +26,10 @@ interface PersistedBoardState {
   currentUser: User | null;
 }
 
+export type ConnectionStatus = 'online' | 'reconnecting' | 'offline';
+
+const EMPTY_COLUMN_CARDS: Card[] = [];
+
 export class RetroStore {
   socket: Socket | null = null;
   socketService: SocketService | null = null;
@@ -36,6 +42,8 @@ export class RetroStore {
   users: User[] = [];
   error: string | null = null;
   isReconnecting = false;
+  connectionStatus: ConnectionStatus = 'online';
+  rejoinRequired = false;
   voteError: { cardId: string; message: string } | null = null;
   phaseTimer: PhaseTimerState = { durationSeconds: 0, remainingSeconds: 0, running: false };
   chatMessages: ChatMessage[] = [];
@@ -57,7 +65,7 @@ export class RetroStore {
     resultsVisible: false
   };
   arkanoidActive = false;
-  arkanoidHits: Record<string, number> = {};
+  arkanoidHits = new Map<string, number>();
   arkanoidScore = 0;
   arkanoidCardsBroken = 0;
   arkanoidBestScore = 0;
@@ -65,19 +73,24 @@ export class RetroStore {
   arkanoidHasPlayed = false;
   arkanoidScores: ArkanoidScoreEntry[] = [];
   private arkanoidStatsKey: string | null = null;
+  private boardPersistTimer: number | null = null;
+  private columnCardsCache = new Map<number, IComputedValue<Card[]>>();
 
   constructor() {
-    makeAutoObservable(this, {}, { autoBind: true });
-    this.socketService = new SocketService(this);
+    makeAutoObservable(this, {
+      columnCardsCache: false,
+      boardPersistTimer: false,
+      cardsInColumn: false
+    } as object, { autoBind: true });
     this.tryRestoreAuth();
     this.tryRestoreSelectedTeam();
     this.tryRestoreBoardState();
-    this.tryRestoreSession();
+    this.socketService = new SocketService(this);
 
     window.addEventListener('beforeunload', () => {
       if (this.currentUser && this.room) {
         this.saveSession(this.currentUser.id, this.room.id, this.currentUser.name);
-        this.persistBoardState();
+        this.flushBoardState();
       }
     });
   }
@@ -85,7 +98,7 @@ export class RetroStore {
   get hasBoardSession(): boolean {
     if (this.room) return true;
     if (!this.authProfile) return false;
-    return Boolean(localStorage.getItem('roomId') && localStorage.getItem('username'));
+    return Boolean(readStoredSession());
   }
 
   get canRenderBoard(): boolean {
@@ -104,26 +117,56 @@ export class RetroStore {
     });
   }
 
+  setConnectionStatus(status: ConnectionStatus) {
+    runInAction(() => {
+      this.connectionStatus = status;
+    });
+  }
+
+  setRejoinRequired(value: boolean) {
+    runInAction(() => {
+      this.rejoinRequired = value;
+    });
+  }
+
   persistBoardState() {
-    const roomId = this.room?.id ?? localStorage.getItem('roomId');
+    if (this.boardPersistTimer != null) return;
+    this.boardPersistTimer = window.setTimeout(() => {
+      this.boardPersistTimer = null;
+      this.flushBoardState();
+    }, 1500);
+  }
+
+  flushBoardState() {
+    if (this.boardPersistTimer != null) {
+      window.clearTimeout(this.boardPersistTimer);
+      this.boardPersistTimer = null;
+    }
+    const roomId = this.room?.id ?? readStoredSession()?.roomId;
     if (!roomId || !this.room) return;
 
     const snapshot: PersistedBoardState = {
       roomId,
       room: this.room,
       phase: this.phase,
-      cards: this.cards,
+      cards: this.cards.map((card) => (
+        card.imageUrl?.startsWith('data:') ? { ...card, imageUrl: undefined } : card
+      )),
       users: this.users,
       columnTitles: this.columnTitles,
       columnColors: this.columnColors,
       template: this.template,
-      roomFeatures: this.roomFeatures,
+      roomFeatures: {
+        ...this.roomFeatures,
+        backgroundImage: this.roomFeatures.backgroundImage?.startsWith('data:') ? '' : this.roomFeatures.backgroundImage
+      },
       currentUser: this.currentUser,
     };
 
-    sessionStorage.setItem(BOARD_STATE_KEY, JSON.stringify(snapshot));
+    const serialized = JSON.stringify(snapshot);
+    sessionStorage.setItem(BOARD_STATE_KEY, serialized);
     try {
-      localStorage.setItem(BOARD_STATE_KEY, JSON.stringify(snapshot));
+      localStorage.setItem(BOARD_STATE_KEY, serialized);
     } catch {
       // Ignore quota errors for large boards.
     }
@@ -138,7 +181,7 @@ export class RetroStore {
   }
 
   private tryRestoreBoardState() {
-    const roomId = localStorage.getItem('roomId');
+    const roomId = readStoredSession()?.roomId ?? null;
     const raw = sessionStorage.getItem(BOARD_STATE_KEY) ?? localStorage.getItem(BOARD_STATE_KEY);
     if (!roomId || !raw || this.room) return;
 
@@ -170,15 +213,11 @@ export class RetroStore {
   }
 
   private saveSession(userId: string, roomId: string, username: string) {
-    localStorage.setItem('userId', userId);
-    localStorage.setItem('roomId', roomId);
-    localStorage.setItem('username', username);
+    writeTabSession({ userId, roomId, username });
   }
 
   clearSession() {
-    localStorage.removeItem('userId');
-    localStorage.removeItem('roomId');
-    localStorage.removeItem('username');
+    clearStoredSession();
     this.clearBoardState();
   }
 
@@ -246,39 +285,15 @@ export class RetroStore {
     }
   }
 
-  private async tryRestoreSession() {
-    const userId = localStorage.getItem('userId');
-    const roomId = localStorage.getItem('roomId');
-    const username = localStorage.getItem('username');
-
-    if (userId && roomId && username && this.socketService) {
-      const hasCachedBoard = this.canRenderBoard;
-      try {
-        if (!hasCachedBoard) {
-          this.setReconnecting(true);
-        }
-        console.log('Attempting to restore session with:', { userId, roomId, username });
-        await this.socketService.restoreSession(roomId, userId, username, this.authProfile?.token);
-        this.setReconnecting(false);
-      } catch (error) {
-        console.error('Failed to restore session:', error);
-        if (!this.room) {
-          this.clearSession();
-          this.setReconnecting(false);
-        }
-      }
-    }
-  }
-
   setSocket(socket: Socket) {
-    console.log('Setting socket:', socket.id);
+    log.debug('Setting socket:', socket.id);
     runInAction(() => {
       this.socket = socket;
     });
   }
 
   setError(error: string | null) {
-    console.log('Setting error:', error);
+    log.debug('Setting error:', error);
     runInAction(() => {
       this.error = error;
     });
@@ -355,7 +370,7 @@ export class RetroStore {
         return;
       }
 
-      const roomId = this.room?.id ?? localStorage.getItem('roomId');
+      const roomId = this.room?.id ?? readStoredSession()?.roomId;
       const alreadySeen = roomId
         ? this.getSeenFacilitatorSelectedAt(roomId) === announcement.selectedAt
         : false;
@@ -365,7 +380,7 @@ export class RetroStore {
 
   dismissFacilitatorDialog() {
     const announcement = this.facilitatorAnnouncement;
-    const roomId = this.room?.id ?? localStorage.getItem('roomId');
+    const roomId = this.room?.id ?? readStoredSession()?.roomId;
     if (announcement && roomId) {
       this.markFacilitatorSeen(roomId, announcement.selectedAt);
     }
@@ -413,6 +428,7 @@ export class RetroStore {
   }
 
   clearAuthProfile() {
+    this.setRejoinRequired(false);
     this.setAuthProfile(null);
     this.setSelectedTeam(null);
     this.setRoom(null);
@@ -431,17 +447,17 @@ export class RetroStore {
   }
 
   setCurrentUser(user: User | null) {
-    console.log('Setting current user:', user);
+    log.debug('Setting current user:', user);
     runInAction(() => {
       if (user && (!this.currentUser || this.currentUser.role !== user.role)) {
-        console.log('Updating user with role:', user.role);
+        log.debug('Updating user with role:', user.role);
       }
       this.currentUser = user;
     });
   }
 
   setRoom(room: Room | null) {
-    console.log('Setting room:', room);
+    log.debug('Setting room:', room);
     const previousRoomId = this.room?.id;
     runInAction(() => {
       this.room = room;
@@ -455,36 +471,19 @@ export class RetroStore {
         this.roomFeatures = room.features
           ? { ...DEFAULT_ROOM_FEATURES, ...room.features }
           : { ...DEFAULT_ROOM_FEATURES };
-        const savedUsername = localStorage.getItem('username');
-        console.log('Current users in room:', room.users.map(u => ({ name: u.name, role: u.role })));
-        
-        if (savedUsername) {
-          // Находим пользователя по имени и сохраняем его полностью (включая роль)
-          const foundUser = room.users.find(u => u.name === savedUsername);
-          if (foundUser) {
-            console.log('Found user by saved username:', { name: foundUser.name, role: foundUser.role });
-            this.currentUser = foundUser;
-            // Сохраняем текущую сессию
-            this.saveSession(foundUser.id, room.id, foundUser.name);
-            console.log('Restored user session:', this.currentUser);
-          }
-        }
-
-        // Если не нашли по сохраненным данным, это новое подключение
-        if (!this.currentUser) {
-          const foundUser = room.users.find(u => u.id === this.socket?.id);
-          if (foundUser) {
-            console.log('Found user by socket ID:', { name: foundUser.name, role: foundUser.role });
-            this.currentUser = foundUser;
-            this.saveSession(foundUser.id, room.id, foundUser.name);
-            console.log('New connection, saved session for:', this.currentUser);
-          }
+        const authName = this.authProfile?.name;
+        const foundUser = (this.currentUser && room.users.find((user) => user.id === this.currentUser?.id))
+          || (authName ? room.users.find((user) => user.name === authName) : undefined)
+          || room.users.find((user) => user.id === this.socket?.id);
+        if (foundUser) {
+          this.currentUser = foundUser;
+          this.saveSession(foundUser.id, room.id, foundUser.name);
         }
         this.persistBoardState();
         if (previousRoomId && previousRoomId !== room.id) {
           this.arkanoidStatsKey = null;
           this.arkanoidActive = false;
-          this.arkanoidHits = {};
+          this.arkanoidHits.clear();
           this.arkanoidScore = 0;
           this.arkanoidCardsBroken = 0;
           this.arkanoidBestScore = 0;
@@ -513,7 +512,9 @@ export class RetroStore {
         this.retroRating = { hasVoted: false, votesCount: 0, totalCount: 0, resultsVisible: false };
         this.arkanoidStatsKey = null;
         this.arkanoidActive = false;
-        this.arkanoidHits = {};
+        this.arkanoidHits.clear();
+        this.rejoinRequired = false;
+        this.connectionStatus = 'online';
         this.arkanoidScore = 0;
         this.arkanoidCardsBroken = 0;
         this.arkanoidBestScore = 0;
@@ -521,13 +522,13 @@ export class RetroStore {
         this.arkanoidHasPlayed = false;
         this.arkanoidScores = [];
         this.isReconnecting = false;
-        console.log('Cleared room and session');
+        log.debug('Cleared room and session');
       }
     });
   }
 
   setPhase(phase: Phase) {
-    console.log('Setting phase:', phase);
+    log.debug('Setting phase:', phase);
     runInAction(() => {
       this.phase = phase;
       if (phase !== 'discussion') {
@@ -541,7 +542,7 @@ export class RetroStore {
   }
 
   setCards(cards: Card[]) {
-    console.log('Setting cards:', cards);
+    log.debug('Setting cards:', cards);
     runInAction(() => {
       this.cards = cards;
     });
@@ -560,7 +561,7 @@ export class RetroStore {
   }
 
   updateState(state: RoomState) {
-    console.log('Updating state:', state);
+    log.debug('Updating state:', state);
     runInAction(() => {
       this.cards = state.cards;
       this.phase = state.phase;
@@ -583,14 +584,14 @@ export class RetroStore {
   }
 
   addCard(card: Card) {
-    console.log('Adding card:', card);
+    log.debug('Adding card:', card);
     runInAction(() => {
       this.cards.push(card);
     });
   }
 
   updateCard(updatedCard: Card) {
-    console.log('Updating card:', updatedCard);
+    log.debug('Updating card:', updatedCard);
     runInAction(() => {
       const index = this.cards.findIndex(c => c.id === updatedCard.id);
       if (index !== -1) {
@@ -634,7 +635,7 @@ export class RetroStore {
   }
 
   deleteCard(cardId: string) {
-    console.log('Deleting card:', cardId);
+    log.debug('Deleting card:', cardId);
     runInAction(() => {
       this.cards = this.cards.filter(c => c.id !== cardId);
     });
@@ -648,7 +649,7 @@ export class RetroStore {
   }
 
   moveCard(cardId: string, column: number, originColumn?: number) {
-    console.log('Moving card:', cardId, 'to column:', column);
+    log.debug('Moving card:', cardId, 'to column:', column);
     runInAction(() => {
       const card = this.cards.find(c => c.id === cardId);
       if (!card) return;
@@ -665,7 +666,7 @@ export class RetroStore {
   }
 
   updateVotes(cardId: string, likes: string[], dislikes: string[]) {
-    console.log('Updating votes:', { cardId, likes, dislikes });
+    log.debug('Updating votes:', { cardId, likes, dislikes });
     runInAction(() => {
       const card = this.cards.find(c => c.id === cardId);
       if (card) {
@@ -676,7 +677,7 @@ export class RetroStore {
   }
 
   addUser(user: User) {
-    console.log('Adding user:', user);
+    log.debug('Adding user:', user);
     runInAction(() => {
       const existingIndex = this.users.findIndex(
         (currentUser) => currentUser.id === user.id || currentUser.name === user.name
@@ -691,14 +692,26 @@ export class RetroStore {
   }
 
   removeUser(userId: string) {
-    console.log('Removing user:', userId);
+    log.debug('Removing user:', userId);
     runInAction(() => {
       this.users = this.users.filter(u => u.id !== userId);
     });
   }
 
   get isOwner() {
-    return this.currentUser?.id === this.room?.owner;
+    return Boolean(this.currentUser?.name && this.currentUser.name === this.room?.owner);
+  }
+
+  cardsInColumn(columnIndex: number): Card[] {
+    let entry = this.columnCardsCache.get(columnIndex);
+    if (!entry) {
+      entry = computed(() => {
+        const columnCards = this.cards.filter((card) => card.column === columnIndex);
+        return columnCards.length ? columnCards : EMPTY_COLUMN_CARDS;
+      });
+      this.columnCardsCache.set(columnIndex, entry);
+    }
+    return entry.get();
   }
 
   get sortedCards() {
@@ -710,13 +723,7 @@ export class RetroStore {
   }
 
   get isAdmin(): boolean {
-    const isAdmin = this.currentUser?.role === 'admin';
-    console.log('Checking isAdmin:', { 
-      currentUser: this.currentUser?.name,
-      role: this.currentUser?.role,
-      isAdmin 
-    });
-    return isAdmin;
+    return this.currentUser?.role === 'admin';
   }
 
   canEditCard(card: Card): boolean {
@@ -950,7 +957,7 @@ export class RetroStore {
     this.ensureArkanoidStats();
     this.arkanoidActive = true;
     this.arkanoidHasPlayed = true;
-    this.arkanoidHits = {};
+    this.arkanoidHits.clear();
     this.arkanoidScore = 0;
     this.arkanoidCardsBroken = 0;
     const sharedScore = this.arkanoidBestScore > 0 ? this.arkanoidBestScore : 0;
@@ -960,23 +967,23 @@ export class RetroStore {
 
   restartArkanoidRound() {
     this.arkanoidActive = true;
-    this.arkanoidHits = {};
+    this.arkanoidHits.clear();
     this.arkanoidScore = 0;
     this.arkanoidCardsBroken = 0;
   }
 
   finishArkanoidRound() {
     this.arkanoidActive = false;
-    this.arkanoidHits = {};
+    this.arkanoidHits.clear();
     this.arkanoidScore = 0;
     this.arkanoidCardsBroken = 0;
   }
 
   recordArkanoidHit(cardId: string): number {
-    const previous = this.arkanoidHits[cardId] || 0;
+    const previous = this.arkanoidHits.get(cardId) || 0;
     if (previous >= ARKANOID_HITS_TO_BREAK) return previous;
     const next = previous + 1;
-    this.arkanoidHits = { ...this.arkanoidHits, [cardId]: next };
+    this.arkanoidHits.set(cardId, next);
     this.arkanoidScore += ARKANOID_POINTS_PER_HIT;
     if (next >= ARKANOID_HITS_TO_BREAK) {
       this.arkanoidCardsBroken += 1;
@@ -1026,7 +1033,7 @@ export class RetroStore {
     this.persistBoardState();
 
     if (this.socketService) {
-      console.log('Updating user ready state:', isReady);
+      log.debug('Updating user ready state:', isReady);
       void this.socketService.updateReadyState(isReady);
     }
   }

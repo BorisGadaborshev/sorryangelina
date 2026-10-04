@@ -5,7 +5,7 @@ import { useTheme } from '@mui/material/styles';
 import { Droppable, Draggable } from '@hello-pangea/dnd';
 import { RetroStore } from '../store/RetroStore';
 import RetroCard from './RetroCard';
-import { Card, COLUMN_COLOR_IDS, COLUMN_COLOR_PRESETS, buildColumnMarkdown, getCardTypeByColumn, getColumnColorStyles } from '../types';
+import { COLUMN_COLOR_IDS, COLUMN_COLOR_PRESETS, buildColumnMarkdown, getCardTypeByColumn, getColumnColorStyles } from '../types';
 import EmojiEmotionsIcon from '@mui/icons-material/EmojiEmotions';
 import ImageIcon from '@mui/icons-material/Image';
 import MicIcon from '@mui/icons-material/Mic';
@@ -16,7 +16,8 @@ import MoreVertIcon from '@mui/icons-material/MoreVert';
 import CheckIcon from '@mui/icons-material/Check';
 import CloseIcon from '@mui/icons-material/Close';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
-import { fileToImageDataUrl, IMAGE_FILE_ACCEPT, resolveMediaUrl } from '../utils/media';
+import { fileToImageDataUrl, IMAGE_FILE_ACCEPT, safeMediaSrc } from '../utils/media';
+import { cardDraftKey } from '../services/session';
 
 const getSpeechRecognition = (): SpeechRecognitionConstructor | null =>
   window.SpeechRecognition || window.webkitSpeechRecognition || null;
@@ -60,7 +61,6 @@ const RetroColumn: React.FC<Props> = observer(({ columnIndex, store, enableDragD
   const [newCardImageUrl, setNewCardImageUrl] = useState('');
   const [imagePickError, setImagePickError] = useState('');
   const [selectedEmoji, setSelectedEmoji] = useState('');
-  const [localCards, setLocalCards] = useState<Card[]>([]);
   const [isComposerOpen, setIsComposerOpen] = useState(false);
   const [anchorEl, setAnchorEl] = useState<HTMLButtonElement | null>(null);
   const [cursorPosition, setCursorPosition] = useState<number>(0);
@@ -73,6 +73,9 @@ const RetroColumn: React.FC<Props> = observer(({ columnIndex, store, enableDragD
   const [headerMenuAnchorEl, setHeaderMenuAnchorEl] = useState<HTMLButtonElement | null>(null);
   const [colorMenuAnchorEl, setColorMenuAnchorEl] = useState<HTMLElement | null>(null);
   const [copySuccess, setCopySuccess] = useState(false);
+  const copyResetTimer = useRef<number | null>(null);
+  const localCards = store.cardsInColumn(columnIndex);
+  const draftKey = store.room?.id ? cardDraftKey(store.room.id, columnIndex) : null;
   const textFieldRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const speechRecognitionRef = useRef<SpeechRecognition | null>(null);
@@ -149,16 +152,46 @@ const RetroColumn: React.FC<Props> = observer(({ columnIndex, store, enableDragD
     try {
       await navigator.clipboard.writeText(markdown);
       setCopySuccess(true);
-      setTimeout(() => setCopySuccess(false), 2000);
+      if (copyResetTimer.current != null) window.clearTimeout(copyResetTimer.current);
+      copyResetTimer.current = window.setTimeout(() => setCopySuccess(false), 2000);
     } catch {
       setCopySuccess(false);
     }
   };
 
+  useEffect(() => () => {
+    if (copyResetTimer.current != null) window.clearTimeout(copyResetTimer.current);
+  }, []);
+
   useEffect(() => {
-    const filteredCards = store.cards.filter(card => card.column === columnIndex);
-    setLocalCards(filteredCards);
-  }, [store.cards, columnIndex]);
+    if (!draftKey) return;
+    const raw = sessionStorage.getItem(draftKey);
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw) as { text?: string; imageUrl?: string };
+      if (parsed.text) {
+        newCardTextRef.current = parsed.text;
+        setNewCardText(parsed.text);
+      }
+      const imageSrc = safeMediaSrc(parsed.imageUrl);
+      if (imageSrc && !imageSrc.startsWith('data:')) setNewCardImageUrl(parsed.imageUrl || '');
+    } catch {
+      sessionStorage.removeItem(draftKey);
+    }
+  }, [draftKey]);
+
+  useEffect(() => {
+    if (!draftKey) return;
+    const timeoutId = window.setTimeout(() => {
+      if (!newCardText.trim() && !newCardImageUrl.trim()) {
+        sessionStorage.removeItem(draftKey);
+        return;
+      }
+      const imageUrl = newCardImageUrl.startsWith('data:') ? '' : newCardImageUrl.trim();
+      sessionStorage.setItem(draftKey, JSON.stringify({ text: newCardText, imageUrl }));
+    }, 400);
+    return () => window.clearTimeout(timeoutId);
+  }, [draftKey, newCardImageUrl, newCardText]);
 
   const insertDictation = (transcript: string) => {
     const cleaned = transcript.trim();
@@ -707,7 +740,7 @@ const RetroColumn: React.FC<Props> = observer(({ columnIndex, store, enableDragD
                 <Box sx={{ position: 'relative', mt: 0.5 }}>
                   <Box
                     component="img"
-                    src={resolveMediaUrl(newCardImageUrl.trim())}
+                    src={safeMediaSrc(newCardImageUrl)}
                     alt="preview"
                     sx={{
                       width: '100%',

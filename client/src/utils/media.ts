@@ -3,6 +3,26 @@ export const IMAGE_FILE_ACCEPT = 'image/*,image/heic,image/heif,image/jpeg,image
 const MAX_EDGE = 1600;
 const JPEG_QUALITY = 0.82;
 const MAX_OUTPUT_BYTES = 2.5 * 1024 * 1024;
+const MAX_INPUT_BYTES = 10 * 1024 * 1024;
+
+const hasImageExtension = (name: string): boolean => /\.(png|jpe?g|gif|webp|bmp|heic|heif|avif)$/i.test(name);
+
+export const isSafeHttpUrl = (value: string): boolean => {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' || url.protocol === 'http:';
+  } catch {
+    return false;
+  }
+};
+
+export const isSafeMediaUrl = (value: string | null | undefined): boolean => {
+  const trimmed = value?.trim() || '';
+  if (!trimmed) return false;
+  if (trimmed.startsWith('/uploads/') || trimmed.startsWith('/api/uploads/')) return true;
+  if (/^data:image\/[a-z0-9.+-]+;base64,/i.test(trimmed)) return true;
+  return isSafeHttpUrl(trimmed);
+};
 
 export const resolveMediaUrl = (value: string): string => {
   const trimmed = value.trim();
@@ -12,8 +32,14 @@ export const resolveMediaUrl = (value: string): string => {
   return trimmed;
 };
 
+export const safeMediaSrc = (value: string | null | undefined): string => {
+  if (!isSafeMediaUrl(value)) return '';
+  return resolveMediaUrl(value!.trim());
+};
+
 export const toCssBackgroundUrl = (value: string): string => {
-  const resolved = resolveMediaUrl(value);
+  if (!isSafeMediaUrl(value)) return 'none';
+  const resolved = resolveMediaUrl(value.trim());
   const escaped = resolved.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   return `url("${escaped}")`;
 };
@@ -73,7 +99,13 @@ const canvasToJpegDataUrl = (canvas: HTMLCanvasElement, quality: number): Promis
   });
 
 export const fileToImageDataUrl = async (file: File): Promise<string> => {
-  if (file.type && !file.type.startsWith('image/') && file.type !== 'application/octet-stream') {
+  if (file.size > MAX_INPUT_BYTES) {
+    throw new Error('Файл слишком большой. Выберите фото меньше 10 МБ');
+  }
+  const allowedType = !file.type
+    || file.type.startsWith('image/')
+    || (file.type === 'application/octet-stream' && hasImageExtension(file.name));
+  if (!allowedType) {
     throw new Error('Можно выбрать только файл изображения');
   }
 

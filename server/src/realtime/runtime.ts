@@ -1,3 +1,4 @@
+import '../config/env';
 import { Server, Socket } from 'socket.io';
 import { Room, User, Card, Mood, Phase, RetroTemplate } from '../types';
 import { normalizeRoomFeatures } from '../utils/roomFeatures';

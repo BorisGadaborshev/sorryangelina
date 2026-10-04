@@ -11,6 +11,9 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import { RetroStore } from '../store/RetroStore';
 import { BUILTIN_TEAM_ID, Mood, Phase } from '../types';
 import { getReadyButtonSx } from './readyButtonStyles';
+import { getApiBase } from '../utils/apiBase';
+import { apiFetch } from '../utils/apiFetch';
+import { isAbortError } from '../utils/errors';
 
 interface User {
   id: string;
@@ -22,7 +25,6 @@ interface User {
 
 interface UserListProps {
   users: User[];
-  onlineUsers: string[]; // массив ID пользователей онлайн
   currentUserId: string;
   currentPhase: Phase;
   onReadyStateChange: (isReady: boolean) => void;
@@ -32,7 +34,6 @@ interface UserListProps {
 
 const UserList: React.FC<UserListProps> = observer(({ 
   users, 
-  onlineUsers, 
   currentUserId,
   currentPhase,
   onReadyStateChange,
@@ -68,9 +69,10 @@ const UserList: React.FC<UserListProps> = observer(({
       return;
     }
 
+    const controller = new AbortController();
     const fetchRosterUsers = async () => {
       try {
-        const apiBase = process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3001';
+        const apiBase = getApiBase();
         const headers: Record<string, string> = {};
         const accessCode = localStorage.getItem('suboAccessCode');
         if (accessCode) {
@@ -79,18 +81,20 @@ const UserList: React.FC<UserListProps> = observer(({
         if (store.authProfile?.token) {
           headers.Authorization = `Bearer ${store.authProfile.token}`;
         }
-        const response = await fetch(`${apiBase}/api/teams/${encodeURIComponent(teamId)}/members`, {
+        const response = await apiFetch(`${apiBase}/api/teams/${encodeURIComponent(teamId)}/members`, {
           headers,
+          signal: controller.signal
         });
         if (!response.ok) return;
         const data = (await response.json()) as { members: string[] };
         setRosterUsers(data.members || []);
       } catch (error) {
-        // Silent fail: participant list should still work.
+        if (isAbortError(error)) return;
       }
     };
 
     fetchRosterUsers();
+    return () => controller.abort();
   }, [teamId, store.authProfile?.token]);
 
   const offlineRosterUsers = useMemo(() => {
@@ -324,7 +328,7 @@ const UserList: React.FC<UserListProps> = observer(({
                 )}
                 <Avatar
                   sx={{
-                    bgcolor: moodMeta?.color ?? (onlineUsers.includes(user.id) ? 'success.main' : 'grey.400'),
+                    bgcolor: moodMeta?.color ?? 'success.main',
                   }}
                 >
                   {moodMeta?.emoji ?? (user.role === 'admin' ? <AdminPanelSettingsIcon /> : <PersonIcon />)}
@@ -352,7 +356,7 @@ const UserList: React.FC<UserListProps> = observer(({
                     m: 0,
                     minWidth: 0,
                     '& .MuiListItemText-primary': {
-                      fontWeight: onlineUsers.includes(user.id) ? 'bold' : 'normal',
+                      fontWeight: 'bold',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap',

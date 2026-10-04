@@ -18,6 +18,10 @@ import PauseIcon from '@mui/icons-material/Pause';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import SkipNextIcon from '@mui/icons-material/SkipNext';
 import SkipPreviousIcon from '@mui/icons-material/SkipPrevious';
+import { getApiBase } from '../utils/apiBase';
+import { apiFetch } from '../utils/apiFetch';
+import { isAbortError } from '../utils/errors';
+import { isSafeHttpUrl } from '../utils/media';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 
 const LOCAL_TRACK_SRC = '/audio/timer-music.mp3';
@@ -88,7 +92,6 @@ interface Props {
   onClose: () => void;
 }
 
-const getApiBase = (): string => (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3001');
 
 const MusicPlayerWidget: React.FC<Props> = ({
   open,
@@ -171,20 +174,25 @@ const MusicPlayerWidget: React.FC<Props> = ({
     setIsPlaying(false);
   }, []);
 
+  const radioAbortRef = useRef<AbortController | null>(null);
+
   const loadRadioStation = useCallback(async () => {
+    radioAbortRef.current?.abort();
+    const controller = new AbortController();
+    radioAbortRef.current = controller;
     const requestId = skipRequestIdRef.current + 1;
     skipRequestIdRef.current = requestId;
     setIsLoadingRadio(true);
     setRadioError(null);
 
     try {
-      const response = await fetch(`${getApiBase()}/api/radio/station`);
+      const response = await apiFetch(`${getApiBase()}/api/radio/station`, { signal: controller.signal });
       if (!response.ok) {
         throw new Error('Radio-Browser request failed');
       }
       const station = await response.json() as RadioStationResponse;
       if (requestId !== skipRequestIdRef.current) return;
-      if (!station.url) {
+      if (!station.url || !isSafeHttpUrl(station.url)) {
         throw new Error('Empty stream url');
       }
 
@@ -197,14 +205,34 @@ const MusicPlayerWidget: React.FC<Props> = ({
         url: station.url,
         country: station.country
       });
-    } catch {
-      if (requestId !== skipRequestIdRef.current) return;
+    } catch (error) {
+      if (isAbortError(error) || requestId !== skipRequestIdRef.current) return;
       setRadioError('Не удалось включить станцию Radio-Browser');
     } finally {
       if (requestId === skipRequestIdRef.current) {
         setIsLoadingRadio(false);
       }
     }
+  }, []);
+
+  useEffect(() => () => {
+    radioAbortRef.current?.abort();
+  }, []);
+
+  useEffect(() => {
+    const onVisibility = () => {
+      const audio = audioRef.current;
+      if (!audio) return;
+      if (document.hidden) {
+        audio.pause();
+        return;
+      }
+      if (wantPlayingRef.current) {
+        void audio.play().catch(() => undefined);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
   }, []);
 
   useEffect(() => {
@@ -379,7 +407,7 @@ const MusicPlayerWidget: React.FC<Props> = ({
         ref={audioRef}
         src={audioSrc}
         loop={source.kind === 'local'}
-        preload="auto"
+        preload="none"
         onCanPlay={tryPlay}
         onPlaying={() => setIsPlaying(true)}
         onPause={() => setIsPlaying(false)}

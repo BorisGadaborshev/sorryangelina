@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { observer } from 'mobx-react-lite';
 import {
   Alert,
@@ -23,6 +23,9 @@ import { AuthProfile, AvailableRoom, AvailableTeam, BUILTIN_TEAM_ID, RETRO_TEMPL
 import CreateTeamDialog from './CreateTeamDialog';
 import RoomTiles from './RoomTiles';
 import TeamLobby from './TeamLobby';
+import { getApiBase } from '../utils/apiBase';
+import { apiFetch } from '../utils/apiFetch';
+import { isAbortError } from '../utils/errors';
 import TeamMembersPanel from './TeamMembersPanel';
 
 interface Props {
@@ -33,8 +36,6 @@ interface FixedLoginResponse {
   profile: AuthProfile;
   isFirstLogin: boolean;
 }
-
-const getApiBase = (): string => (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3001');
 
 const Login: React.FC<Props> = observer(({ store }) => {
   const theme = useTheme();
@@ -88,41 +89,49 @@ const Login: React.FC<Props> = observer(({ store }) => {
   const [isChangeTeamPasswordDialogOpen, setIsChangeTeamPasswordDialogOpen] = useState(false);
   const [changeTeamPasswordValue, setChangeTeamPasswordValue] = useState('');
   const [changeTeamPasswordError, setChangeTeamPasswordError] = useState<string | null>(null);
+  const copyTimers = useRef<number[]>([]);
+  useEffect(() => () => {
+    copyTimers.current.forEach((id) => window.clearTimeout(id));
+  }, []);
   const selectedTeam = store.selectedTeam;
+  const selectedTeamId = selectedTeam?.id;
+  const authToken = store.authProfile?.token;
   const isFixedAuth = store.authProfile?.type === 'fixed';
 
-  const fetchAvailableRooms = useCallback(async () => {
-    if (!selectedTeam) {
+  const fetchAvailableRooms = useCallback(async (signal?: AbortSignal) => {
+    if (!selectedTeamId) {
       setAvailableRooms([]);
       return;
     }
-    const teamId = selectedTeam.id;
+    const teamId = selectedTeamId;
 
     setIsRoomsLoading(true);
     try {
-      const response = await fetch(`${getApiBase()}/api/teams/${encodeURIComponent(teamId)}/rooms`);
+      const response = await apiFetch(`${getApiBase()}/api/teams/${encodeURIComponent(teamId)}/rooms`, { signal });
       if (!response.ok) {
         throw new Error('Failed to fetch rooms');
       }
       const rooms = (await response.json()) as AvailableRoom[];
       setAvailableRooms(rooms);
     } catch (error) {
+      if (isAbortError(error) || signal?.aborted) return;
       store.setError('Не удалось загрузить список комнат');
     } finally {
-      setIsRoomsLoading(false);
+      if (!signal?.aborted) setIsRoomsLoading(false);
     }
-  }, [selectedTeam?.id, store]);
+  }, [selectedTeamId, store]);
 
-  const fetchSelectedTeam = useCallback(async () => {
-    if (!store.authProfile || !selectedTeam) return;
-    const teamId = selectedTeam.id;
+  const fetchSelectedTeam = useCallback(async (signal?: AbortSignal) => {
+    if (!authToken || !selectedTeamId) return;
+    const teamId = selectedTeamId;
 
     setIsTeamMembersLoading(true);
     try {
-      const response = await fetch(`${getApiBase()}/api/teams/${encodeURIComponent(teamId)}`, {
+      const response = await apiFetch(`${getApiBase()}/api/teams/${encodeURIComponent(teamId)}`, {
         headers: {
-          Authorization: `Bearer ${store.authProfile.token}`
-        }
+          Authorization: `Bearer ${authToken}`
+        },
+        signal
       });
       if (response.status === 403) {
         const data = (await response.json()) as { error?: string };
@@ -139,40 +148,46 @@ const Login: React.FC<Props> = observer(({ store }) => {
       const team = (await response.json()) as Team;
       store.setSelectedTeam(team);
     } catch (error) {
+      if (isAbortError(error) || signal?.aborted) return;
       store.setError('Не удалось загрузить участников команды');
     } finally {
-      setIsTeamMembersLoading(false);
+      if (!signal?.aborted) setIsTeamMembersLoading(false);
     }
-  }, [selectedTeam?.id, store, store.authProfile?.token]);
+  }, [selectedTeamId, authToken, store]);
 
-  const fetchAvailableTeams = useCallback(async () => {
+  const fetchAvailableTeams = useCallback(async (signal?: AbortSignal) => {
     setIsTeamsLoading(true);
     try {
-      const response = await fetch(`${getApiBase()}/api/teams`);
+      const response = await apiFetch(`${getApiBase()}/api/teams`, { signal });
       if (!response.ok) {
         throw new Error('Failed to fetch teams');
       }
       const teams = (await response.json()) as AvailableTeam[];
       setAvailableTeams(teams);
     } catch (error) {
+      if (isAbortError(error) || signal?.aborted) return;
       store.setError('Не удалось загрузить список команд');
     } finally {
-      setIsTeamsLoading(false);
+      if (!signal?.aborted) setIsTeamsLoading(false);
     }
   }, [store]);
 
   useEffect(() => {
+    const controller = new AbortController();
     if (!store.authProfile || (store.authProfile && (!isFixedAuth || isChoosingTeam))) {
-      fetchAvailableTeams();
+      void fetchAvailableTeams(controller.signal);
     }
+    return () => controller.abort();
   }, [fetchAvailableTeams, store.authProfile, isFixedAuth, isChoosingTeam]);
 
   useEffect(() => {
-    if (store.authProfile && selectedTeam) {
-      fetchAvailableRooms();
-      void fetchSelectedTeam();
+    const controller = new AbortController();
+    if (store.authProfile && selectedTeamId) {
+      void fetchAvailableRooms(controller.signal);
+      void fetchSelectedTeam(controller.signal);
     }
-  }, [fetchAvailableRooms, fetchSelectedTeam, store.authProfile, selectedTeam?.id]);
+    return () => controller.abort();
+  }, [fetchAvailableRooms, fetchSelectedTeam, store.authProfile, selectedTeamId]);
 
   const autoJoinBuiltinTeam = useCallback(async () => {
     if (!store.authProfile || store.authProfile.type !== 'fixed' || store.selectedTeam) return;
@@ -180,7 +195,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
     setIsAutoJoiningBuiltinTeam(true);
     store.setError(null);
     try {
-      const response = await fetch(`${getApiBase()}/api/teams/${encodeURIComponent(BUILTIN_TEAM_ID)}/join`, {
+      const response = await apiFetch(`${getApiBase()}/api/teams/${encodeURIComponent(BUILTIN_TEAM_ID)}/join`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -234,7 +249,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
   };
 
   const joinTeamWithProfile = async (profile: AuthProfile, teamId: string, password?: string): Promise<Team> => {
-    const response = await fetch(`${getApiBase()}/api/teams/${encodeURIComponent(teamId)}/join`, {
+    const response = await apiFetch(`${getApiBase()}/api/teams/${encodeURIComponent(teamId)}/join`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -255,7 +270,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
     store.setError(null);
     try {
       const isBuiltinTeam = selectedTeamForJoin.id === BUILTIN_TEAM_ID;
-      const response = await fetch(`${getApiBase()}${isBuiltinTeam ? '/api/auth/fixed-login' : '/api/auth/login'}`, {
+      const response = await apiFetch(`${getApiBase()}${isBuiltinTeam ? '/api/auth/fixed-login' : '/api/auth/login'}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: loginName, password: loginPassword })
@@ -294,7 +309,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
     setIsLoading(true);
     store.setError(null);
     try {
-      const response = await fetch(`${getApiBase()}/api/auth/register`, {
+      const response = await apiFetch(`${getApiBase()}/api/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: registerName, password: registerPassword })
@@ -352,7 +367,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
     if (!store.authProfile) {
       throw new Error('Необходимо войти в аккаунт');
     }
-    const response = await fetch(`${getApiBase()}/api/teams/${encodeURIComponent(teamId)}/join`, {
+    const response = await apiFetch(`${getApiBase()}/api/teams/${encodeURIComponent(teamId)}/join`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -403,7 +418,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
       setJoinTeamError(null);
       store.setError(null);
       try {
-        const response = await fetch(`${getApiBase()}/api/teams/${encodeURIComponent(selectedTeamForJoin.id)}/unlock`, {
+        const response = await apiFetch(`${getApiBase()}/api/teams/${encodeURIComponent(selectedTeamForJoin.id)}/unlock`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ password: joinTeamPassword.trim() })
@@ -449,7 +464,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
     setIsLoading(true);
     store.setError(null);
     try {
-      const response = await fetch(`${getApiBase()}/api/teams`, {
+      const response = await apiFetch(`${getApiBase()}/api/teams`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -478,7 +493,6 @@ const Login: React.FC<Props> = observer(({ store }) => {
     setIsLoading(true);
     store.setError(null);
     try {
-      sessionStorage.setItem('roomPassword', createRoomPassword.trim());
       await store.socketService?.createRoom(
         createRoomId.trim(),
         createRoomPassword.trim() || undefined,
@@ -504,7 +518,6 @@ const Login: React.FC<Props> = observer(({ store }) => {
     setJoinRoomError(null);
     store.setError(null);
     try {
-      sessionStorage.setItem('roomPassword', password);
       await store.socketService?.joinRoom(roomId, password, store.authProfile.name, store.authProfile.token);
       setIsJoinDialogOpen(false);
     } catch (error) {
@@ -543,7 +556,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
     setIsDeletingRoom(true);
     store.setError(null);
     try {
-      const response = await fetch(`${getApiBase()}/api/rooms/${encodeURIComponent(deleteRoomId)}`, {
+      const response = await apiFetch(`${getApiBase()}/api/rooms/${encodeURIComponent(deleteRoomId)}`, {
         method: 'DELETE',
         headers: {
           Authorization: `Bearer ${store.authProfile.token}`
@@ -583,7 +596,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
     setBusyMemberName(memberToRemove);
     store.setError(null);
     try {
-      const response = await fetch(`${getApiBase()}/api/teams/${encodeURIComponent(selectedTeam.id)}/members`, {
+      const response = await apiFetch(`${getApiBase()}/api/teams/${encodeURIComponent(selectedTeam.id)}/members`, {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
@@ -611,7 +624,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
     setBusyMemberName(name);
     store.setError(null);
     try {
-      const response = await fetch(`${getApiBase()}/api/teams/${encodeURIComponent(selectedTeam.id)}/members/reset-password`, {
+      const response = await apiFetch(`${getApiBase()}/api/teams/${encodeURIComponent(selectedTeam.id)}/members/reset-password`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -644,7 +657,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
     setChangeTeamPasswordError(null);
     store.setError(null);
     try {
-      const response = await fetch(`${getApiBase()}/api/teams/${encodeURIComponent(selectedTeam.id)}/password`, {
+      const response = await apiFetch(`${getApiBase()}/api/teams/${encodeURIComponent(selectedTeam.id)}/password`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -671,7 +684,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
     try {
       await navigator.clipboard.writeText(resetPasswordValue);
       setResetPasswordCopySuccess(true);
-      setTimeout(() => setResetPasswordCopySuccess(false), 2000);
+      copyTimers.current.push(window.setTimeout(() => setResetPasswordCopySuccess(false), 2000));
     } catch (error) {
       store.setError('Не удалось скопировать пароль');
     }
@@ -730,7 +743,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
     try {
       await navigator.clipboard.writeText(inviteMessage);
       setInviteCopySuccess(true);
-      setTimeout(() => setInviteCopySuccess(false), 2000);
+      copyTimers.current.push(window.setTimeout(() => setInviteCopySuccess(false), 2000));
     } catch (error) {
       store.setError('Не удалось скопировать приглашение');
     }
@@ -908,7 +921,7 @@ const Login: React.FC<Props> = observer(({ store }) => {
             flexShrink: 0
           }}
         >
-          <Button variant="outlined" onClick={fetchAvailableRooms} disabled={isRoomsLoading}>
+          <Button variant="outlined" onClick={() => { void fetchAvailableRooms(); }} disabled={isRoomsLoading}>
             Обновить
           </Button>
           <Button variant="outlined" onClick={handleChangeTeam}>

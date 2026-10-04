@@ -1,4 +1,4 @@
-import dotenv from 'dotenv';
+import './config/env';
 import path from 'path';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
@@ -16,8 +16,6 @@ import {
   migrateInlineImages,
   purgeExpiredImages
 } from './services/ImageStore';
-
-dotenv.config();
 
 connectDB().catch((err) => {
   console.error('PostgreSQL connection error:', err);
@@ -46,7 +44,11 @@ const io = new Server(httpServer, {
   transports: ['websocket', 'polling'],
   allowUpgrades: true,
   upgradeTimeout: 10000,
-  allowEIO3: true
+  allowEIO3: true,
+  connectionStateRecovery: {
+    maxDisconnectionDuration: 2 * 60 * 1000,
+    skipMiddlewares: true
+  }
 });
 
 attachRealtime(io);

@@ -4,7 +4,7 @@ import { RealtimeSession } from '../session';
 import { Card, getCardTypeByColumn, getRetroTemplate } from '../../types';
 import { RoomService } from '../../services/RoomService';
 import { assertCardSlotAvailable, assertCreationSlotAvailable, UsageLimitError } from '../../services/UsageLimits';
-import { signAuthToken, verifyAuthToken } from '../../config/jwt';
+import { eventAuth } from '../socketAuth';
 import { replaceBackgroundImage, replaceCardImage } from '../../services/ImageStore';
 import {
   allowDiscussionBurst,
@@ -318,7 +318,7 @@ export function registerCardsHandlers(socket: Socket, session: RealtimeSession):
     try {
       let actor = await resolveSocketActor(socket, session.currentUser);
       if (!actor?.roomId || !actor.name) {
-        const auth = typeof token === 'string' ? verifyAuthToken(token) : null;
+        const auth = eventAuth(socket, token);
         const roomId = typeof payloadRoomId === 'string' && payloadRoomId
           ? payloadRoomId
           : (typeof socket.data.roomId === 'string' ? socket.data.roomId : undefined);

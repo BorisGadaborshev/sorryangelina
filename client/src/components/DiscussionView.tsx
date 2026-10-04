@@ -2,13 +2,14 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { observer } from 'mobx-react-lite';
 import { keyframes } from '@emotion/react';
 import { Box, Paper, Typography, IconButton, Tooltip, Button, Popover, useMediaQuery } from '@mui/material';
-import { NavigateBefore, NavigateNext } from '@mui/icons-material';
+import NavigateBefore from '@mui/icons-material/NavigateBefore';
+import NavigateNext from '@mui/icons-material/NavigateNext';
 import { useTheme } from '@mui/material/styles';
 import { RetroStore } from '../store/RetroStore';
 import { Card as CardType, DISCUSSION_BURST_EMOJIS, DiscussionNavigationState, getCardTextSegments, getColumnColorStyles } from '../types';
 import RetroCard from './RetroCard';
 import { VoteIcon } from './VoteIcon';
-import { resolveMediaUrl } from '../utils/media';
+import { safeMediaSrc } from '../utils/media';
 
 interface Props {
   store: RetroStore;
@@ -169,6 +170,13 @@ const DiscussionView: React.FC<Props> = observer(({ store }) => {
       bursts.forEach((burst) => seenBurstIds.current.add(burst.id));
       burstsPrimed.current = true;
       return;
+    }
+
+    if (seenBurstIds.current.size > 80) {
+      const live = new Set(bursts.map((burst) => burst.id));
+      seenBurstIds.current.forEach((id) => {
+        if (!live.has(id)) seenBurstIds.current.delete(id);
+      });
     }
 
     const fresh = bursts.filter((burst) => !seenBurstIds.current.has(burst.id));
@@ -580,10 +588,10 @@ const DiscussionView: React.FC<Props> = observer(({ store }) => {
                       </React.Fragment>
                     ))}
                   </Box>
-                  {card.imageUrl && (
+                  {safeMediaSrc(card.imageUrl) && (
                     <Box
                       component="img"
-                      src={resolveMediaUrl(card.imageUrl)}
+                      src={safeMediaSrc(card.imageUrl)}
                       alt="thumb"
                       sx={{
                         width: '100%',

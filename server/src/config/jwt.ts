@@ -1,3 +1,4 @@
+import './env';
 import crypto from 'crypto';
 import { AuthProfileType } from '../types';
 

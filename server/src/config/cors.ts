@@ -1,3 +1,5 @@
+import './env';
+
 export const productionOrigins = [
   'https://insretro.ru',
   'https://www.insretro.ru',

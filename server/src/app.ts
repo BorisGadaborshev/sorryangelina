@@ -15,11 +15,18 @@ export const createApp = () => {
     credentials: true
   }));
 
+  app.use((_req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    next();
+  });
+
   app.use(express.json());
   app.use('/uploads', express.static(getUploadDir(), { index: false, fallthrough: false }));
   app.use('/api/uploads', express.static(getUploadDir(), { index: false, fallthrough: false }));
 
-  const clientBuildPath = path.join(__dirname, '../../../client/build');
+  const clientBuildPath = path.resolve(__dirname, '../../client/build');
   console.log('Client build path:', clientBuildPath);
   app.use(express.static(clientBuildPath));
 

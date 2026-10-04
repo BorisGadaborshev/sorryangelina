@@ -6,7 +6,7 @@
   "main": "dist/server.js",
   "scripts": {
     "start": "node dist/server.js",
-    "dev": "npm run migrate:up && nodemon src/server.ts",
+    "dev": "NODE_ENV=development npm run migrate:up && NODE_ENV=development nodemon --exec \"node -r ts-node/register/transpile-only\" src/server.ts",
     "build": "tsc",
     "test": "node --test test/*.test.cjs",
     "watch": "tsc -w",
@@ -36,6 +36,7 @@
     "@types/node": "^22.10.0",
     "@types/pg": "^8.15.5",
     "nodemon": "^3.1.10",
+    "ts-node": "^10.9.2",
     "typescript": "^5.6.3"
   }
 }
