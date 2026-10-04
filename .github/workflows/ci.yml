@@ -1,0 +1,108 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+
+  server:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: retro
+          POSTGRES_PASSWORD: retro
+          POSTGRES_DB: retro_board_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U retro -d retro_board_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      INTEGRATION_DATABASE_URL: postgres://retro:retro@localhost:5432/retro_board_test
+      JWT_SECRET: test-jwt-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build:shared
+      - run: npx tsc --noEmit
+        working-directory: server
+      - run: npm test -w server
+      - run: npm run build -w server
+
+  client:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
+        working-directory: client
+      - run: npm test -w client
+      - run: npm run build -w client
+
+  e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: retro
+          POSTGRES_PASSWORD: retro
+          POSTGRES_DB: retro_board_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U retro -d retro_board_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://retro:retro@localhost:5432/retro_board_test
+      JWT_SECRET: test-jwt-secret
+      NODE_ENV: development
+      PORT: 3001
+      BASE_URL: http://127.0.0.1:3001
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - run: npx node-pg-migrate up --migrations-dir migrations
+        working-directory: server
+      - name: Start the app and run Playwright
+        run: |
+          node dist/server.js &
+          for _ in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:3001/healthz && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:3001/healthz
+          cd ..
+          npm run test:e2e
+        working-directory: server

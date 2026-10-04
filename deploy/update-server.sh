@@ -14,11 +14,11 @@ cd $APP_DIR
 # Pull latest changes
 git pull origin main
 
-# Build server
+# Build shared types and the server
 echo "🔨 Building Node.js server..."
+npm ci -w shared -w server
+npm run build -w server
 cd server
-npm install
-npm run build
 # shellcheck disable=SC1091
 source "$APP_DIR/deploy/database-url.sh"
 load_database_url "$APP_DIR/server"

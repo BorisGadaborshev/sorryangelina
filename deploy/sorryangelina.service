@@ -9,6 +9,7 @@ User=www-data
 Group=www-data
 WorkingDirectory=/var/www/sorryangelina/server
 ExecStart=/usr/bin/node dist/server.js
+# Readiness: curl -fsS http://127.0.0.1:3001/healthz
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=10

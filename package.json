@@ -2,26 +2,28 @@
   "name": "retro-board",
   "version": "1.0.0",
   "private": true,
+  "workspaces": [
+    "shared",
+    "server",
+    "client"
+  ],
   "scripts": {
-    "build": "cd client && npm install && npm run build",
-    "dev": "concurrently -n server,client -c blue,green \"npm --prefix server run dev\" \"npm --prefix client start\""
-  },
-  "dependencies": {
-    "@types/bcryptjs": "^2.4.6",
-    "@types/cors": "^2.8.17",
-    "@types/dotenv": "^8.2.0",
-    "@types/express": "^4.17.21",
-    "@types/jsonwebtoken": "^9.0.10",
-    "bcryptjs": "^2.4.3",
-    "cors": "^2.8.5",
-    "dotenv": "^16.3.1",
-    "express": "^4.18.2",
-    "jsonwebtoken": "^9.0.3",
-    "pg": "^8.12.0",
-    "socket.io": "^4.8.1"
+    "build:shared": "npm run build -w shared",
+    "build": "npm run build:shared && npm run build -w server && npm run build -w client",
+    "dev": "npm run build:shared && concurrently -n server,client -c blue,green \"npm run dev -w server\" \"npm run start -w client\"",
+    "test": "npm test -w server && npm test -w client",
+    "lint": "eslint client/src server/src server/test shared/src e2e",
+    "format": "prettier --write \"client/src/**/*.{ts,tsx}\" \"server/src/**/*.ts\" \"server/test/**/*.ts\" \"shared/src/**/*.ts\" \"e2e/**/*.ts\"",
+    "test:e2e": "playwright test"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@playwright/test": "^1.63.0",
     "concurrently": "^9.2.1",
-    "playwright": "^1.58.2"
+    "eslint": "^9.39.5",
+    "eslint-config-prettier": "^10.1.8",
+    "playwright": "^1.58.2",
+    "prettier": "^3.9.9",
+    "typescript-eslint": "^8.71.0"
   }
 }

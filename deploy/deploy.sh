@@ -71,18 +71,17 @@ chown -R www-data:www-data $APP_DIR
 echo -e "${YELLOW}🔨 Building application...${NC}"
 cd $APP_DIR
 
+# Install workspace dependencies (devDependencies include the TypeScript compiler)
+npm ci -w shared -w server -w client
+
 # Build client
 echo "Building React client..."
-cd client
-npm install --production
-npm run build
-cd ..
+npm run build -w client
 
-# Build server (devDependencies include the TypeScript compiler)
+# Build shared types and the server
 echo "Building Node.js server..."
+npm run build -w server
 cd server
-npm install
-npm run build
 # shellcheck disable=SC1091
 source "$APP_DIR/deploy/database-url.sh"
 load_database_url "$APP_DIR/server"
@@ -133,16 +132,14 @@ cat > /usr/local/bin/deploy-sorryangelina << 'EOF'
 cd /root/apps/sorryangelina
 git pull origin main
 
-# Build client
-cd client
-npm install --production
-npm run build
-cd ..
+npm ci -w shared -w server -w client
 
-# Build server
+# Build client
+npm run build -w client
+
+# Build shared types and the server
+npm run build -w server
 cd server
-npm install
-npm run build
 # shellcheck disable=SC1091
 source /root/apps/sorryangelina/deploy/database-url.sh
 load_database_url /root/apps/sorryangelina/server

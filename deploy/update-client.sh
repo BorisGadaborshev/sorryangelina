@@ -16,10 +16,8 @@ git pull origin main
 
 # Build client
 echo "🔨 Building React client..."
-cd client
-npm install --production
-npm run build
-cd ..
+npm ci -w shared -w client
+npm run build -w client
 
 # Reload nginx to serve new static files
 echo "🌐 Reloading nginx..."
