@@ -16,7 +16,7 @@ git pull origin main
 
 # Build shared types and the server
 echo "🔨 Building Node.js server..."
-npm ci -w shared -w server
+npm ci
 npm run build -w server
 cd server
 # shellcheck disable=SC1091
