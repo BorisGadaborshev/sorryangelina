@@ -81,7 +81,6 @@ jobs:
     env:
       DATABASE_URL: postgres://retro:retro@localhost:5432/retro_board_test
       JWT_SECRET: test-jwt-secret
-      NODE_ENV: development
       PORT: 3001
       BASE_URL: http://127.0.0.1:3001
     steps:
@@ -96,6 +95,8 @@ jobs:
       - run: npx node-pg-migrate up --migrations-dir migrations
         working-directory: server
       - name: Start the app and run Playwright
+        env:
+          NODE_ENV: development
         run: |
           node dist/server.js &
           for _ in $(seq 1 30); do
