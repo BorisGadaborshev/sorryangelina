@@ -23,6 +23,7 @@ export interface CreateRoomDialogState {
   roomId: string;
   password: string;
   template: RetroTemplateId;
+  settingsLoaded: boolean;
   onRoomId: (value: string) => void;
   onPassword: (value: string) => void;
   onTemplate: (value: RetroTemplateId) => void;
@@ -245,7 +246,7 @@ const TeamRoomsView: React.FC<Props> = ({
       <DialogTitle>Создать комнату</DialogTitle>
       <DialogContent>
         <DialogContentText sx={{ mb: 1 }}>
-          Комната будет создана внутри команды <b>{store.selectedTeam?.name}</b>.
+          Комната будет создана внутри команды <b>{store.selectedTeam?.name}</b>. Шаблон, колонки и переключатели берутся из настроек команды. Если их изменить в комнате, следующая комната этой команды откроется уже с ними.
         </DialogContentText>
         {store.error && (
           <Alert severity="error" sx={{ mb: 1 }}>
@@ -314,7 +315,7 @@ const TeamRoomsView: React.FC<Props> = ({
         <Button
           variant="contained"
           onClick={createDialog.onSubmit}
-          disabled={isLoading || !createDialog.roomId.trim()}
+          disabled={isLoading || !createDialog.settingsLoaded || !createDialog.roomId.trim()}
         >
           {isLoading ? <CircularProgress size={18} color="inherit" /> : 'Создать'}
         </Button>

@@ -21,6 +21,7 @@ import {
   getColumnCount,
   getRetroTemplate,
   getTemplateColumn,
+  isCardSegmentAuthor,
   normalizeColumnColors
 } from '../types';
 import { writeTabSession } from '../services/session';
@@ -312,7 +313,7 @@ export class RoomStore {
     if (!this.roomFeatures.hideCardTextDuringCreation) return false;
     if (this.phase !== 'creation') return false;
     if (this.currentUser?.role === 'admin') return false;
-    if (this.currentUser?.name === card.createdBy) return false;
+    if (this.currentUser?.name && isCardSegmentAuthor(card, this.currentUser.name)) return false;
     const actionColumn = this.templateConfig.actionColumnIndex;
     if (actionColumn != null && card.column === actionColumn && !this.roomFeatures.membersCanAddCards) return false;
     return true;

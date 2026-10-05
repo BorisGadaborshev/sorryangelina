@@ -1,6 +1,7 @@
 import { pool } from '../config/database';
-import { TeamDocument, TeamMember } from '../types';
+import { TeamDocument, TeamMember, TeamRoomSettings } from '../types';
 import { reserveCreationSlot } from '../services/UsageLimits';
+import { normalizeTeamRoomSettings } from '../utils/teamRoomSettings';
 
 export const TeamModel = {
   async create(doc: TeamDocument, options?: { enforceDailyLimit?: boolean }): Promise<TeamDocument> {
@@ -37,7 +38,7 @@ export const TeamModel = {
 
   async findOne(where: { id: string }): Promise<TeamDocument | null> {
     const { rows } = await pool.query(
-      'select id, name, password_hash, password_version, owner, created_at from teams where id=$1',
+      'select id, name, password_hash, password_version, owner, created_at, room_settings from teams where id=$1',
       [where.id]
     );
     if (rows.length === 0) return null;
@@ -49,6 +50,7 @@ export const TeamModel = {
       password_version: number;
       owner: string;
       created_at: string;
+      room_settings: unknown;
     };
     const membersRes = await pool.query('select team_id, name, role from team_members where team_id=$1 order by created_at asc', [where.id]);
     const members = (membersRes.rows as Array<{ team_id: string; name: string; role: TeamMember['role'] }>).map((member) => ({
@@ -64,8 +66,21 @@ export const TeamModel = {
       passwordVersion: Number(teamRow.password_version) || 1,
       owner: teamRow.owner,
       createdAt: teamRow.created_at,
-      members
+      members,
+      roomSettings: normalizeTeamRoomSettings(teamRow.room_settings)
     };
+  },
+
+  async getRoomSettings(teamId: string): Promise<unknown> {
+    const { rows } = await pool.query('select room_settings from teams where id=$1', [teamId]);
+    return rows[0]?.room_settings ?? null;
+  },
+
+  async updateRoomSettings(teamId: string, settings: TeamRoomSettings): Promise<void> {
+    await pool.query(
+      'update teams set room_settings=$1::jsonb, updated_at=now() where id=$2',
+      [JSON.stringify(settings), teamId]
+    );
   },
 
   async find(): Promise<TeamDocument[]> {

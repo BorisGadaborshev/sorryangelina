@@ -3,7 +3,8 @@ import { observer } from 'mobx-react-lite';
 import { Box, Button, LinearProgress, Paper, Radio, Step, StepLabel, Stepper, Typography, useMediaQuery, useTheme } from '@mui/material';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import { RetroStore } from '../store/RetroStore';
-import { ArkanoidScoreEntry, Card, ChatMessage, ColumnKind, Mood, RetroTemplate, User, getCardTextSegments, getTemplateColumn } from '../types';
+import { teamApi } from '../services/teamApi';
+import { ArkanoidScoreEntry, AvailableRoom, Card, ChatMessage, ColumnKind, Mood, RetroTemplate, User, getCardTextSegments, getTemplateColumn } from '../types';
 
 interface Props {
   store: RetroStore;
@@ -131,6 +132,56 @@ const kindStatLabel = (prefix: string, template: RetroTemplate, columnTitles: st
 
 const countLabel = (count: number, one: string, few: string, many: string): string =>
   `${count} ${plural(count, one, few, many)}`;
+
+type TeamRetroPlace =
+  | { status: 'loading' }
+  | { status: 'ready'; index: number }
+  | { status: 'unavailable' };
+
+const compareTeamRooms = (a: AvailableRoom, b: AvailableRoom): number => {
+  const aTime = Date.parse(a.createdAt || '');
+  const bTime = Date.parse(b.createdAt || '');
+  const aValid = Number.isFinite(aTime);
+  const bValid = Number.isFinite(bTime);
+  if (aValid && bValid && aTime !== bTime) return aTime - bTime;
+  if (aValid !== bValid) return aValid ? -1 : 1;
+  return a.id.localeCompare(b.id);
+};
+
+const RetroStatGrid: React.FC<{ items: RetroStat[]; isDark: boolean }> = ({ items, isDark }) => (
+  <Box
+    sx={{
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+      gap: 1.25
+    }}
+  >
+    {items.map((item) => (
+      <Box
+        key={item.id}
+        sx={{
+          p: 1.5,
+          borderRadius: 1,
+          border: '1px solid',
+          borderColor: 'divider',
+          bgcolor: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)'
+        }}
+      >
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5, lineHeight: 1.35 }}>
+          {item.label}
+        </Typography>
+        <Typography sx={{ fontWeight: 700, lineHeight: 1.35, overflowWrap: 'anywhere' }}>
+          {item.primary}
+        </Typography>
+        {item.secondary && (
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, overflowWrap: 'anywhere' }}>
+            {item.secondary}
+          </Typography>
+        )}
+      </Box>
+    ))}
+  </Box>
+);
 
 const buildRetroStatSections = (input: {
   cards: Card[];
@@ -487,6 +538,65 @@ const RetroRatingView: React.FC<Props> = observer(({ store }) => {
     store.currentUser?.name
   ]);
   const hasCards = store.cards.length > 0;
+  const teamId = store.room?.teamId;
+  const roomId = store.room?.id;
+  const [teamRetro, setTeamRetro] = useState<TeamRetroPlace>({ status: 'loading' });
+
+  useEffect(() => {
+    if (!rating.resultsVisible) return;
+    if (!teamId || !roomId) {
+      setTeamRetro({ status: 'unavailable' });
+      return;
+    }
+
+    const controller = new AbortController();
+    setTeamRetro({ status: 'loading' });
+    teamApi.listRooms(teamId, controller.signal)
+      .then((rooms) => {
+        const ordered = [...rooms].sort(compareTeamRooms);
+        const found = ordered.findIndex((room) => room.id === roomId);
+        if (ordered.length === 0 || found < 0) {
+          setTeamRetro({ status: 'unavailable' });
+          return;
+        }
+        setTeamRetro({ status: 'ready', index: found + 1 });
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        if (error instanceof Error && error.name === 'AbortError') return;
+        setTeamRetro({ status: 'unavailable' });
+      });
+
+    return () => controller.abort();
+  }, [rating.resultsVisible, teamId, roomId]);
+
+  const adminNames = [...new Set(
+    store.users
+      .filter((user) => user.role === 'admin')
+      .map((user) => user.name.trim())
+      .filter(Boolean)
+  )];
+  const sessionFacts: RetroStat[] = [
+    {
+      id: 'admin',
+      label: 'Админ',
+      primary: adminNames.length > 0 ? formatNames(adminNames) : '—'
+    },
+    ...(store.roomFeatures.facilitatorEnabled ? [{
+      id: 'facilitator',
+      label: 'Ведущий',
+      primary: store.sessionFacilitatorName || store.facilitatorAnnouncement?.userName || 'Не выбран'
+    }] : []),
+    {
+      id: 'team-retro',
+      label: 'Ретро команды',
+      primary: teamRetro.status === 'ready'
+        ? `${teamRetro.index}-е`
+        : teamRetro.status === 'loading'
+          ? '…'
+          : '—'
+    }
+  ];
 
   const handleSubmit = () => {
     if (!selectedRating) return;
@@ -585,9 +695,16 @@ const RetroRatingView: React.FC<Props> = observer(({ store }) => {
                   Статистика ретро
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                  Кто писал карточки, кто голосовал, кто больше всех обсуждал{store.roomFeatures.arkanoidEnabled ? ' и кто играл в Arkanoid' : ''}.
+                  Кто был админом{store.roomFeatures.facilitatorEnabled ? ' и ведущим' : ''}, какое это ретро команды, кто писал карточки, кто голосовал, кто больше всех обсуждал{store.roomFeatures.arkanoidEnabled ? ' и кто играл в Arkanoid' : ''}.
                   {store.roomFeatures.anonymousEnabled ? ' На доске авторы скрыты, в этой сводке имена видны.' : ''}
                 </Typography>
+
+                <Box sx={{ mb: 2.5 }}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1 }}>
+                    Сессия
+                  </Typography>
+                  <RetroStatGrid items={sessionFacts} isDark={theme.palette.mode === 'dark'} />
+                </Box>
 
                 {!hasCards && statSections.length === 0 ? (
                   <Typography color="text.secondary">Пока нет карточек и активности, чтобы собрать сводку.</Typography>
@@ -597,38 +714,7 @@ const RetroRatingView: React.FC<Props> = observer(({ store }) => {
                       <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1 }}>
                         {section.title}
                       </Typography>
-                      <Box
-                        sx={{
-                          display: 'grid',
-                          gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
-                          gap: 1.25
-                        }}
-                      >
-                        {section.items.map((item) => (
-                          <Box
-                            key={item.id}
-                            sx={{
-                              p: 1.5,
-                              borderRadius: 1,
-                              border: '1px solid',
-                              borderColor: 'divider',
-                              bgcolor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)'
-                            }}
-                          >
-                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5, lineHeight: 1.35 }}>
-                              {item.label}
-                            </Typography>
-                            <Typography sx={{ fontWeight: 700, lineHeight: 1.35, overflowWrap: 'anywhere' }}>
-                              {item.primary}
-                            </Typography>
-                            {item.secondary && (
-                              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, overflowWrap: 'anywhere' }}>
-                                {item.secondary}
-                              </Typography>
-                            )}
-                          </Box>
-                        ))}
-                      </Box>
+                      <RetroStatGrid items={section.items} isDark={theme.palette.mode === 'dark'} />
                     </Box>
                   ))
                 )}

@@ -10,13 +10,16 @@ const EmojiIcon: React.FC<IconProps & { emoji: string; label: string }> = ({ siz
     role="img"
     aria-label={label}
     style={{
-      display: 'block',
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
       flexShrink: 0,
-      width: size,
+      // Color emoji ink is wider than the em square and overlaps the count
+      // when the box is only `size` wide.
+      width: Math.ceil(size * 1.45),
       height: size,
-      lineHeight: `${size}px`,
-      fontSize: size,
-      textAlign: 'center'
+      lineHeight: 1,
+      fontSize: size
     }}
   >
     {emoji}

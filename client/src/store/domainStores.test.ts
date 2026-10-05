@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Card, DEFAULT_ROOM_FEATURES, User } from '../types';
+import { Card, CARD_TEXT_SEGMENT_SEPARATOR, DEFAULT_ROOM_FEATURES, User } from '../types';
 import { DiscussionStore } from './DiscussionStore';
 import { ExtrasStore } from './ExtrasStore';
 import { RoomStore } from './RoomStore';
@@ -50,6 +50,23 @@ describe('RoomStore', () => {
     expect(room.isCardTextHidden(card('Ben'))).toBe(false);
   });
 
+  it('shows a merged card to each author whose text was combined', () => {
+    const room = new RoomStore(boardHost);
+    room.phase = 'creation';
+    room.roomFeatures = { ...DEFAULT_ROOM_FEATURES, hideCardTextDuringCreation: true };
+    const merged: Card = {
+      ...card('Ann'),
+      text: `текст Анны${CARD_TEXT_SEGMENT_SEPARATOR}текст Бена`,
+      segmentAuthors: ['Ann', 'Ben']
+    };
+
+    room.currentUser = member('Ben');
+    expect(room.isCardTextHidden(merged)).toBe(false);
+
+    room.currentUser = member('Cara');
+    expect(room.isCardTextHidden(merged)).toBe(true);
+  });
+
   it('remembers the source column when a card moves onto the roadmap', () => {
     const room = new RoomStore(boardHost);
     room.cards = [card('Ann', 1)];
@@ -73,6 +90,27 @@ describe('DiscussionStore', () => {
     expect(discussion.discussionBursts[0].id).toBe('5');
     expect(discussion.discussionBursts[39].id).toBe('44');
   });
+
+  it('remembers the facilitator after discussion ends', () => {
+    const discussion = new DiscussionStore(() => 'room-1');
+    discussion.setFacilitatorAnnouncement({ userId: '1', userName: 'Мария', selectedAt: 10 }, false);
+    expect(discussion.sessionFacilitatorName).toBe('Мария');
+    expect(discussion.facilitatorAnnouncement).toBeNull();
+    expect(discussion.isFacilitatorDialogOpen).toBe(false);
+
+    discussion.facilitatorAnnouncement = { userId: '1', userName: 'Мария', selectedAt: 10 };
+    discussion.leaveDiscussion();
+    expect(discussion.facilitatorAnnouncement).toBeNull();
+    expect(discussion.sessionFacilitatorName).toBe('Мария');
+
+    discussion.sessionFacilitatorName = '';
+    discussion.facilitatorAnnouncement = { userId: '2', userName: 'Иван', selectedAt: 11 };
+    discussion.leaveDiscussion();
+    expect(discussion.sessionFacilitatorName).toBe('Иван');
+
+    discussion.clear();
+    expect(discussion.sessionFacilitatorName).toBe('');
+  });
 });
 
 describe('ExtrasStore', () => {
@@ -93,6 +131,26 @@ describe('ExtrasStore', () => {
     }
     expect(extras.chatMessages).toHaveLength(200);
     expect(extras.chatMessages[0].id).toBe('5');
+    expect(extras.unreadChatCount).toBe(0);
+
+    extras.addChatMessage({
+      id: 'other',
+      roomId: 'room',
+      userName: 'Ben',
+      text: 'hey',
+      timestamp: 300
+    });
+    expect(extras.unreadChatCount).toBe(1);
+    extras.setChatPanelOpen(true);
+    expect(extras.unreadChatCount).toBe(0);
+    extras.addChatMessage({
+      id: 'other-2',
+      roomId: 'room',
+      userName: 'Ben',
+      text: 'again',
+      timestamp: 301
+    });
+    expect(extras.unreadChatCount).toBe(0);
 
     const stroke = {
       id: 'stroke-1',

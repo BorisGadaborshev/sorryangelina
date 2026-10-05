@@ -17,6 +17,7 @@ const EMPTY_RATING: RetroRatingState = {
 
 export class DiscussionStore {
   facilitatorAnnouncement: FacilitatorAnnouncement | null = null;
+  sessionFacilitatorName = '';
   isFacilitatorDialogOpen = false;
   discussionNavigation: DiscussionNavigationState | null = null;
   discussionHands: string[] = [];
@@ -50,7 +51,11 @@ export class DiscussionStore {
     this.retroRating = rating;
   }
 
-  setFacilitatorAnnouncement(announcement: FacilitatorAnnouncement | null) {
+  setFacilitatorAnnouncement(announcement: FacilitatorAnnouncement | null, announce = true) {
+    const name = announcement?.userName?.trim();
+    if (name) this.sessionFacilitatorName = name;
+    if (announcement && !announce) return;
+
     this.facilitatorAnnouncement = announcement;
     if (!announcement) {
       this.isFacilitatorDialogOpen = false;
@@ -99,6 +104,8 @@ export class DiscussionStore {
   }
 
   leaveDiscussion() {
+    const name = this.facilitatorAnnouncement?.userName?.trim();
+    if (name) this.sessionFacilitatorName = name;
     this.discussionNavigation = null;
     this.facilitatorAnnouncement = null;
     this.isFacilitatorDialogOpen = false;
@@ -107,6 +114,7 @@ export class DiscussionStore {
   }
 
   clear() {
+    this.sessionFacilitatorName = '';
     this.leaveDiscussion();
     this.retroRating = { ...EMPTY_RATING };
   }

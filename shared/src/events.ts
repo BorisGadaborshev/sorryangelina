@@ -186,6 +186,7 @@ export interface ClientToServerEvents {
   'delete-card': (payload: CardIdPayload) => void;
   'delete-all-cards': (payload?: EmptyPayload) => void;
   'merge-cards': (payload: MergeCardsPayload) => void;
+  'unmerge-card': (payload: CardIdPayload) => void;
   'move-card': (payload: MoveCardPayload) => void;
   'vote-card': (payload: VoteCardPayload) => void;
   'update-ready-state': (payload: ReadyStatePayload) => void;

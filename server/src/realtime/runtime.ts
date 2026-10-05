@@ -146,16 +146,24 @@ export const refreshFacilitatorSocketId = (
     ...facilitator,
     userId: socketId
   };
-  roomFacilitators.set(roomId, updated);
+  rememberRoomFacilitator(roomId, updated);
   return updated;
 };
 
+export const rememberRoomFacilitator = (roomId: string, facilitator: FacilitatorAnnouncement): void => {
+  roomFacilitators.set(roomId, facilitator);
+  roomLastFacilitators.set(roomId, facilitator);
+};
+
 export const emitFacilitatorToSocket = (socket: Socket, roomId: string, room?: Room): void => {
-  if (room && (room.phase !== 'discussion' || !getRoomFeatures(room).facilitatorEnabled)) return;
+  const inDiscussion = !room || room.phase === 'discussion';
+  const facilitatorEnabled = !room || getRoomFeatures(room).facilitatorEnabled;
+  if (inDiscussion && !facilitatorEnabled) return;
+
   const userName = typeof socket.data.userName === 'string' ? socket.data.userName : undefined;
-  const facilitator = userName
-    ? refreshFacilitatorSocketId(roomId, userName, socket.id)
-    : roomFacilitators.get(roomId);
+  const facilitator = inDiscussion
+    ? (userName ? refreshFacilitatorSocketId(roomId, userName, socket.id) : roomFacilitators.get(roomId))
+    : (roomLastFacilitators.get(roomId) ?? roomFacilitators.get(roomId));
   if (facilitator) {
     socket.emit('facilitator-selected', facilitator);
   }
@@ -247,6 +255,7 @@ export const roomChats = new Map<string, ChatMessage[]>();
 export const roomWhiteboards = new Map<string, WhiteboardStroke[]>();
 export const roomRetroRatings = new Map<string, RetroRatingRoomState>();
 export const roomFacilitators = new Map<string, FacilitatorAnnouncement>();
+export const roomLastFacilitators = new Map<string, FacilitatorAnnouncement>();
 export const roomDiscussionNavigation = new Map<string, DiscussionNavigationState>();
 export const roomRaisedHands = new Map<string, Map<string, string>>();
 export const discussionBurstTimestamps = new Map<string, Map<string, number[]>>();
@@ -402,12 +411,12 @@ export const startRoomTimer = (
   void persistRoomEphemeral(roomId);
 };
 
-const hydratedRooms = new Set<string>();
+const roomHydrations = new Map<string, Promise<void>>();
 
 export const persistRoomEphemeral = async (roomId: string): Promise<void> => {
   const timer = roomTimers.get(roomId);
   const rating = roomRetroRatings.get(roomId);
-  const facilitator = roomFacilitators.get(roomId);
+  const facilitator = roomLastFacilitators.get(roomId) ?? roomFacilitators.get(roomId);
   const discussion = roomDiscussionNavigation.get(roomId);
   const state: StoredRoomRuntime = {
     timer: timer
@@ -422,30 +431,39 @@ export const persistRoomEphemeral = async (roomId: string): Promise<void> => {
   await writeRoomRuntime(roomId, state);
 };
 
-export const hydrateRoomEphemeral = async (roomId: string): Promise<void> => {
-  if (hydratedRooms.has(roomId)) return;
-  hydratedRooms.add(roomId);
-  try {
-    const stored = await readRoomRuntime(roomId);
-    if (stored.rating && !roomRetroRatings.has(roomId)) {
-      roomRetroRatings.set(roomId, {
-        votes: new Map(stored.rating.votes),
-        resultsVisible: stored.rating.resultsVisible
-      });
+export const hydrateRoomEphemeral = (roomId: string): Promise<void> => {
+  const existing = roomHydrations.get(roomId);
+  if (existing) return existing;
+
+  const pending = (async () => {
+    try {
+      const stored = await readRoomRuntime(roomId);
+      if (stored.rating && !roomRetroRatings.has(roomId)) {
+        roomRetroRatings.set(roomId, {
+          votes: new Map(stored.rating.votes),
+          resultsVisible: stored.rating.resultsVisible
+        });
+      }
+      if (stored.facilitator && !roomLastFacilitators.has(roomId)) {
+        roomLastFacilitators.set(roomId, stored.facilitator);
+      }
+      if (stored.facilitator && !roomFacilitators.has(roomId)) {
+        roomFacilitators.set(roomId, stored.facilitator);
+      }
+      if (stored.discussion && !roomDiscussionNavigation.has(roomId)) {
+        roomDiscussionNavigation.set(roomId, stored.discussion);
+      }
+      if (stored.timer && stored.timer.endAt > Date.now() && !roomTimers.has(roomId)) {
+        startRoomTimer(roomId, stored.timer.phase, stored.timer.durationSeconds, stored.timer.endAt);
+      }
+    } catch (error) {
+      roomHydrations.delete(roomId);
+      logger.error({ err: error, roomId }, 'failed to hydrate room runtime');
     }
-    if (stored.facilitator && !roomFacilitators.has(roomId)) {
-      roomFacilitators.set(roomId, stored.facilitator);
-    }
-    if (stored.discussion && !roomDiscussionNavigation.has(roomId)) {
-      roomDiscussionNavigation.set(roomId, stored.discussion);
-    }
-    if (stored.timer && stored.timer.endAt > Date.now() && !roomTimers.has(roomId)) {
-      startRoomTimer(roomId, stored.timer.phase, stored.timer.durationSeconds, stored.timer.endAt);
-    }
-  } catch (error) {
-    hydratedRooms.delete(roomId);
-    logger.error({ err: error, roomId }, 'failed to hydrate room runtime');
-  }
+  })();
+
+  roomHydrations.set(roomId, pending);
+  return pending;
 };
 
 export const appendChatMessage = (roomId: string, message: ChatMessage): ChatMessage[] => {
@@ -771,13 +789,14 @@ export function clearRoomRuntimeState(roomId: string, emitTimerReset = false): v
   roomWhiteboards.delete(roomId);
   roomRetroRatings.delete(roomId);
   roomFacilitators.delete(roomId);
+  roomLastFacilitators.delete(roomId);
   roomDiscussionNavigation.delete(roomId);
   roomRaisedHands.delete(roomId);
   discussionBurstTimestamps.delete(roomId);
   roomSprintVipVotes.delete(roomId);
   roomArkanoidScores.delete(roomId);
   cancelPendingDeparturesForRoom(roomId);
-  hydratedRooms.delete(roomId);
+  roomHydrations.delete(roomId);
   clearRoomVersion(roomId);
   void persistRoomEphemeral(roomId);
 }

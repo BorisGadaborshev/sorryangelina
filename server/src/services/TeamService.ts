@@ -3,6 +3,7 @@ import { pool } from '../config/database';
 import { RoomCache } from './RoomCache';
 import { TeamModel } from '../models/Team';
 import { AvailableTeam, CreateTeamInput, Team, TeamDocument, TeamMember } from '../types';
+import { normalizeTeamRoomSettings } from '../utils/teamRoomSettings';
 import { FIXED_AUTH_NAMES, normalizeAuthName } from '../config/authNames';
 import { AccountService } from './AccountService';
 import { assertNoProfanity } from './ContentModeration';
@@ -324,7 +325,8 @@ export class TeamService {
       name: doc.name,
       owner: doc.owner,
       createdAt: doc.createdAt,
-      members: doc.members
+      members: doc.members,
+      roomSettings: normalizeTeamRoomSettings(doc.roomSettings)
     };
   }
 

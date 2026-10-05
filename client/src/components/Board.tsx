@@ -110,6 +110,11 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   }, [canUseChat, isChatVisible]);
 
   useEffect(() => {
+    store.setChatPanelOpen(canUseChat && isChatVisible);
+    return () => store.setChatPanelOpen(false);
+  }, [store, canUseChat, isChatVisible]);
+
+  useEffect(() => {
     if (!canDrawOnBoard && isDrawEnabled) {
       setIsDrawEnabled(false);
     }
@@ -296,8 +301,10 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
               minHeight: 0,
               overflow: 'hidden',
               bgcolor: 'background.paper',
-              borderRadius: 1,
-              boxShadow: 1,
+              borderRadius: '12px',
+              border: '1px solid',
+              borderColor: 'divider',
+              boxShadow: themeMode === 'dark' ? 'none' : '0 8px 24px rgba(20, 24, 40, 0.06)',
               transition: 'width 0.2s ease-in-out',
               visibility: isUserListVisible ? 'visible' : 'hidden',
               display: 'flex',

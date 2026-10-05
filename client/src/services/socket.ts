@@ -650,6 +650,11 @@ export class SocketService {
     this.socket.emit('merge-cards', { targetCardId, sourceCardId });
   }
 
+  unmergeCard(cardId: string): void {
+    if (!this.store.currentUser || this.store.currentUser.role !== 'admin') return;
+    this.socket.emit('unmerge-card', { cardId });
+  }
+
   moveCard(cardId: string, column: number): void {
     this.socket.emit('move-card', { cardId, column });
   }

@@ -8,6 +8,8 @@ export const ARKANOID_POINTS_PER_HIT = 10;
 
 export class ExtrasStore {
   chatMessages: ChatMessage[] = [];
+  unreadChatCount = 0;
+  chatPanelOpen = false;
   whiteboardStrokes: WhiteboardStroke[] = [];
   sprintVip: SprintVipState = { voteCount: 0 };
   arkanoidActive = false;
@@ -28,11 +30,19 @@ export class ExtrasStore {
     this.chatMessages = messages;
   }
 
+  setChatPanelOpen(open: boolean) {
+    this.chatPanelOpen = open;
+    if (open) this.unreadChatCount = 0;
+  }
+
   addChatMessage(message: ChatMessage) {
     this.chatMessages.push(message);
     if (this.chatMessages.length > 200) {
       this.chatMessages = this.chatMessages.slice(-200);
     }
+    if (this.chatPanelOpen) return;
+    if (message.userName && message.userName === this.host.userName()) return;
+    this.unreadChatCount += 1;
   }
 
   setWhiteboardHistory(strokes: WhiteboardStroke[]) {
@@ -173,6 +183,8 @@ export class ExtrasStore {
 
   clear() {
     this.chatMessages = [];
+    this.unreadChatCount = 0;
+    this.chatPanelOpen = false;
     this.whiteboardStrokes = [];
     this.sprintVip = { voteCount: 0 };
     this.resetScores();

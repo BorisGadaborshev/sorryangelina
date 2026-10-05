@@ -2,7 +2,7 @@ import React from 'react';
 import { observer } from 'mobx-react-lite';
 import { Box, Button, IconButton, Tab, Tabs, Tooltip } from '@mui/material';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
-import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
+import { ChatToolbarButton } from './BoardToolbar';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import PersonIcon from '@mui/icons-material/Person';
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
@@ -45,11 +45,11 @@ const MobileBoardHeader: React.FC<Props> = observer(({
           </IconButton>
         </Tooltip>
         {canUseChat && (
-          <Tooltip title={isChatVisible ? 'Скрыть чат' : 'Показать чат'}>
-            <IconButton color="inherit" onClick={onToggleChat} size="small">
-              <ChatBubbleOutlineIcon />
-            </IconButton>
-          </Tooltip>
+          <ChatToolbarButton
+            active={isChatVisible}
+            unread={store.unreadChatCount}
+            onClick={onToggleChat}
+          />
         )}
         <Tooltip title="Настройки">
           <IconButton color="inherit" onClick={onOpenSettings} size="small">

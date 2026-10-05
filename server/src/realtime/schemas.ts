@@ -45,6 +45,7 @@ export const eventSchemas: Record<ClientEventName, z.ZodTypeAny> = {
   'delete-card': z.object({ cardId: id }).passthrough(),
   'delete-all-cards': z.object({}).passthrough(),
   'merge-cards': z.object({ targetCardId: id, sourceCardId: id }).passthrough(),
+  'unmerge-card': z.object({ cardId: id }).passthrough(),
   'move-card': z.object({ cardId: id, column: z.number().int() }).passthrough(),
   'vote-card': z.object({
     cardId: id,

@@ -1,8 +1,9 @@
 // Postgres access helpers
+import crypto from 'crypto';
 import { pool } from '../config/database';
-import { Room, RoomDocument, User, Card, CardComment, CardReaction, RoomFeatures, ColumnColorId, mergeCardTexts, getColumnCount, getRetroTemplate, normalizeColumnColors } from '../types';
+import { Room, RoomDocument, User, Card, CardComment, CardReaction, RoomFeatures, ColumnColorId, mergeCardTexts, mergeSegmentAuthors, alignSegmentAuthors, getCardTextSegments, getColumnCount, getRetroTemplate, normalizeColumnColors } from '../types';
 import { normalizeRoomFeatures } from '../utils/roomFeatures';
-import { lockAndAssertCardSlot, reserveCreationSlot } from '../services/UsageLimits';
+import { CARDS_PER_PERSON_PER_ROOM, CARD_LIMIT_MESSAGE, lockAndAssertCardSlot, reserveCreationSlot, UsageLimitError } from '../services/UsageLimits';
 
 type CommentRow = {
   id: string;
@@ -58,6 +59,7 @@ const ROOM_WITH_CHILDREN_SQL = `
         'origin_column', c.origin_column,
         'image_url', c.image_url,
         'author_revealed', c.author_revealed,
+        'segment_authors', c.segment_authors,
         'likes', coalesce((
           select json_agg(v.user_id) from card_votes v where v.card_id = c.id and v.vote = 'like'
         ), '[]'::json),
@@ -102,6 +104,12 @@ type RoomUserJson = {
   mood: User['mood'] | null;
 };
 
+const readSegmentAuthors = (value: unknown): string[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+  const authors = value.map((item) => (typeof item === 'string' ? item : ''));
+  return authors.some((author) => author.trim()) ? authors : undefined;
+};
+
 type RoomCardJson = {
   id: string;
   text: string;
@@ -111,6 +119,7 @@ type RoomCardJson = {
   origin_column: number | null;
   image_url: string | null;
   author_revealed: boolean;
+  segment_authors: unknown;
   likes: string[] | null;
   dislikes: string[] | null;
   comments: CommentRow[] | null;
@@ -123,10 +132,22 @@ export const RoomModel = {
     try {
       await client.query('BEGIN');
       const insertedRoom = await client.query(
-        `insert into rooms (id, password, has_password, team_id, owner, phase, template) values ($1,$2,$3,$4,$5,$6,$7)
+        `insert into rooms (id, password, has_password, team_id, owner, phase, template, column_titles, column_colors, features)
+         values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb)
          on conflict (id) do nothing
          returning id`,
-        [doc.id, doc.password, doc.hasPassword, doc.teamId ?? null, doc.owner, doc.phase, doc.template ?? 'classic']
+        [
+          doc.id,
+          doc.password,
+          doc.hasPassword,
+          doc.teamId ?? null,
+          doc.owner,
+          doc.phase,
+          doc.template ?? 'classic',
+          JSON.stringify(doc.columnTitles ?? null),
+          JSON.stringify(doc.columnColors ?? null),
+          JSON.stringify(doc.features ?? null)
+        ]
       );
       if (insertedRoom.rows.length > 0) {
         await reserveCreationSlot(client, doc.owner, 'room', doc.id);
@@ -186,6 +207,7 @@ export const RoomModel = {
       originColumn: cardRow.origin_column ?? undefined,
       imageUrl: cardRow.image_url ?? undefined,
       authorRevealed: Boolean(cardRow.author_revealed),
+      segmentAuthors: readSegmentAuthors(cardRow.segment_authors),
       comments: (cardRow.comments || []).map(mapCommentRow),
       reactions: (cardRow.reactions || []).map((reaction): CardReaction => ({
         emoji: reaction.emoji,
@@ -243,11 +265,11 @@ export const RoomModel = {
     try {
       await client.query('BEGIN');
       const { rows } = await client.query(
-        'select id, text, image_url from cards where room_id=$1 and id = any($2::text[]) for update',
+        'select id, text, image_url, created_by, segment_authors from cards where room_id=$1 and id = any($2::text[]) for update',
         [roomId, [targetCardId, sourceCardId]]
       );
-      const targetCard = rows.find((row: { id: string }) => row.id === targetCardId) as { id: string; text: string; image_url: string | null } | undefined;
-      const sourceCard = rows.find((row: { id: string }) => row.id === sourceCardId) as { id: string; text: string; image_url: string | null } | undefined;
+      const targetCard = rows.find((row: { id: string }) => row.id === targetCardId) as { id: string; text: string; image_url: string | null; created_by: string; segment_authors: unknown } | undefined;
+      const sourceCard = rows.find((row: { id: string }) => row.id === sourceCardId) as { id: string; text: string; image_url: string | null; created_by: string; segment_authors: unknown } | undefined;
 
       if (!targetCard || !sourceCard) {
         await client.query('ROLLBACK');
@@ -255,10 +277,18 @@ export const RoomModel = {
       }
 
       const mergedText = mergeCardTexts(targetCard.text, sourceCard.text);
+      const mergedAuthors = mergeSegmentAuthors(
+        targetCard.text,
+        targetCard.created_by,
+        readSegmentAuthors(targetCard.segment_authors),
+        sourceCard.text,
+        sourceCard.created_by,
+        readSegmentAuthors(sourceCard.segment_authors)
+      );
       const mergedImageUrl = targetCard.image_url || sourceCard.image_url || null;
       await client.query(
-        'update cards set text=$1, image_url=$2 where room_id=$3 and id=$4',
-        [mergedText, mergedImageUrl, roomId, targetCardId]
+        'update cards set text=$1, image_url=$2, segment_authors=$3::jsonb where room_id=$4 and id=$5',
+        [mergedText, mergedImageUrl, JSON.stringify(mergedAuthors), roomId, targetCardId]
       );
       await client.query(
         'update card_comments set card_id=$1 where card_id=$2',
@@ -279,6 +309,86 @@ export const RoomModel = {
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    return this.findOne({ id: roomId });
+  },
+
+  async unmergeCard(roomId: string, cardId: string): Promise<RoomDocument | null> {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const { rows } = await client.query(
+        'select id, text, type, created_by, column_index, origin_column, segment_authors from cards where room_id=$1 and id=$2 for update',
+        [roomId, cardId]
+      );
+      const card = rows[0] as {
+        id: string;
+        text: string;
+        type: Card['type'];
+        created_by: string;
+        column_index: number;
+        origin_column: number | null;
+        segment_authors: unknown;
+      } | undefined;
+
+      if (!card) {
+        await client.query('ROLLBACK');
+        return null;
+      }
+
+      const segments = getCardTextSegments(card.text);
+      if (segments.length < 2) {
+        await client.query('ROLLBACK');
+        return null;
+      }
+
+      const authors = alignSegmentAuthors(card.text, card.created_by, readSegmentAuthors(card.segment_authors));
+      const extras = segments.slice(1).map((text, index) => ({
+        text,
+        createdBy: authors[index + 1] || card.created_by
+      }));
+      const extraCounts = new Map<string, number>();
+      extras.forEach((extra) => {
+        extraCounts.set(extra.createdBy, (extraCounts.get(extra.createdBy) || 0) + 1);
+      });
+
+      for (const author of [...extraCounts.keys()].sort()) {
+        await client.query('select pg_advisory_xact_lock(hashtext($1)::bigint)', [`card:${roomId}:${author}`]);
+        const countResult = await client.query(
+          'select count(*)::int as count from cards where room_id = $1 and created_by = $2',
+          [roomId, author]
+        );
+        const count = Number((countResult.rows[0] as { count?: number } | undefined)?.count ?? 0);
+        if (count + (extraCounts.get(author) || 0) > CARDS_PER_PERSON_PER_ROOM) {
+          await client.query('ROLLBACK');
+          throw new UsageLimitError(CARD_LIMIT_MESSAGE);
+        }
+      }
+
+      await client.query(
+        'update cards set text=$1, segment_authors=null where room_id=$2 and id=$3',
+        [segments[0], roomId, cardId]
+      );
+
+      for (const extra of extras) {
+        await client.query(
+          `insert into cards (id, room_id, text, type, created_by, column_index, image_url, origin_column)
+           values ($1,$2,$3,$4,$5,$6,$7,$8)`,
+          [crypto.randomUUID(), roomId, extra.text, card.type, extra.createdBy, card.column_index, null, card.origin_column]
+        );
+      }
+
+      await client.query('COMMIT');
+    } catch (error) {
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        // The transaction may already be closed after an explicit rollback.
+      }
       throw error;
     } finally {
       client.release();
@@ -440,6 +550,11 @@ export const RoomModel = {
     if (typeof updates.originColumn !== 'undefined') set('origin_column', updates.originColumn);
     if (typeof updates.imageUrl !== 'undefined') set('image_url', updates.imageUrl || null);
     if (typeof updates.authorRevealed !== 'undefined') set('author_revealed', Boolean(updates.authorRevealed));
+    if (Object.prototype.hasOwnProperty.call(updates, 'segmentAuthors')) {
+      const authors = updates.segmentAuthors;
+      params.push(authors && authors.length > 0 ? JSON.stringify(authors) : null);
+      assignments.push(`segment_authors = $${params.length}::jsonb`);
+    }
     if (assignments.length === 0) return this.findOne({ id: roomId });
     params.push(cardId, roomId);
     const { rowCount } = await pool.query(

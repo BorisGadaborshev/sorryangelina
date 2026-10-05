@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { observer } from 'mobx-react-lite';
-import { AppBar, Box, IconButton, Menu, MenuItem, Toolbar, Tooltip, Typography } from '@mui/material';
+import { AppBar, Box, IconButton, Menu, Toolbar, Tooltip, Typography } from '@mui/material';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import SettingsIcon from '@mui/icons-material/Settings';
@@ -40,7 +40,6 @@ const BoardHeader: React.FC<Props> = observer(({
   onOpenSettings,
   onOpenMusic
 }) => {
-  const [moreAnchorEl, setMoreAnchorEl] = useState<null | HTMLElement>(null);
   const [timerAnchorEl, setTimerAnchorEl] = useState<null | HTMLElement>(null);
 
   const leaveRoomButton = (
@@ -89,34 +88,13 @@ const BoardHeader: React.FC<Props> = observer(({
           </Box>
         )}
         <PhaseSwitcher store={store} isMobile={isMobile} isDarkMode={isDarkMode} timerControls={timerControls} />
-        {!isCompactDesktop && !isMobile && (
+        {!isMobile && (
           <>
             <Tooltip title="Настройки">
-              <IconButton color="inherit" onClick={onOpenSettings} size="small">
+              <IconButton color="inherit" onClick={onOpenSettings} size="small" aria-label="Настройки">
                 <SettingsIcon />
               </IconButton>
             </Tooltip>
-            {leaveRoomButton}
-          </>
-        )}
-        {!isMobile && isCompactDesktop && (
-          <>
-            <IconButton size="small" onClick={(event) => setMoreAnchorEl(event.currentTarget)} aria-label="more actions">
-              <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                {'>>'}
-              </Typography>
-            </IconButton>
-            <Menu
-              anchorEl={moreAnchorEl}
-              open={Boolean(moreAnchorEl)}
-              onClose={() => setMoreAnchorEl(null)}
-              anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-              transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-            >
-              <MenuItem onClick={() => { setMoreAnchorEl(null); onOpenSettings(); }}>
-                Настройки
-              </MenuItem>
-            </Menu>
             {leaveRoomButton}
           </>
         )}

@@ -4,8 +4,8 @@ import { Box, Button, Typography } from '@mui/material';
 import { RetroStore } from '../../store/RetroStore';
 import { getPhaseLabel, PHASE_OPTIONS } from './phases';
 
-const PHASE_ACTIVE_GREEN = '#34c759';
 const PHASE_ACCENT = '#6c63ff';
+const PHASE_PLAQUE_GRADIENT = 'linear-gradient(135deg, #766dff 0%, #5b54e8 100%)';
 
 const getPhaseButtonSx = (isActive: boolean, isUnavailable: boolean, isMobile: boolean, isDarkMode: boolean) => ({
   minWidth: 0,
@@ -17,7 +17,7 @@ const getPhaseButtonSx = (isActive: boolean, isUnavailable: boolean, isMobile: b
   color: isActive ? '#fff' : 'text.secondary',
   bgcolor: isActive ? PHASE_ACCENT : (isDarkMode ? 'rgba(255,255,255,0.09)' : 'background.paper'),
   backgroundImage: isActive
-    ? 'linear-gradient(135deg, #766dff 0%, #5b54e8 100%)'
+    ? PHASE_PLAQUE_GRADIENT
     : 'none',
   boxShadow: isActive
     ? '0 4px 12px rgba(92, 84, 232, 0.3)'
@@ -77,13 +77,16 @@ const PhaseSwitcher: React.FC<Props> = observer(({ store, isMobile, isDarkMode, 
           variant="body2"
           sx={{
             whiteSpace: 'nowrap',
-            fontWeight: 600,
-            color: PHASE_ACTIVE_GREEN,
-            px: 1.25,
-            py: 0.5,
-            border: `2px solid ${PHASE_ACTIVE_GREEN}`,
-            borderRadius: 1,
+            fontWeight: 800,
+            color: '#fff',
+            px: 1.35,
+            py: 0.75,
+            borderRadius: '10px',
             lineHeight: 1.2,
+            letterSpacing: '-0.01em',
+            bgcolor: PHASE_ACCENT,
+            backgroundImage: PHASE_PLAQUE_GRADIENT,
+            boxShadow: '0 4px 12px rgba(92, 84, 232, 0.3)',
           }}
         >
           {getPhaseLabel(store.phase)}

@@ -17,7 +17,9 @@ import {
   persistRoomEphemeral,
   resolveSocketActor,
   roomDiscussionNavigation,
+  rememberRoomFacilitator,
   roomFacilitators,
+  roomLastFacilitators,
   roomRaisedHands,
   roomRetroRatings,
   selectRandomFacilitator
@@ -94,8 +96,13 @@ export function registerPhaseHandlers(socket: Socket, session: RealtimeSession):
       if (roomState.phase === 'discussion' && getRoomFeatures(roomState).facilitatorEnabled) {
         const facilitator = selectRandomFacilitator(roomState);
         if (facilitator) {
-          roomFacilitators.set(actor.roomId, facilitator);
+          rememberRoomFacilitator(actor.roomId, facilitator);
           io.to(actor.roomId).emit('facilitator-selected', facilitator);
+        }
+      } else {
+        const lastFacilitator = roomLastFacilitators.get(actor.roomId);
+        if (lastFacilitator) {
+          io.to(actor.roomId).emit('facilitator-selected', lastFacilitator);
         }
       }
 
@@ -172,17 +179,22 @@ export function registerPhaseHandlers(socket: Socket, session: RealtimeSession):
       const { backgroundImage: _backgroundImage, ...featuresWithoutBackground } = updatedRoom.features;
       io.to(actorRoomId).emit('room-features-updated', { features: featuresWithoutBackground });
 
-      if (updatedRoom.phase === 'discussion') {
-        if (updatedRoom.features.facilitatorEnabled && !roomFacilitators.get(actorRoomId)) {
-          const facilitator = selectRandomFacilitator(updatedRoom);
-          if (facilitator) {
-            roomFacilitators.set(actorRoomId, facilitator);
-            io.to(actorRoomId).emit('facilitator-selected', facilitator);
-          }
-        } else if (!updatedRoom.features.facilitatorEnabled) {
-          roomFacilitators.delete(actorRoomId);
-          io.to(actorRoomId).emit('facilitator-selected', null);
+      if (updatedRoom.features.facilitatorEnabled) {
+        let facilitator = roomFacilitators.get(actorRoomId) ?? roomLastFacilitators.get(actorRoomId) ?? null;
+        if (!facilitator && updatedRoom.phase === 'discussion') {
+          facilitator = selectRandomFacilitator(updatedRoom);
         }
+        if (facilitator) {
+          rememberRoomFacilitator(actorRoomId, facilitator);
+          io.to(actorRoomId).emit('facilitator-selected', facilitator);
+          await persistRoomEphemeral(actorRoomId);
+        }
+      } else if (updatedRoom.phase === 'discussion') {
+        roomFacilitators.delete(actorRoomId);
+        io.to(actorRoomId).emit('facilitator-selected', null);
+      }
+
+      if (updatedRoom.phase === 'discussion') {
         if (!updatedRoom.features.discussionActionsEnabled) {
           roomRaisedHands.delete(actorRoomId);
           emitDiscussionHands(actorRoomId);

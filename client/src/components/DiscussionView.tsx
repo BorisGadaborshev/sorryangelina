@@ -607,17 +607,17 @@ const DiscussionView: React.FC<Props> = observer(({ store }) => {
                         Автор: {card.createdBy}
                       </Typography>
                     )}
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexShrink: 0 }}>
                         <VoteIcon type="like" id={features.likeIcon} size={14} />
-                        <Typography variant="caption" color="text.secondary">
+                        <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1 }}>
                           {card.likes?.length || 0}
                         </Typography>
                       </Box>
                       {showDislikes && (
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexShrink: 0 }}>
                           <VoteIcon type="dislike" id={features.dislikeIcon} size={14} />
-                          <Typography variant="caption" color="text.secondary">
+                          <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1 }}>
                             {card.dislikes?.length || 0}
                           </Typography>
                         </Box>

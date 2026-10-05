@@ -99,8 +99,10 @@ export class RetroStore {
       voteError: delegated,
       phaseTimer: delegated,
       chatMessages: delegated,
+      unreadChatCount: delegated,
       whiteboardStrokes: delegated,
       facilitatorAnnouncement: delegated,
+      sessionFacilitatorName: delegated,
       isFacilitatorDialogOpen: delegated,
       discussionNavigation: delegated,
       discussionHands: delegated,
@@ -162,10 +164,12 @@ export class RetroStore {
   get columnColors() { return this.board.columnColors; }
   get roomFeatures() { return this.board.roomFeatures; }
   get chatMessages() { return this.extras.chatMessages; }
+  get unreadChatCount() { return this.extras.unreadChatCount; }
   get whiteboardStrokes() { return this.extras.whiteboardStrokes; }
   get sprintVip() { return this.extras.sprintVip; }
   get retroRating() { return this.discussion.retroRating; }
   get facilitatorAnnouncement() { return this.discussion.facilitatorAnnouncement; }
+  get sessionFacilitatorName() { return this.discussion.sessionFacilitatorName; }
   get isFacilitatorDialogOpen() { return this.discussion.isFacilitatorDialogOpen; }
   get discussionNavigation() { return this.discussion.discussionNavigation; }
   get discussionHands() { return this.discussion.discussionHands; }
@@ -265,6 +269,10 @@ export class RetroStore {
     this.extras.setChatHistory(messages);
   }
 
+  setChatPanelOpen(open: boolean) {
+    this.extras.setChatPanelOpen(open);
+  }
+
   addChatMessage(message: ChatMessage) {
     this.extras.addChatMessage(message);
   }
@@ -286,7 +294,8 @@ export class RetroStore {
   }
 
   setFacilitatorAnnouncement(announcement: FacilitatorAnnouncement | null) {
-    this.discussion.setFacilitatorAnnouncement(announcement);
+    const announce = this.phase === 'discussion' && this.roomFeatures.facilitatorEnabled;
+    this.discussion.setFacilitatorAnnouncement(announcement, announce);
   }
 
   dismissFacilitatorDialog() {

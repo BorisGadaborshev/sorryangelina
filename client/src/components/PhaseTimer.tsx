@@ -18,7 +18,7 @@ export const PhaseTimerLabel = observer(({ store, prefix }: { store: RetroStore;
   return (
     <Typography
       variant="caption"
-      sx={{ color: store.phaseTimer.running ? 'warning.main' : 'text.secondary', whiteSpace: 'nowrap' }}
+      sx={{ color: store.phaseTimer.running ? 'warning.main' : 'text.secondary', whiteSpace: 'nowrap', mt: '3px' }}
     >
       {prefix ? `${prefix}${remaining}` : remaining}
     </Typography>

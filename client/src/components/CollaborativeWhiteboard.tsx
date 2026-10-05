@@ -60,7 +60,10 @@ const CollaborativeWhiteboard: React.FC<Props> = observer(({ store, enabled, too
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.restore();
     strokesRef.current.forEach((stroke) => drawStroke(ctx, stroke));
     drawnCountRef.current = strokesRef.current.length;
   }, [drawStroke]);
@@ -81,7 +84,9 @@ const CollaborativeWhiteboard: React.FC<Props> = observer(({ store, enabled, too
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
-    if (strokes.length < drawnCountRef.current) {
+    // Local strokes are painted while drawing, so the stored list can shrink
+    // back to zero without this effect having counted them. Always repaint then.
+    if (strokes.length <= drawnCountRef.current) {
       redraw();
       return;
     }
@@ -89,7 +94,7 @@ const CollaborativeWhiteboard: React.FC<Props> = observer(({ store, enabled, too
       drawStroke(ctx, strokes[index]);
     }
     drawnCountRef.current = strokes.length;
-  }, [drawStroke, redraw, store.whiteboardStrokes]);
+  }, [drawStroke, redraw, store.whiteboardStrokes.length]);
 
   const getPoint = (event: React.MouseEvent<HTMLCanvasElement>): WhiteboardPoint | null => {
     const canvas = canvasRef.current;

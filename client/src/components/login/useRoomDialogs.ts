@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { RetroStore } from '../../store/RetroStore';
 import { teamApi } from '../../services/teamApi';
 import { AvailableRoom, RetroTemplateId } from '../../types';
@@ -25,6 +25,8 @@ export function useRoomDialogs({ store, availableRooms, refreshRooms, setIsLoadi
   const [createRoomId, setCreateRoomId] = useState('');
   const [createPassword, setCreatePassword] = useState('');
   const [createTemplate, setCreateTemplate] = useState<RetroTemplateId>('classic');
+  const [teamSettingsLoaded, setTeamSettingsLoaded] = useState(false);
+  const templateTouched = useRef(false);
 
   const [isJoinOpen, setIsJoinOpen] = useState(false);
   const [joinRoomId, setJoinRoomId] = useState('');
@@ -42,11 +44,31 @@ export function useRoomDialogs({ store, availableRooms, refreshRooms, setIsLoadi
   const inviteCopied = useCopyFlag();
 
   const openCreate = () => {
+    templateTouched.current = false;
+    setTeamSettingsLoaded(false);
     setCreateRoomId('');
     setCreatePassword('');
-    setCreateTemplate('classic');
+    setCreateTemplate(store.selectedTeam?.roomSettings?.template ?? 'classic');
     store.setError(null);
     setIsCreateOpen(true);
+
+    const team = store.selectedTeam;
+    const token = store.authProfile?.token;
+    if (!team || !token) {
+      setTeamSettingsLoaded(true);
+      return;
+    }
+    void teamApi.getTeam(team.id, token).then((fresh) => {
+      store.setSelectedTeam(fresh);
+      if (!templateTouched.current) {
+        setCreateTemplate(fresh.roomSettings?.template ?? 'classic');
+      }
+    }).catch(() => undefined).finally(() => setTeamSettingsLoaded(true));
+  };
+
+  const chooseTemplate = (template: RetroTemplateId) => {
+    templateTouched.current = true;
+    setCreateTemplate(template);
   };
 
   const openJoin = (roomId: string) => {
@@ -72,7 +94,7 @@ export function useRoomDialogs({ store, availableRooms, refreshRooms, setIsLoadi
   const createRoom = async () => {
     const profile = store.authProfile;
     const team = store.selectedTeam;
-    if (!profile || !team || !createRoomId.trim()) return;
+    if (!profile || !team || !createRoomId.trim() || !teamSettingsLoaded) return;
 
     setIsLoading(true);
     store.setError(null);
@@ -172,9 +194,10 @@ export function useRoomDialogs({ store, availableRooms, refreshRooms, setIsLoadi
     roomId: createRoomId,
     password: createPassword,
     template: createTemplate,
+    settingsLoaded: teamSettingsLoaded,
     onRoomId: setCreateRoomId,
     onPassword: setCreatePassword,
-    onTemplate: setCreateTemplate,
+    onTemplate: chooseTemplate,
     onClose: () => setIsCreateOpen(false),
     onSubmit: () => { void createRoom(); }
   };

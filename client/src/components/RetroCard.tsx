@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { observer } from 'mobx-react-lite';
 import { Card as CardType, cardTextToEditorValue, editorValueToCardText, getCardTextSegments, getColumnColorStyles } from '../types';
 import { Card, CardContent, Typography, IconButton, TextField, Box, Button, Menu, MenuItem, ListItemIcon, ListItemText, Divider } from '@mui/material';
+import CallSplit from '@mui/icons-material/CallSplit';
 import Delete from '@mui/icons-material/Delete';
 import Edit from '@mui/icons-material/Edit';
 import MoreVert from '@mui/icons-material/MoreVert';
@@ -178,6 +179,11 @@ const RetroCard: React.FC<Props> = observer(({ card, store, isMergeDropTarget = 
     handleDelete();
   };
 
+  const handleUnmerge = (event: React.MouseEvent) => {
+    event.stopPropagation();
+    store.socketService?.unmergeCard(card.id);
+  };
+
   const handleSelectImageFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
@@ -207,6 +213,7 @@ const RetroCard: React.FC<Props> = observer(({ card, store, isMergeDropTarget = 
     ? getColumnColorStyles(store.getColumnColor(originColumn as number), theme.palette.mode).accent
     : undefined;
   const isTextHidden = store.isCardTextHidden(card);
+  const canUnmerge = store.canMergeCards && !isTextHidden && getCardTextSegments(card.text).length > 1;
   const canEdit = store.canEditCard(card);
   const showAuthorClaim = Boolean(card.authorRevealed && card.createdBy);
   const showAuthor = !showAuthorClaim && !features.anonymousEnabled && Boolean(card.createdBy);
@@ -329,6 +336,26 @@ const RetroCard: React.FC<Props> = observer(({ card, store, isMergeDropTarget = 
                 ) : (
                   <CardBodyText text={card.text} />
                 )}
+                {canUnmerge && (
+                  <Button
+                    size="small"
+                    color="inherit"
+                    startIcon={<CallSplit sx={{ fontSize: 16 }} />}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onClick={handleUnmerge}
+                    sx={{
+                      mt: 0.75,
+                      px: 0.75,
+                      py: 0.25,
+                      minWidth: 0,
+                      textTransform: 'none',
+                      fontSize: '0.75rem',
+                      opacity: 0.85
+                    }}
+                  >
+                    Отменить объединение
+                  </Button>
+                )}
                 {showAuthorClaim && (
                   <Typography
                     variant="caption"
@@ -413,7 +440,7 @@ const RetroCard: React.FC<Props> = observer(({ card, store, isMergeDropTarget = 
               </Typography>
             )}
 
-            <CardSocial store={store} card={card} cardColor={cardColor} />
+            <CardSocial store={store} card={card} />
           </>
         )}
       </CardContent>

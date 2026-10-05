@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import { Socket } from 'socket.io';
 import { on, rejectAction } from '../on';
 import { RealtimeSession } from '../session';
-import { Card, getCardTypeByColumn, getRetroTemplate } from '../../types';
+import { Card, alignSegmentAuthors, compactSegmentAuthors, getCardTextSegments, getCardTypeByColumn, getRetroTemplate } from '../../types';
 import { RoomService } from '../../services/RoomService';
 import { assertCardSlotAvailable, UsageLimitError } from '../../services/UsageLimits';
 import { ContentModerationError } from '../../services/ContentModeration';
@@ -100,6 +100,10 @@ export function registerCardsHandlers(socket: Socket, session: RealtimeSession):
       if (typeof text === 'string') {
         await moderateRoomText(room, text);
         updates.text = text.trim();
+        updates.segmentAuthors = compactSegmentAuthors(
+          alignSegmentAuthors(updates.text, card.createdBy, card.segmentAuthors),
+          card.createdBy
+        ) ?? [];
       }
       if (typeof imageUrl !== 'undefined') {
         updates.imageUrl = features.mediaEnabled
@@ -204,6 +208,38 @@ export function registerCardsHandlers(socket: Socket, session: RealtimeSession):
     } catch (error) {
       logger.error({ err: error }, 'failed to merge cards');
       rejectAction(socket, 'Failed to merge cards');
+    }
+  });
+
+
+  on(socket, 'unmerge-card', async ({ cardId }) => {
+    if (!session.currentUser || typeof cardId !== 'string') return;
+
+    try {
+      const room = await RoomService.getRoom(session.currentUser.roomId);
+      if (!room || room.phase !== 'creation') return;
+      if (!getRoomFeatures(room).cardEditingEnabled) return;
+      if (!isRoomAdmin(room, session.currentUser.name)) return;
+
+      const card = room.cards.find((currentCard) => currentCard.id === cardId);
+      if (!card || getCardTextSegments(card.text).length < 2) return;
+
+      const updatedRoom = await RoomService.unmergeCard(session.currentUser.roomId, cardId);
+      if (updatedRoom) {
+        io.to(session.currentUser.roomId).emit('state-updated', {
+          cards: updatedRoom.cards,
+          phase: updatedRoom.phase,
+          users: updatedRoom.users
+        });
+        bumpRoomVersion(session.currentUser.roomId);
+      }
+    } catch (error) {
+      if (error instanceof UsageLimitError) {
+        rejectAction(socket, error.message);
+        return;
+      }
+      logger.error({ err: error }, 'failed to unmerge card');
+      rejectAction(socket, 'Не удалось отменить объединение');
     }
   });
 

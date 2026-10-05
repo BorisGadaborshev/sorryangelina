@@ -259,6 +259,41 @@ export const joinCardTextSegments = (segments: string[]): string =>
 export const mergeCardTexts = (targetText: string, sourceText: string): string =>
   joinCardTextSegments([...getCardTextSegments(targetText), ...getCardTextSegments(sourceText)]);
 
+export const alignSegmentAuthors = (
+  text: string,
+  createdBy: string,
+  segmentAuthors?: string[] | null
+): string[] => {
+  const fallback = createdBy.trim();
+  return getCardTextSegments(text).map((_, index) => segmentAuthors?.[index]?.trim() || fallback);
+};
+
+export const mergeSegmentAuthors = (
+  targetText: string,
+  targetCreatedBy: string,
+  targetAuthors: string[] | undefined,
+  sourceText: string,
+  sourceCreatedBy: string,
+  sourceAuthors: string[] | undefined
+): string[] => [
+  ...alignSegmentAuthors(targetText, targetCreatedBy, targetAuthors),
+  ...alignSegmentAuthors(sourceText, sourceCreatedBy, sourceAuthors)
+];
+
+export const compactSegmentAuthors = (authors: string[], createdBy: string): string[] | undefined => {
+  if (authors.length <= 1 && (!authors[0] || authors[0] === createdBy)) return undefined;
+  return authors;
+};
+
+export const isCardSegmentAuthor = (
+  card: { text: string; createdBy: string; segmentAuthors?: string[] },
+  name: string
+): boolean => {
+  const normalized = name.trim();
+  if (!normalized) return false;
+  return alignSegmentAuthors(card.text, card.createdBy, card.segmentAuthors).includes(normalized);
+};
+
 export interface Card {
   id: string;
   text: string;
@@ -272,6 +307,7 @@ export interface Card {
   comments?: CardComment[];
   reactions?: CardReaction[];
   authorRevealed?: boolean;
+  segmentAuthors?: string[];
 }
 
 export interface Room {
@@ -377,12 +413,27 @@ export interface TeamMember {
   role: TeamRole;
 }
 
+export interface TeamRoomSettings {
+  template: RetroTemplateId;
+  columnTitles: string[];
+  columnColors: ColumnColorId[];
+  features: RoomFeatures;
+}
+
+export const DEFAULT_TEAM_ROOM_SETTINGS: TeamRoomSettings = {
+  template: 'classic',
+  columnTitles: [...DEFAULT_COLUMN_TITLES],
+  columnColors: [...DEFAULT_COLUMN_COLORS],
+  features: { ...DEFAULT_ROOM_FEATURES }
+};
+
 export interface Team {
   id: string;
   name: string;
   owner: string;
   createdAt?: string;
   members: TeamMember[];
+  roomSettings?: TeamRoomSettings;
 }
 
 export interface AvailableTeam {

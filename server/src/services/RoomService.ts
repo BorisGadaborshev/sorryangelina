@@ -1,7 +1,17 @@
 import crypto from 'crypto';
 import { RoomModel } from '../models/Room';
-import { Room, RoomDocument, User, Card, CardComment, Phase, CreateRoomOptions, RoomFeatures, CARD_REACTION_EMOJIS, getColumnCount, getRetroTemplate, isRetroTemplateId, normalizeColumnColors } from '../types';
+import { TeamModel } from '../models/Team';
+import { Room, RoomDocument, User, Card, CardComment, Phase, CreateRoomOptions, RetroTemplateId, RoomFeatures, TeamRoomSettings, CARD_REACTION_EMOJIS, getColumnCount, getRetroTemplate, isRetroTemplateId, normalizeColumnColors } from '../types';
 import { normalizeRoomFeatures } from '../utils/roomFeatures';
+import {
+  changedRoomFeatures,
+  normalizeTeamRoomSettings,
+  patchTeamRoomFeatures,
+  roomSettingsForNewRoom,
+  withColumnColors,
+  withColumnTitles
+} from '../utils/teamRoomSettings';
+import { logger } from '../utils/logger';
 import {
   deleteCardMedia,
   deleteRoomCardMedia,
@@ -29,10 +39,14 @@ export class RoomService {
       };
     
         
-      const templateId = options.template ?? 'classic';
-      if (!isRetroTemplateId(templateId)) {
+      if (options.template && !isRetroTemplateId(options.template)) {
         throw new Error('Invalid retro template');
       }
+
+      const storedSettings = normalizeTeamRoomSettings(
+        options.teamId ? await TeamModel.getRoomSettings(options.teamId) : null
+      );
+      const { settings, templateChanged } = roomSettingsForNewRoom(storedSettings, options.template);
 
       const room = await RoomModel.create({
         id: roomId,
@@ -41,10 +55,19 @@ export class RoomService {
         teamId: options.teamId,
         owner: username,
         phase: 'creation',
-        template: templateId,
+        template: settings.template,
+        columnTitles: settings.columnTitles,
+        columnColors: settings.columnColors,
+        features: settings.features,
         users: [user],
         cards: []
       });
+
+      if (templateChanged) {
+        await this.rememberTeamRoomSettings(options.teamId, (current) => (
+          roomSettingsForNewRoom(current, settings.template).settings
+        ));
+      }
 
       const convertedRoom = this.convertToRoom(room);
           return convertedRoom;
@@ -92,7 +115,13 @@ export class RoomService {
       }
       const normalized = titles.map((title) => title.trim());
       const room = await RoomModel.updateColumnTitles(roomId, normalized);
-      return room ? this.convertToRoom(room) : null;
+      const converted = room ? this.convertToRoom(room) : null;
+      if (converted?.teamId && converted.template && converted.columnTitles) {
+        await this.rememberTeamRoomSettings(converted.teamId, (current) => (
+          withColumnTitles(current, converted.template as RetroTemplateId, converted.columnTitles || [])
+        ));
+      }
+      return converted;
       } finally {
       RoomCache.invalidate(roomId);
     }
@@ -109,7 +138,13 @@ export class RoomService {
         return null;
       }
       const room = await RoomModel.updateColumnColors(roomId, normalized);
-      return room ? this.convertToRoom(room) : null;
+      const converted = room ? this.convertToRoom(room) : null;
+      if (converted?.teamId && converted.template && converted.columnColors) {
+        await this.rememberTeamRoomSettings(converted.teamId, (current) => (
+          withColumnColors(current, converted.template as RetroTemplateId, converted.columnColors || [])
+        ));
+      }
+      return converted;
       } finally {
       RoomCache.invalidate(roomId);
     }
@@ -120,9 +155,16 @@ export class RoomService {
     try {
       const current = await RoomModel.findOne({ id: roomId });
       if (!current) return null;
+      const previous = normalizeRoomFeatures(current.features);
       const merged = normalizeRoomFeatures({ ...current.features, ...features });
       const room = await RoomModel.updateRoomFeatures(roomId, merged);
-      return room ? this.convertToRoom(room) : null;
+      const converted = room ? this.convertToRoom(room) : null;
+      if (converted?.teamId) {
+        await this.rememberTeamRoomSettings(converted.teamId, (stored) => (
+          patchTeamRoomFeatures(stored, changedRoomFeatures(previous, merged))
+        ));
+      }
+      return converted;
       } finally {
       RoomCache.invalidate(roomId);
     }
@@ -326,6 +368,16 @@ export class RoomService {
       const room = await RoomModel.mergeCards(roomId, targetCardId, sourceCardId);
       return room ? this.convertToRoom(room) : null;
       } finally {
+      RoomCache.invalidate(roomId);
+    }
+}
+
+  static async unmergeCard(roomId: string, cardId: string): Promise<Room | null> {
+    RoomCache.invalidate(roomId);
+    try {
+      const room = await RoomModel.unmergeCard(roomId, cardId);
+      return room ? this.convertToRoom(room) : null;
+    } finally {
       RoomCache.invalidate(roomId);
     }
 }
@@ -643,6 +695,21 @@ export class RoomService {
       RoomCache.invalidate(roomId);
     }
 }
+
+  private static async rememberTeamRoomSettings(
+    teamId: string | undefined,
+    update: (current: TeamRoomSettings) => TeamRoomSettings | null
+  ): Promise<void> {
+    if (!teamId) return;
+    try {
+      const current = normalizeTeamRoomSettings(await TeamModel.getRoomSettings(teamId));
+      const next = update(current);
+      if (!next || JSON.stringify(next) === JSON.stringify(current)) return;
+      await TeamModel.updateRoomSettings(teamId, next);
+    } catch (error) {
+      logger.error({ err: error, teamId }, 'failed to save team room settings');
+    }
+  }
 
   private static convertToRoom(doc: RoomDocument): Room {
     const { id, teamId, owner, phase, columnColors, createdAt, users, cards } = doc;
