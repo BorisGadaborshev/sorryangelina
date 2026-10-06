@@ -120,15 +120,15 @@ const FloorCatActor: React.FC = () => {
           }
         } else if (mood === 'play') {
           const center = x + CAT_W / 2;
-          let face: 1 | -1 = pointer.x >= center ? 1 : -1;
-          if (Math.abs(pointer.x - center) < 14) face = dir === -1 ? -1 : 1;
-          const headOffset = face === 1 ? HEAD_X : CAT_W - HEAD_X;
-          const goal = pointer.x - headOffset - 10 * face;
+          if (Math.abs(pointer.x - center) > 22) {
+            dir = pointer.x >= center ? 1 : -1;
+          }
+          const headOffset = dir === 1 ? HEAD_X : CAT_W - HEAD_X;
+          const goal = pointer.x - headOffset - 10 * dir;
           const clamped = Math.min(maxX, Math.max(4, goal));
           const delta = clamped - x;
           const maxStep = RUN_SPEED * dt;
           x += Math.sign(delta) * Math.min(Math.abs(delta), maxStep);
-          dir = Math.abs(delta) > 8 ? (delta > 0 ? 1 : -1) : face;
         }
       }
 
@@ -199,6 +199,7 @@ const FloorCatActor: React.FC = () => {
                 <div className="tail" />
                 <div className="leg leg-hind-far" />
                 <div className="leg leg-front-far" />
+                <div className="hip" />
                 <div className="body" />
                 <div className="leg leg-hind" />
                 <div className="leg leg-front" />

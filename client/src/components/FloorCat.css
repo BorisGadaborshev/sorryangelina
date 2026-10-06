@@ -89,7 +89,7 @@
 
 .cat {
   --aim: 10deg;
-  --step: 0.42s;
+  --step: 0.72s;
   --eye-x: 0px;
   --eye-y: 0px;
   position: relative;
@@ -98,7 +98,7 @@
 }
 
 .cat[data-mood='play'] {
-  --step: 0.2s;
+  --step: 0.4s;
 }
 
 .mover {
@@ -111,7 +111,7 @@
 
 .cat[data-mood='walk'] .mover,
 .cat[data-mood='play'] .mover {
-  animation: floor-cat-bob var(--step) ease-in-out infinite;
+  animation: floor-cat-bob calc(var(--step) / 2) ease-in-out infinite;
 }
 
 .tail {
@@ -119,7 +119,7 @@
   left: 9px;
   bottom: 8px;
   width: 2px;
-  height: 15px;
+  height: 20px;
   background: #f4efe6;
   border-radius: 2px;
   transform-origin: center bottom;
@@ -138,14 +138,26 @@
 
 .body {
   position: absolute;
-  left: 10px;
-  bottom: 5px;
-  width: 20px;
-  height: 10px;
+  left: 9px;
+  bottom: 4px;
+  width: 22px;
+  height: 11px;
   background: #f4efe6;
-  border-radius: 7px 8px 6px 6px;
+  border-radius: 8px 8px 6px 7px;
   z-index: 2;
   transition: left 0.28s ease, bottom 0.28s ease, width 0.28s ease, height 0.28s ease, border-radius 0.28s ease;
+}
+
+.hip {
+  position: absolute;
+  left: 5px;
+  bottom: 3px;
+  width: 16px;
+  height: 13px;
+  background: #f4efe6;
+  border-radius: 50%;
+  z-index: 2;
+  transition: opacity 0.28s ease, left 0.28s ease, bottom 0.28s ease, width 0.28s ease, height 0.28s ease;
 }
 
 .leg {
@@ -161,25 +173,28 @@
 }
 
 .leg-hind-far {
-  left: 10px;
-  animation: floor-cat-step var(--step) ease-in-out infinite;
+  left: 11px;
+  animation: floor-cat-walk var(--step) linear infinite;
+  animation-delay: calc(var(--step) * -0.5);
 }
 
 .leg-front-far {
   left: 21px;
-  animation: floor-cat-step var(--step) ease-in-out infinite reverse;
+  animation: floor-cat-walk var(--step) linear infinite;
+  animation-delay: calc(var(--step) * -0.25);
 }
 
 .leg-hind {
-  left: 16px;
+  left: 15px;
   z-index: 4;
-  animation: floor-cat-step var(--step) ease-in-out infinite reverse;
+  animation: floor-cat-walk var(--step) linear infinite;
 }
 
 .leg-front {
   left: 27px;
   z-index: 4;
-  animation: floor-cat-step var(--step) ease-in-out infinite;
+  animation: floor-cat-walk var(--step) linear infinite;
+  animation-delay: calc(var(--step) * -0.75);
 }
 
 .cat[data-action='swat'] .leg {
@@ -206,35 +221,82 @@
 
 .cat[data-mood='sit'] .leg {
   animation: none;
-}
-
-.cat[data-mood='sit'] .leg-hind,
-.cat[data-mood='sit'] .leg-hind-far {
   opacity: 0;
 }
 
-.cat[data-mood='sit'] .leg-front,
-.cat[data-mood='sit'] .leg-front-far {
-  transform: none;
-  height: 6px;
+.cat[data-mood='sit'] .hip {
+  left: 14px;
+  bottom: 0;
+  width: 18px;
+  height: 11px;
+  border-radius: 9px 9px 8px 8px;
 }
 
 .cat[data-mood='sit'] .body {
-  bottom: 3px;
-  height: 12px;
-  border-radius: 8px 10px 7px 6px;
+  left: 16px;
+  bottom: 0;
+  width: 14px;
+  height: 8px;
+  border-radius: 7px;
+}
+
+.cat[data-mood='sit'] .head {
+  left: 14px;
+  bottom: 4px;
+  width: 18px;
+  height: 17px;
+}
+
+.cat[data-mood='sit'] .eye-left {
+  left: 4px;
+}
+
+.cat[data-mood='sit'] .eye-right {
+  left: 10px;
+}
+
+.cat[data-mood='sit'] .ear-left {
+  left: 1px;
+  transform: rotate(-12deg);
+}
+
+.cat[data-mood='sit'] .ear-right {
+  right: 1px;
+  transform: rotate(12deg);
 }
 
 .cat[data-mood='sit'] .tail {
   animation: none;
-  left: 6px;
-  bottom: 2px;
-  height: 12px;
-  transform: rotate(-72deg);
+  left: 30px;
+  bottom: 3px;
+  width: 2px;
+  height: 10px;
+  background: #f4efe6;
+  border: 0;
+  border-radius: 2px;
+  transform: rotate(24deg);
+  transform-origin: left bottom;
 }
 
-.cat[data-mood='sit'] .head {
-  bottom: 10px;
+.cat[data-mood='sit'] .tail::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 1px;
+  width: 5px;
+  height: 2px;
+  background: inherit;
+  border-radius: 2px;
+  transform: rotate(50deg);
+  transform-origin: left center;
+}
+
+.floor-cat__flip:has(.cat[data-mood='sit']) .floor-cat__ask {
+  right: 16px;
+}
+
+.cat[data-mood='sleep'] .hip {
+  opacity: 0;
 }
 
 .cat[data-mood='sleep'] .body {
@@ -254,7 +316,6 @@
   background: #f4efe6;
   border-radius: 50%;
   z-index: 3;
-  transition: left 0.28s ease, bottom 0.28s ease, transform 0.2s ease;
 }
 
 .cat[data-mood='sleep'] .head {
@@ -266,8 +327,7 @@
 }
 
 .cat[data-mood='play'][data-look='up'] .head {
-  transform: translateY(-1px) rotate(-8deg);
-  transform-origin: 30% 80%;
+  transform: translateY(-1px);
 }
 
 .ear {
@@ -349,13 +409,21 @@
   }
 }
 
-@keyframes floor-cat-step {
-  0%,
-  100% {
-    transform: rotate(18deg);
+@keyframes floor-cat-walk {
+  0% {
+    transform: translateX(-2.5px) rotate(10deg);
   }
-  50% {
-    transform: rotate(-18deg);
+  8% {
+    transform: translateX(0) translateY(-2.5px) rotate(2deg);
+  }
+  16% {
+    transform: translateX(2.5px) translateY(-2.5px) rotate(-10deg);
+  }
+  25% {
+    transform: translateX(2.5px) rotate(-10deg);
+  }
+  100% {
+    transform: translateX(-2.5px) rotate(10deg);
   }
 }
 
