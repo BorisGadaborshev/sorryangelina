@@ -10,7 +10,7 @@ const PrivacyNotice: React.FC = () => {
         position: 'fixed',
         left: { xs: 12, sm: 24 },
         right: { xs: 12, sm: 24 },
-        bottom: { xs: 24, sm: 28 },
+        bottom: { xs: 12, sm: 20 },
         zIndex: 1100,
         display: 'flex',
         justifyContent: 'center',

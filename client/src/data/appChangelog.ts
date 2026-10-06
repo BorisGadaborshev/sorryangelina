@@ -6,6 +6,13 @@ export interface AppVersion {
 
 export const APP_CHANGELOG: AppVersion[] = [
   {
+    version: '1.21.10',
+    date: '06.10.2026',
+    changes: [
+      'Котик ходит только в комнате и не появляется на экране входа'
+    ]
+  },
+  {
     version: '1.21.09',
     date: '06.10.2026',
     changes: [

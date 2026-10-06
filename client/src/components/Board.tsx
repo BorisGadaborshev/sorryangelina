@@ -19,6 +19,7 @@ import { getNextPhase, getPhaseLabel } from './board/phases';
 import { useBoardMood } from './board/useBoardMood';
 import { useAllReadyPrompt } from './board/useAllReadyPrompt';
 import { setFloorCatArkanoidActive } from './floorCatPreference';
+import FloorCat from './FloorCat';
 
 const CollaborativeWhiteboard = lazy(() => import('./CollaborativeWhiteboard'));
 const ArkanoidGame = lazy(() => import('./ArkanoidGame'));
@@ -445,6 +446,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
       />
 
       {rejoinDialog}
+      <FloorCat />
     </Box>
   );
 });
