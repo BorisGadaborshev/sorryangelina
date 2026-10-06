@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useTheme } from '@mui/material/styles';
 import './FloorCat.css';
 import { FLOOR_CAT_VISIBILITY_EVENT, isFloorCatVisible } from './floorCatPreference';
 
@@ -12,6 +13,7 @@ const NEAR_RADIUS = 100;
 const rand = (min: number, max: number) => min + Math.random() * (max - min);
 
 const FloorCatActor: React.FC = () => {
+  const themeMode = useTheme().palette.mode;
   const actorRef = useRef<HTMLButtonElement>(null);
   const flipRef = useRef<HTMLDivElement>(null);
   const liftRef = useRef<HTMLDivElement>(null);
@@ -190,7 +192,7 @@ const FloorCatActor: React.FC = () => {
   }, []);
 
   return (
-    <div className="floor-cat">
+    <div className="floor-cat" data-theme={themeMode}>
       <button type="button" className="floor-cat__actor" ref={actorRef} aria-label="Котик" onClick={poke}>
         <div className="floor-cat__flip" ref={flipRef}>
           <div className="floor-cat__lift" ref={liftRef}>
