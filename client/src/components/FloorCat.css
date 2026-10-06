@@ -1,0 +1,422 @@
+.floor-cat {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 0;
+  z-index: 1160;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.floor-cat__actor {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 46px;
+  height: 32px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  pointer-events: auto;
+  cursor: pointer;
+  will-change: transform;
+}
+
+.floor-cat__actor:focus {
+  outline: none;
+}
+
+.floor-cat__actor:focus-visible {
+  outline: 2px solid rgba(255, 244, 220, 0.85);
+  outline-offset: 2px;
+}
+
+.floor-cat__flip {
+  position: relative;
+  width: 46px;
+  height: 32px;
+  transform: scaleX(var(--face, 1));
+  transform-origin: center bottom;
+}
+
+.floor-cat__lift {
+  transition: transform 0.16s ease-out;
+}
+
+.floor-cat__zzz,
+.floor-cat__ask {
+  position: absolute;
+  pointer-events: none;
+  font-family: Nunito, sans-serif;
+  font-weight: 800;
+  line-height: 1;
+  color: #f7f2e8;
+  text-shadow:
+    0 0 1px rgba(40, 30, 20, 0.9),
+    0 0 6px rgba(255, 244, 220, 0.95);
+}
+
+.floor-cat__zzz {
+  top: -16px;
+  right: 0;
+  font-size: 13px;
+  letter-spacing: 0.5px;
+  opacity: 0;
+  transform: scaleX(var(--face, 1));
+}
+
+.floor-cat__flip:has(.cat[data-mood='sleep']) .floor-cat__zzz {
+  opacity: 1;
+  animation: floor-cat-zzz 1.6s ease-in-out infinite;
+}
+
+.floor-cat__ask {
+  top: -16px;
+  right: 4px;
+  font-size: 14px;
+  opacity: 0;
+  transform: scaleX(var(--face, 1));
+}
+
+.floor-cat__flip:has(.cat[data-ask='1']) .floor-cat__ask {
+  opacity: 1;
+  animation: floor-cat-ask 1.1s ease-in-out infinite;
+}
+
+.cat {
+  --aim: 10deg;
+  --step: 0.42s;
+  --eye-x: 0px;
+  --eye-y: 0px;
+  position: relative;
+  width: 46px;
+  height: 32px;
+}
+
+.cat[data-mood='play'] {
+  --step: 0.2s;
+}
+
+.mover {
+  position: absolute;
+  inset: 0;
+  filter:
+    drop-shadow(0 0 0.6px rgba(62, 48, 28, 0.55))
+    drop-shadow(0 0 3px rgba(255, 244, 214, 0.8));
+}
+
+.cat[data-mood='walk'] .mover,
+.cat[data-mood='play'] .mover {
+  animation: floor-cat-bob var(--step) ease-in-out infinite;
+}
+
+.tail {
+  position: absolute;
+  left: 9px;
+  bottom: 8px;
+  width: 2px;
+  height: 15px;
+  background: #f4efe6;
+  border-radius: 2px;
+  transform-origin: center bottom;
+  animation: floor-cat-wag 0.9s ease-in-out infinite;
+  z-index: 1;
+  transition: opacity 0.2s ease;
+}
+
+.cat[data-mood='play'] .tail {
+  animation-duration: 0.28s;
+}
+
+.cat[data-mood='sleep'] .tail {
+  opacity: 0;
+}
+
+.body {
+  position: absolute;
+  left: 10px;
+  bottom: 5px;
+  width: 20px;
+  height: 10px;
+  background: #f4efe6;
+  border-radius: 7px 8px 6px 6px;
+  z-index: 2;
+  transition: left 0.28s ease, bottom 0.28s ease, width 0.28s ease, height 0.28s ease, border-radius 0.28s ease;
+}
+
+.leg {
+  position: absolute;
+  bottom: 0;
+  width: 2px;
+  height: 7px;
+  background: #f4efe6;
+  border-radius: 1.5px;
+  transform-origin: center top;
+  z-index: 1;
+  transition: opacity 0.2s ease, height 0.2s ease;
+}
+
+.leg-hind-far {
+  left: 10px;
+  animation: floor-cat-step var(--step) ease-in-out infinite;
+}
+
+.leg-front-far {
+  left: 21px;
+  animation: floor-cat-step var(--step) ease-in-out infinite reverse;
+}
+
+.leg-hind {
+  left: 16px;
+  z-index: 4;
+  animation: floor-cat-step var(--step) ease-in-out infinite reverse;
+}
+
+.leg-front {
+  left: 27px;
+  z-index: 4;
+  animation: floor-cat-step var(--step) ease-in-out infinite;
+}
+
+.cat[data-action='swat'] .leg {
+  animation-play-state: paused;
+}
+
+.cat[data-action='swat'] .leg-front {
+  animation: floor-cat-swat 0.34s ease-in-out infinite;
+  transform-origin: center top;
+}
+
+.cat[data-action='swat'] .leg-front-far {
+  animation: none;
+  transform: none;
+}
+
+.cat[data-mood='sleep'] .leg {
+  opacity: 0;
+}
+
+.cat[data-mood='sit'] .mover {
+  animation: none;
+}
+
+.cat[data-mood='sit'] .leg {
+  animation: none;
+}
+
+.cat[data-mood='sit'] .leg-hind,
+.cat[data-mood='sit'] .leg-hind-far {
+  opacity: 0;
+}
+
+.cat[data-mood='sit'] .leg-front,
+.cat[data-mood='sit'] .leg-front-far {
+  transform: none;
+  height: 6px;
+}
+
+.cat[data-mood='sit'] .body {
+  bottom: 3px;
+  height: 12px;
+  border-radius: 8px 10px 7px 6px;
+}
+
+.cat[data-mood='sit'] .tail {
+  animation: none;
+  left: 6px;
+  bottom: 2px;
+  height: 12px;
+  transform: rotate(-72deg);
+}
+
+.cat[data-mood='sit'] .head {
+  bottom: 10px;
+}
+
+.cat[data-mood='sleep'] .body {
+  left: 1px;
+  bottom: 0;
+  width: 42px;
+  height: 14px;
+  border-radius: 11px;
+}
+
+.head {
+  position: absolute;
+  left: 22px;
+  bottom: 8px;
+  width: 16px;
+  height: 15px;
+  background: #f4efe6;
+  border-radius: 50%;
+  z-index: 3;
+  transition: left 0.28s ease, bottom 0.28s ease, transform 0.2s ease;
+}
+
+.cat[data-mood='sleep'] .head {
+  left: 24px;
+  bottom: 2px;
+  width: 17px;
+  height: 15px;
+  transform: none;
+}
+
+.cat[data-mood='play'][data-look='up'] .head {
+  transform: translateY(-1px) rotate(-8deg);
+  transform-origin: 30% 80%;
+}
+
+.ear {
+  position: absolute;
+  top: -4px;
+  width: 7px;
+  height: 7px;
+  background: #f4efe6;
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+
+.ear-left {
+  left: 1px;
+  transform: rotate(-16deg);
+}
+
+.ear-right {
+  right: 0;
+  transform: rotate(14deg);
+}
+
+.cat[data-mood='sleep'] .ear {
+  width: 6px;
+  height: 5px;
+  top: -3px;
+}
+
+.eye {
+  position: absolute;
+  top: 6px;
+  width: 2.5px;
+  height: 2.5px;
+  background: #1a1a1a;
+  border-radius: 50%;
+  z-index: 1;
+}
+
+.eye-left {
+  left: 3px;
+}
+
+.eye-right {
+  left: 8px;
+}
+
+.cat[data-mood='walk'] .eye,
+.cat[data-mood='play'] .eye,
+.cat[data-mood='sit'] .eye {
+  animation: floor-cat-blink 4.8s infinite;
+  transform-origin: center;
+}
+
+.cat[data-mood='sleep'] .eye {
+  animation: none;
+  top: 7px;
+  width: 4px;
+  height: 2px;
+  background: transparent;
+  border-bottom: 1.25px solid #2a2a2a;
+  border-radius: 0 0 4px 4px;
+  transform: none;
+}
+
+.cat[data-mood='sleep'] .eye-left {
+  left: 2px;
+}
+
+.cat[data-mood='sleep'] .eye-right {
+  left: 8px;
+}
+
+@keyframes floor-cat-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-1px);
+  }
+}
+
+@keyframes floor-cat-step {
+  0%,
+  100% {
+    transform: rotate(18deg);
+  }
+  50% {
+    transform: rotate(-18deg);
+  }
+}
+
+@keyframes floor-cat-wag {
+  0%,
+  100% {
+    transform: rotate(-6deg);
+  }
+  50% {
+    transform: rotate(-28deg);
+  }
+}
+
+@keyframes floor-cat-blink {
+  0%,
+  90%,
+  100% {
+    transform: translate(var(--eye-x), var(--eye-y)) scaleY(1);
+  }
+  95% {
+    transform: translate(var(--eye-x), var(--eye-y)) scaleY(0.15);
+  }
+}
+
+@keyframes floor-cat-swat {
+  0%,
+  100% {
+    transform: rotate(14deg);
+  }
+  40% {
+    transform: rotate(-58deg);
+  }
+}
+
+@keyframes floor-cat-zzz {
+  0%,
+  100% {
+    transform: scaleX(var(--face, 1)) translateY(0);
+  }
+  50% {
+    transform: scaleX(var(--face, 1)) translateY(-3px);
+  }
+}
+
+@keyframes floor-cat-ask {
+  0%,
+  100% {
+    transform: scaleX(var(--face, 1)) translateY(0);
+  }
+  50% {
+    transform: scaleX(var(--face, 1)) translateY(-3px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mover,
+  .tail,
+  .leg,
+  .paw,
+  .eye,
+  .floor-cat__zzz {
+    animation: none !important;
+  }
+}

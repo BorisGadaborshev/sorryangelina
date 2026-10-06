@@ -43,6 +43,7 @@ import AddCardIcon from '@mui/icons-material/AddCard';
 import RemoveIcon from '@mui/icons-material/Remove';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import WallpaperIcon from '@mui/icons-material/Wallpaper';
+import PetsIcon from '@mui/icons-material/Pets';
 import { RetroStore } from '../store/RetroStore';
 import { ACCENT_GRADIENT, ACCENT_GRADIENT_HOVER, ACCENT_SHADOW } from './readyButtonStyles';
 import { DislikeIconId, LikeIconId, MAX_VOTE_LIMIT, MIN_VOTE_LIMIT, RoomFeatures } from '../types';
@@ -51,6 +52,7 @@ import {
   LIKE_ICON_OPTIONS,
   VoteIcon
 } from './VoteIcon';
+import { readFloorCatEnabled, setFloorCatEnabled } from './floorCatPreference';
 
 const AboutAppDialog = lazy(() => import('./AboutAppDialog'));
 const BackgroundImageDialog = lazy(() => import('./BackgroundImageDialog'));
@@ -126,6 +128,7 @@ const RoomSettingsSidebar: React.FC<Props> = observer(({ store, open, onClose, t
   const [isDeleteAllCardsDialogOpen, setIsDeleteAllCardsDialogOpen] = useState(false);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
   const [isBackgroundDialogOpen, setIsBackgroundDialogOpen] = useState(false);
+  const [catEnabled, setCatEnabled] = useState(readFloorCatEnabled);
   const showTooltips = useMediaQuery('(hover: hover) and (pointer: fine)');
   const features = store.roomFeatures;
   const canEditFeatures = store.isAdmin;
@@ -309,6 +312,18 @@ const RoomSettingsSidebar: React.FC<Props> = observer(({ store, open, onClose, t
                 tooltip={themeMode === 'dark' ? 'Переключить на светлую тему' : 'Переключить на тёмную тему'}
                 icon={themeMode === 'dark' ? <LightModeIcon fontSize="inherit" /> : <DarkModeIcon fontSize="inherit" />}
                 onClick={onToggleTheme}
+                showTooltip={showTooltips}
+              />
+              <FeatureToggle
+                active={catEnabled}
+                label="Котик"
+                tooltip={catEnabled ? 'Скрыть котика на нижнем крае экрана' : 'Показать котика на нижнем крае экрана'}
+                icon={<PetsIcon fontSize="inherit" />}
+                onClick={() => {
+                  const next = !catEnabled;
+                  setCatEnabled(next);
+                  setFloorCatEnabled(next);
+                }}
                 showTooltip={showTooltips}
               />
               <FeatureToggle

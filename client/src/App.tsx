@@ -4,6 +4,7 @@ import { RetroStore } from './store/RetroStore';
 import { RetroStoreProvider } from './store/StoreContext';
 import { observer } from 'mobx-react-lite';
 import ErrorBoundary from './components/ErrorBoundary';
+import FloorCat from './components/FloorCat';
 
 const Login = lazy(() => import('./components/Login'));
 const Board = lazy(() => import('./components/Board'));
@@ -84,6 +85,7 @@ const App = observer(() => {
           </Suspense>
         </RetroStoreProvider>
       </ErrorBoundary>
+      <FloorCat />
     </ThemeProvider>
   );
 });

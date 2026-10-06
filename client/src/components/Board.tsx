@@ -18,6 +18,7 @@ import { AllReadyDialog, FacilitatorDialog, MoodDialog, RoomRejoinDialog } from 
 import { getNextPhase, getPhaseLabel } from './board/phases';
 import { useBoardMood } from './board/useBoardMood';
 import { useAllReadyPrompt } from './board/useAllReadyPrompt';
+import { setFloorCatArkanoidActive } from './floorCatPreference';
 
 const CollaborativeWhiteboard = lazy(() => import('./CollaborativeWhiteboard'));
 const ArkanoidGame = lazy(() => import('./ArkanoidGame'));
@@ -125,6 +126,11 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
       setIsArkanoidEnabled(false);
     }
   }, [canPlayArkanoid, isArkanoidEnabled]);
+
+  useEffect(() => {
+    setFloorCatArkanoidActive(isArkanoidEnabled);
+    return () => setFloorCatArkanoidActive(false);
+  }, [isArkanoidEnabled]);
 
   const submitRejoin = async () => {
     const session = readStoredSession();
