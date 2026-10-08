@@ -373,6 +373,54 @@
   transform: rotate(14deg);
 }
 
+.bow {
+  display: none;
+  position: absolute;
+  top: -3px;
+  left: 3px;
+  width: 3px;
+  height: 3px;
+  background: #ff6b9d;
+  border-radius: 50%;
+  z-index: 6;
+  box-shadow: 0 0 2px rgba(255, 107, 157, 0.7);
+}
+
+.bow::before,
+.bow::after {
+  content: '';
+  position: absolute;
+  top: -1px;
+  width: 6px;
+  height: 5px;
+  background: #ff7eb6;
+  border-radius: 50%;
+}
+
+.bow::before {
+  left: -5px;
+  transform: rotate(-28deg);
+}
+
+.bow::after {
+  left: 2px;
+  transform: rotate(28deg);
+}
+
+.floor-cat[data-bow='1'] .bow {
+  display: block;
+}
+
+.cat[data-mood='sit'] .bow {
+  top: -5px;
+  left: 7px;
+}
+
+.cat[data-mood='sleep'] .bow {
+  top: -2px;
+  left: 2px;
+}
+
 .cat[data-mood='sleep'] .ear {
   width: 6px;
   height: 5px;

@@ -1,7 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { observer } from 'mobx-react-lite';
 import { useTheme } from '@mui/material/styles';
 import './FloorCat.css';
 import { FLOOR_CAT_VISIBILITY_EVENT, isFloorCatVisible } from './floorCatPreference';
+import { useRetroStore } from '../store/StoreContext';
+import { isFemininePersonName } from '../utils/feminineName';
 
 const CAT_W = 46;
 const HEAD_X = 32;
@@ -12,8 +15,10 @@ const NEAR_RADIUS = 100;
 
 const rand = (min: number, max: number) => min + Math.random() * (max - min);
 
-const FloorCatActor: React.FC = () => {
+const FloorCatActor: React.FC = observer(() => {
   const themeMode = useTheme().palette.mode;
+  const store = useRetroStore();
+  const withBow = isFemininePersonName(store.currentUser?.name || store.authProfile?.name);
   const actorRef = useRef<HTMLButtonElement>(null);
   const flipRef = useRef<HTMLDivElement>(null);
   const liftRef = useRef<HTMLDivElement>(null);
@@ -192,7 +197,7 @@ const FloorCatActor: React.FC = () => {
   }, []);
 
   return (
-    <div className="floor-cat" data-theme={themeMode}>
+    <div className="floor-cat" data-theme={themeMode} data-bow={withBow ? '1' : '0'}>
       <button type="button" className="floor-cat__actor" ref={actorRef} aria-label="Котик" onClick={poke}>
         <div className="floor-cat__flip" ref={flipRef}>
           <div className="floor-cat__lift" ref={liftRef}>
@@ -208,6 +213,7 @@ const FloorCatActor: React.FC = () => {
                 <div className="head">
                   <div className="ear ear-left" />
                   <div className="ear ear-right" />
+                  <div className="bow" aria-hidden="true" />
                   <div className="eye eye-left" />
                   <div className="eye eye-right" />
                 </div>
@@ -220,7 +226,7 @@ const FloorCatActor: React.FC = () => {
       </button>
     </div>
   );
-};
+});
 
 const FloorCat: React.FC = () => {
   const [shown, setShown] = useState(isFloorCatVisible);
