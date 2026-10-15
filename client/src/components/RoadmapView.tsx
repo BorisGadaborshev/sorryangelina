@@ -16,11 +16,12 @@ const RoadmapView: React.FC<Props> = observer(({ store }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery('(max-width:900px)');
   const template = store.templateConfig;
-  const roadmapColumns = template.roadmapColumns ?? [];
+  const roadmapColumns = template.roadmapColumns;
   const negativeIndexes = template.columns
     .map((column, index) => (column.kind === 'negative' ? index : -1))
     .filter((index) => index >= 0);
   const sourceCards = store.cards.filter((card) => negativeIndexes.includes(card.column));
+  const sourceTitles = negativeIndexes.map((index) => template.columns[index].title);
 
   const handleDragEnd = (result: DropResult) => {
     const { destination, source, draggableId } = result;
@@ -74,7 +75,9 @@ const RoadmapView: React.FC<Props> = observer(({ store }) => {
             Ещё не в карте
           </Typography>
           <Typography variant="caption" color="text.secondary" align="center">
-            Жёлтые и красные карточки. Перетащите их в анализ, эксперимент или результат.
+            {sourceTitles.length > 0
+              ? `Карточки из ${sourceTitles.map((title) => `«${title}»`).join(' и ')}. Перетащите их в анализ, задачу или результат.`
+              : 'Перетащите карточки в анализ, задачу или результат.'}
           </Typography>
           <Droppable droppableId="roadmap-source">
             {(provided, snapshot) => (

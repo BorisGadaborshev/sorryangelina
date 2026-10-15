@@ -27,6 +27,7 @@ const ColumnHeader: React.FC<Props> = observer(({ store, columnIndex, cards, acc
   const copied = useCopyFlag();
 
   const displayTitle = store.getColumnTitle(columnIndex);
+  const columnTooltip = store.getColumnTooltip(columnIndex);
   const isStoredColumn = columnIndex < store.templateConfig.columns.length;
   const canEditTitle = store.canEditColumnTitles() && isStoredColumn;
   const columnColorId = store.getColumnColor(columnIndex);
@@ -140,9 +141,25 @@ const ColumnHeader: React.FC<Props> = observer(({ store, columnIndex, cards, acc
         </Box>
       ) : (
         <>
-          <Typography variant="h6" align="center" sx={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere', lineHeight: 1.2 }}>
-            {displayTitle}
-          </Typography>
+          <Tooltip
+            title={columnTooltip ?? ''}
+            disableHoverListener={!columnTooltip}
+            enterDelay={400}
+            enterNextDelay={200}
+            componentsProps={{
+              tooltip: {
+                sx: { maxWidth: 360, whiteSpace: 'pre-line', fontSize: '0.8125rem', lineHeight: 1.45 }
+              }
+            }}
+          >
+            <Typography
+              variant="h6"
+              align="center"
+              sx={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere', lineHeight: 1.2, cursor: columnTooltip ? 'help' : 'inherit' }}
+            >
+              {displayTitle}
+            </Typography>
+          </Tooltip>
           {canCopyMarkdown && (
             <Tooltip title={copyLabel}>
               <span>

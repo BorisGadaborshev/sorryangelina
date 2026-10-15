@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { observer } from 'mobx-react-lite';
-import { Card as CardType, cardTextToEditorValue, editorValueToCardText, getCardTextSegments, getColumnColorStyles } from '../types';
+import { Card as CardType, cardTextToEditorValue, editorValueToCardText, getCardTextSegments, getColumnColorStyles, isRoadmapTaskColumn } from '../types';
 import { Card, CardContent, Typography, IconButton, TextField, Box, Button, Menu, MenuItem, ListItemIcon, ListItemText, Divider } from '@mui/material';
 import CallSplit from '@mui/icons-material/CallSplit';
 import Delete from '@mui/icons-material/Delete';
@@ -11,6 +11,7 @@ import { useTheme } from '@mui/material/styles';
 import { ARKANOID_HITS_TO_BREAK, RetroStore } from '../store/RetroStore';
 import { fileToImageDataUrl, IMAGE_FILE_ACCEPT, safeMediaSrc } from '../utils/media';
 import CardSocial from './CardSocial';
+import TaskCardMeta from './TaskCardMeta';
 
 interface Props {
   card: CardType;
@@ -138,7 +139,7 @@ const RetroCard: React.FC<Props> = observer(({ card, store, isMergeDropTarget = 
   }, [card.imageUrl]);
 
   const handleEdit = () => {
-    if (store.canEditCard(card) && (store.phase === 'creation' || store.phase === 'discussion' || store.phase === 'roadmap')) {
+    if (store.canEditCard(card) && (store.phase === 'creation' || store.phase === 'grouping' || store.phase === 'discussion' || store.phase === 'roadmap')) {
       setText(cardTextToEditorValue(card.text));
       setImageUrl(card.imageUrl || '');
       setImagePickError('');
@@ -148,14 +149,14 @@ const RetroCard: React.FC<Props> = observer(({ card, store, isMergeDropTarget = 
 
   const handleSave = () => {
     const nextText = editorValueToCardText(text);
-    if (nextText && store.socket && (store.phase === 'creation' || store.phase === 'discussion' || store.phase === 'roadmap') && store.canEditCard(card)) {
+    if (nextText && store.socket && (store.phase === 'creation' || store.phase === 'grouping' || store.phase === 'discussion' || store.phase === 'roadmap') && store.canEditCard(card)) {
       store.socketService?.updateCard(card.id, nextText, imageUrl.trim() || undefined);
       setIsEditing(false);
     }
   };
 
   const handleDelete = () => {
-    if (store.canEditCard(card) && store.socket && (store.phase === 'creation' || store.phase === 'discussion' || store.phase === 'roadmap')) {
+    if (store.canEditCard(card) && store.socket && (store.phase === 'creation' || store.phase === 'grouping' || store.phase === 'discussion' || store.phase === 'roadmap')) {
       store.socket.emit('delete-card', { cardId: card.id });
     }
   };
@@ -203,6 +204,7 @@ const RetroCard: React.FC<Props> = observer(({ card, store, isMergeDropTarget = 
   const features = store.roomFeatures;
   const isEditingAllowed = (
     store.phase === 'creation'
+    || store.phase === 'grouping'
     || store.phase === 'roadmap'
     || (store.phase === 'discussion' && store.canEditCard(card))
   );
@@ -438,6 +440,10 @@ const RetroCard: React.FC<Props> = observer(({ card, store, isMergeDropTarget = 
               <Typography variant="caption" color="error" sx={{ mt: 1, display: 'block' }}>
                 Не удалось загрузить изображение по этой ссылке
               </Typography>
+            )}
+
+            {!isTextHidden && isRoadmapTaskColumn(store.templateConfig, card.column) && (
+              <TaskCardMeta card={card} store={store} />
             )}
 
             <CardSocial store={store} card={card} />

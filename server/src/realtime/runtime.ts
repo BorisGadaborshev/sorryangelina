@@ -13,7 +13,11 @@ import {
   FacilitatorAnnouncement,
   SprintVipState,
   WhiteboardPoint,
-  WhiteboardStroke
+  WhiteboardStroke,
+  getDiscussionCards,
+  getRetroTemplate,
+  isDiscussionCard,
+  sortCardsByVotes
 } from '../types';
 import { normalizeRoomFeatures } from '../utils/roomFeatures';
 import { RoomCache } from '../services/RoomCache';
@@ -62,13 +66,10 @@ export const clearRoomPasswordAttempts = (socketId: string): void => {
   roomPasswordAttempts.delete(socketId);
 };
 
-// Helper function to get sorted cards by votes
-export const getSortedCards = (cards: Card[]): Card[] => {
-  return [...cards].sort((a, b) => ((b.likes?.length || 0) + (b.dislikes?.length || 0)) - ((a.likes?.length || 0) + (a.dislikes?.length || 0)));
-};
+export const getSortedCards = (cards: Card[]): Card[] => sortCardsByVotes(cards);
 
-export const buildDiscussionNavigation = (cards: Card[]): DiscussionNavigationState => ({
-  unviewedCardIds: getSortedCards(cards).map((card) => card.id),
+export const buildDiscussionNavigation = (cards: Card[], template?: RetroTemplate): DiscussionNavigationState => ({
+  unviewedCardIds: getDiscussionCards(cards, template ?? getRetroTemplate()).map((card) => card.id),
   viewedCardIds: []
 });
 
@@ -77,7 +78,7 @@ export const ensureDiscussionNavigation = (roomId: string, room: Room): Discussi
   const existing = roomDiscussionNavigation.get(roomId);
   if (existing) return existing;
 
-  const initial = buildDiscussionNavigation(room.cards);
+  const initial = buildDiscussionNavigation(room.cards, getRetroTemplate(room.template));
   roomDiscussionNavigation.set(roomId, initial);
   return initial;
 };
@@ -186,11 +187,13 @@ export const normalizeDiscussionNavigation = (
   room: Room,
   state: DiscussionNavigationState
 ): DiscussionNavigationState | null => {
-  const availableIds = new Set(room.cards.map((card) => card.id));
+  const template = getRetroTemplate(room.template);
+  const discussionCards = room.cards.filter((card) => isDiscussionCard(card, template));
+  const availableIds = new Set(discussionCards.map((card) => card.id));
   const unviewedCardIds = state.unviewedCardIds.filter((id) => availableIds.has(id));
   const viewedCardIds = state.viewedCardIds.filter((id) => availableIds.has(id));
   const knownIds = new Set([...unviewedCardIds, ...viewedCardIds]);
-  const appended = room.cards
+  const appended = discussionCards
     .map((card) => card.id)
     .filter((id) => !knownIds.has(id));
 
@@ -205,7 +208,7 @@ export const normalizeDiscussionNavigation = (
 };
 
 export const canInteractWithCardSocial = (phase: Phase): boolean =>
-  phase === 'creation' || phase === 'voting' || phase === 'discussion' || phase === 'roadmap';
+  phase !== 'rating';
 
 export const getRoomFeatures = (room: Room) => normalizeRoomFeatures(room.features);
 

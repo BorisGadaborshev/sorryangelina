@@ -2,6 +2,7 @@ import type {
   ArkanoidScoreEntry,
   Card,
   CardComment,
+  CardTask,
   CardReaction,
   CardType,
   ChatMessage,
@@ -35,6 +36,11 @@ export interface UpdateCardPayload {
   cardId: string;
   text?: string;
   imageUrl?: string | null;
+}
+
+export interface UpdateCardTaskPayload {
+  cardId: string;
+  task: CardTask | null;
 }
 
 export interface CardIdPayload {
@@ -183,6 +189,7 @@ export interface ClientToServerEvents {
   error: (error: unknown) => void;
   'add-card': (payload: AddCardPayload) => void;
   'update-card': (payload: UpdateCardPayload) => void;
+  'update-card-task': (payload: UpdateCardTaskPayload) => void;
   'delete-card': (payload: CardIdPayload) => void;
   'delete-all-cards': (payload?: EmptyPayload) => void;
   'merge-cards': (payload: MergeCardsPayload) => void;

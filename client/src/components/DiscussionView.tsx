@@ -123,7 +123,7 @@ const RaisedHandsCorner: React.FC<{ names: string[] }> = ({ names }) => {
 
 const DiscussionView: React.FC<Props> = observer(({ store }) => {
   const carouselSize = 3;
-  const sortedCards = store.sortedCards;
+  const sortedCards = store.discussionCards;
   const theme = useTheme();
   const canControl = store.canControlDiscussionNavigation();
   const features = store.roomFeatures;

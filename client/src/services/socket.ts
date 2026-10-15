@@ -1,7 +1,7 @@
 import { io, Socket } from 'socket.io-client';
 import { isPhaseTimerDuration, type ClientToServerEvents, type ServerToClientEvents } from '@sorryangelina/shared';
 import { RetroStore } from '../store/RetroStore';
-import { Room, RoomState, User, Card, CardComment, CardReaction, FacilitatorAnnouncement, DiscussionBurst, DiscussionHand, DiscussionNavigationState, Phase, PhaseTimerState, ChatMessage, Mood, RetroRatingState, RoomFeatures, SprintVipState, ArkanoidScoreEntry, WhiteboardStroke, CreateRoomOptions, ColumnColorId } from '../types';
+import { Room, RoomState, User, Card, CardComment, CardReaction, CardTask, FacilitatorAnnouncement, DiscussionBurst, DiscussionHand, DiscussionNavigationState, Phase, PhaseTimerState, ChatMessage, Mood, RetroRatingState, RoomFeatures, SprintVipState, ArkanoidScoreEntry, WhiteboardStroke, CreateRoomOptions, ColumnColorId } from '../types';
 import { getApiBase } from '../utils/apiBase';
 import { log } from '../utils/logger';
 import { classifyServerError, mapServerError, SessionError } from '../utils/errors';
@@ -632,6 +632,11 @@ export class SocketService {
   updateCard(cardId: string, text: string, imageUrl?: string): void {
     if (!this.store.currentUser) return;
     this.socket.emit('update-card', { cardId, text, imageUrl });
+  }
+
+  updateCardTask(cardId: string, task: CardTask | null): void {
+    if (!this.store.currentUser) return;
+    this.socket.emit('update-card-task', { cardId, task });
   }
 
   deleteCard(cardId: string): void {

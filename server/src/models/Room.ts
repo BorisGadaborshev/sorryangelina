@@ -1,7 +1,7 @@
 // Postgres access helpers
 import crypto from 'crypto';
 import { pool } from '../config/database';
-import { Room, RoomDocument, User, Card, CardComment, CardReaction, RoomFeatures, ColumnColorId, mergeCardTexts, mergeSegmentAuthors, alignSegmentAuthors, getCardTextSegments, getColumnCount, getRetroTemplate, normalizeColumnColors } from '../types';
+import { Room, RoomDocument, User, Card, CardComment, CardReaction, RoomFeatures, ColumnColorId, mergeCardTexts, mergeSegmentAuthors, alignSegmentAuthors, getCardTextSegments, getColumnCount, getRetroTemplate, normalizeColumnColors, normalizeCardTask } from '../types';
 import { normalizeRoomFeatures } from '../utils/roomFeatures';
 import { CARDS_PER_PERSON_PER_ROOM, CARD_LIMIT_MESSAGE, lockAndAssertCardSlot, reserveCreationSlot, UsageLimitError } from '../services/UsageLimits';
 
@@ -60,6 +60,7 @@ const ROOM_WITH_CHILDREN_SQL = `
         'image_url', c.image_url,
         'author_revealed', c.author_revealed,
         'segment_authors', c.segment_authors,
+        'task', c.task,
         'likes', coalesce((
           select json_agg(v.user_id) from card_votes v where v.card_id = c.id and v.vote = 'like'
         ), '[]'::json),
@@ -120,6 +121,7 @@ type RoomCardJson = {
   image_url: string | null;
   author_revealed: boolean;
   segment_authors: unknown;
+  task: unknown;
   likes: string[] | null;
   dislikes: string[] | null;
   comments: CommentRow[] | null;
@@ -208,6 +210,7 @@ export const RoomModel = {
       imageUrl: cardRow.image_url ?? undefined,
       authorRevealed: Boolean(cardRow.author_revealed),
       segmentAuthors: readSegmentAuthors(cardRow.segment_authors),
+      task: normalizeCardTask(cardRow.task),
       comments: (cardRow.comments || []).map(mapCommentRow),
       reactions: (cardRow.reactions || []).map((reaction): CardReaction => ({
         emoji: reaction.emoji,
@@ -555,6 +558,11 @@ export const RoomModel = {
       params.push(authors && authors.length > 0 ? JSON.stringify(authors) : null);
       assignments.push(`segment_authors = $${params.length}::jsonb`);
     }
+    if (Object.prototype.hasOwnProperty.call(updates, 'task')) {
+      const task = normalizeCardTask(updates.task);
+      params.push(task ? JSON.stringify(task) : null);
+      assignments.push(`task = $${params.length}::jsonb`);
+    }
     if (assignments.length === 0) return this.findOne({ id: roomId });
     params.push(cardId, roomId);
     const { rowCount } = await pool.query(
@@ -606,11 +614,24 @@ export const RoomModel = {
         return null;
       }
       await lockAndAssertCardSlot(client, roomId, card.createdBy);
+      const task = normalizeCardTask(card.task);
       await client.query(
-        `insert into cards (id, room_id, text, type, created_by, column_index, image_url, origin_column)
-         values ($1,$2,$3,$4,$5,$6,$7,$8)
+        `insert into cards (id, room_id, text, type, created_by, column_index, image_url, origin_column, segment_authors, task, author_revealed)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11)
          on conflict (id) do nothing`,
-        [card.id, roomId, card.text, card.type, card.createdBy, card.column, card.imageUrl || null, card.originColumn ?? null]
+        [
+          card.id,
+          roomId,
+          card.text,
+          card.type,
+          card.createdBy,
+          card.column,
+          card.imageUrl || null,
+          card.originColumn ?? null,
+          card.segmentAuthors && card.segmentAuthors.length > 0 ? JSON.stringify(card.segmentAuthors) : null,
+          task ? JSON.stringify(task) : null,
+          Boolean(card.authorRevealed)
+        ]
       );
       await client.query('COMMIT');
     } catch (error) {
@@ -662,6 +683,19 @@ export const RoomModel = {
     } finally {
       client.release();
     }
+  },
+
+  async listRecentTeamRooms(teamId: string, excludeRoomId: string, limit = 20): Promise<RoomDocument[]> {
+    const { rows } = await pool.query(
+      `select id from rooms where team_id = $1 and id <> $2 order by created_at desc, id desc limit $3`,
+      [teamId, excludeRoomId, limit]
+    );
+    const rooms: RoomDocument[] = [];
+    for (const row of rows as Array<{ id: string }>) {
+      const doc = await this.findOne({ id: row.id });
+      if (doc) rooms.push(doc);
+    }
+    return rooms;
   },
 
   async listSummaries(where?: { teamId?: string }): Promise<Array<{

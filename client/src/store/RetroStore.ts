@@ -123,6 +123,7 @@ export class RetroStore {
       arkanoidScores: delegated,
       isOwner: delegated,
       sortedCards: delegated,
+      discussionCards: delegated,
       isAdmin: delegated,
       templateConfig: delegated,
       isCardLimitReached: delegated,
@@ -184,6 +185,7 @@ export class RetroStore {
   get arkanoidScores() { return this.extras.arkanoidScores; }
   get isOwner() { return this.board.isOwner; }
   get sortedCards() { return this.board.sortedCards; }
+  get discussionCards() { return this.board.discussionCards; }
   get isAdmin() { return this.board.isAdmin; }
   get templateConfig() { return this.board.templateConfig; }
   get isCardLimitReached() { return this.board.isCardLimitReached; }
@@ -376,6 +378,7 @@ export class RetroStore {
 
   getColumnTitle(index: number) { return this.board.getColumnTitle(index); }
   getColumnHint(index: number) { return this.board.getColumnHint(index); }
+  getColumnTooltip(index: number) { return this.board.getColumnTooltip(index); }
   getColumnKind(index: number) { return this.board.getColumnKind(index); }
   setColumnTitles(titles: string[]) { this.board.setColumnTitles(titles); }
   requestColumnTitlesUpdate(titles: string[]) { this.board.requestColumnTitlesUpdate(titles); }

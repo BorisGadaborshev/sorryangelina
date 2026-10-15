@@ -27,7 +27,7 @@ import {
 
 export function registerPhaseHandlers(socket: Socket, session: RealtimeSession): void {
   on(socket, 'change-phase', async ({ phase }) => {
-    const allowedPhases: Phase[] = ['creation', 'voting', 'discussion', 'roadmap', 'rating'];
+    const allowedPhases: Phase[] = ['creation', 'grouping', 'voting', 'discussion', 'roadmap', 'rating'];
     if (!allowedPhases.includes(phase)) {
       rejectAction(socket, 'Invalid phase');
       return;
@@ -42,9 +42,17 @@ export function registerPhaseHandlers(socket: Socket, session: RealtimeSession):
     }
 
     const roomForPhase = await RoomService.getRoom(actor.roomId);
-    if (phase === 'roadmap' && getRetroTemplate(roomForPhase?.template).id !== 'traffic-light') {
-      rejectAction(socket, 'Дорожная карта доступна только для шаблона «Светофор»');
-      return;
+    if (phase === 'grouping') {
+      if (roomForPhase && !getRoomFeatures(roomForPhase).groupingEnabled) {
+        rejectAction(socket, 'Группировка отключена в настройках комнаты');
+        return;
+      }
+    }
+    if (phase === 'roadmap') {
+      if (roomForPhase && !getRoomFeatures(roomForPhase).roadmapEnabled) {
+        rejectAction(socket, 'Дорожная карта отключена в настройках комнаты');
+        return;
+      }
     }
     if (phase === 'rating') {
       if (roomForPhase && !getRoomFeatures(roomForPhase).retroRatingEnabled) {
@@ -73,7 +81,10 @@ export function registerPhaseHandlers(socket: Socket, session: RealtimeSession):
         roomRetroRatings.set(actor.roomId, { votes: new Map(), resultsVisible: false });
       }
       if (roomState.phase === 'discussion') {
-        const navigationState = buildDiscussionNavigation(sortedCards);
+        const navigationState = buildDiscussionNavigation(
+          updatedRoom.cards,
+          getRetroTemplate(updatedRoom.template)
+        );
         roomDiscussionNavigation.set(actor.roomId, navigationState);
         io.to(actor.roomId).emit('discussion-navigation', navigationState);
       } else {

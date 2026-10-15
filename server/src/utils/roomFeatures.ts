@@ -56,6 +56,8 @@ export const normalizeRoomFeatures = (raw?: Partial<RoomFeatures> & { votesPerUs
     dislikeIcon: isDislikeIconId(dislikeIcon) ? dislikeIcon : DEFAULT_ROOM_FEATURES.dislikeIcon,
     dislikesEnabled: raw?.dislikesEnabled ?? DEFAULT_ROOM_FEATURES.dislikesEnabled,
     musicEnabled: raw?.musicEnabled ?? DEFAULT_ROOM_FEATURES.musicEnabled,
+    groupingEnabled: raw?.groupingEnabled ?? DEFAULT_ROOM_FEATURES.groupingEnabled,
+    roadmapEnabled: raw?.roadmapEnabled ?? DEFAULT_ROOM_FEATURES.roadmapEnabled,
     retroRatingEnabled: raw?.retroRatingEnabled ?? DEFAULT_ROOM_FEATURES.retroRatingEnabled,
     sprintVipEnabled: raw?.sprintVipEnabled ?? DEFAULT_ROOM_FEATURES.sprintVipEnabled,
     drawingEnabled: raw?.drawingEnabled ?? DEFAULT_ROOM_FEATURES.drawingEnabled,

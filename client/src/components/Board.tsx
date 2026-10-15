@@ -80,17 +80,22 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   const features = store.roomFeatures;
   const canDrawOnBoard = !isMobile
     && features.drawingEnabled
-    && (store.phase === 'creation' || store.phase === 'voting');
+    && (store.phase === 'creation' || store.phase === 'grouping' || store.phase === 'voting');
   const canPlayArkanoid = !isMobile
     && features.arkanoidEnabled
-    && (store.phase === 'creation' || store.phase === 'voting');
+    && (store.phase === 'creation' || store.phase === 'grouping' || store.phase === 'voting');
   const canUseChat = features.chatEnabled;
   const canPlayTimerMusic = features.musicEnabled;
   const readyEnabled = features.readyEnabled;
   const readyCount = store.getUserReadyCount();
   const totalCount = store.getTotalUserCount();
   const allUsersReady = readyEnabled && totalCount > 0 && readyCount === totalCount;
-  const nextPhase = getNextPhase(store.phase, store.template, features.retroRatingEnabled);
+  const nextPhase = getNextPhase(
+    store.phase,
+    features.retroRatingEnabled,
+    features.groupingEnabled,
+    features.roadmapEnabled
+  );
   const canAdvancePhase = store.isAdmin && nextPhase !== null;
   const allReady = useAllReadyPrompt(allUsersReady, store.phase);
 

@@ -50,6 +50,27 @@ describe('RoomStore', () => {
     expect(room.isCardTextHidden(card('Ben'))).toBe(false);
   });
 
+  it('lets only the admin merge cards on the grouping phase', () => {
+    const room = new RoomStore(boardHost);
+    room.phase = 'grouping';
+    room.roomFeatures = {
+      ...DEFAULT_ROOM_FEATURES,
+      hideCardTextDuringCreation: true,
+      cardEditingEnabled: true,
+      moveCardsEnabled: true
+    };
+
+    room.currentUser = member('Ann');
+    expect(room.isCardTextHidden(card('Ben'))).toBe(false);
+    expect(room.canComposeInColumn(0)).toBe(false);
+    expect(room.canUseCardDragDrop).toBe(false);
+    expect(room.canMergeCards).toBe(false);
+
+    room.currentUser = member('Ann', 'admin');
+    expect(room.canUseCardDragDrop).toBe(true);
+    expect(room.canMergeCards).toBe(true);
+  });
+
   it('shows a merged card to each author whose text was combined', () => {
     const room = new RoomStore(boardHost);
     room.phase = 'creation';
@@ -65,6 +86,16 @@ describe('RoomStore', () => {
 
     room.currentUser = member('Cara');
     expect(room.isCardTextHidden(merged)).toBe(true);
+  });
+
+  it('hides carried task cards from discussion', () => {
+    const room = new RoomStore(boardHost);
+    const taskColumn = room.templateConfig.columns.length + 1;
+    room.cards = [
+      card('Ann', 0),
+      { ...card('Ann', taskColumn), id: 'task', text: 'перенесённая задача' }
+    ];
+    expect(room.discussionCards.map((item) => item.id)).toEqual(['Ann-0']);
   });
 
   it('remembers the source column when a card moves onto the roadmap', () => {

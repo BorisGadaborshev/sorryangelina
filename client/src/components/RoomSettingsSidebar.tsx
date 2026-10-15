@@ -21,6 +21,8 @@ import OpenWithIcon from '@mui/icons-material/OpenWith';
 import PersonIcon from '@mui/icons-material/Person';
 import PeopleIcon from '@mui/icons-material/People';
 import MusicNoteIcon from '@mui/icons-material/MusicNote';
+import JoinInnerRoundedIcon from '@mui/icons-material/JoinInnerRounded';
+import AccountTreeRoundedIcon from '@mui/icons-material/AccountTreeRounded';
 import StarRateIcon from '@mui/icons-material/StarRate';
 import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
 import BrushIcon from '@mui/icons-material/Brush';
@@ -455,6 +457,24 @@ const RoomSettingsSidebar: React.FC<Props> = observer(({ store, open, onClose, t
                 disabled={!canEditFeatures}
               />
               <FeatureToggle
+                active={features.groupingEnabled}
+                label="Группировка"
+                tooltip="Добавить этап группировки: администратор объединяет похожие карточки вместе с командой"
+                icon={<JoinInnerRoundedIcon fontSize="inherit" />}
+                onClick={() => toggleFeature('groupingEnabled')}
+                showTooltip={showTooltips}
+                disabled={!canEditFeatures}
+              />
+              <FeatureToggle
+                active={features.roadmapEnabled}
+                label="Дорожная карта"
+                tooltip="Добавить этап дорожной карты: разобрать проблемные карточки в анализе, задаче и результате"
+                icon={<AccountTreeRoundedIcon fontSize="inherit" />}
+                onClick={() => toggleFeature('roadmapEnabled')}
+                showTooltip={showTooltips}
+                disabled={!canEditFeatures}
+              />
+              <FeatureToggle
                 active={features.retroRatingEnabled}
                 label="Оценка ретро"
                 tooltip="Добавить этап оценки ретроспективы"
@@ -484,7 +504,7 @@ const RoomSettingsSidebar: React.FC<Props> = observer(({ store, open, onClose, t
               <FeatureToggle
                 active={features.arkanoidEnabled}
                 label="Arkanoid"
-                tooltip="Разрешить игру Arkanoid на этапах создания и голосования. Если выключено, статистика игры скрывается"
+                tooltip="Разрешить игру Arkanoid на этапах создания, группировки и голосования. Если выключено, статистика игры скрывается"
                 icon={<SportsEsportsIcon fontSize="inherit" />}
                 onClick={() => toggleFeature('arkanoidEnabled')}
                 showTooltip={showTooltips}

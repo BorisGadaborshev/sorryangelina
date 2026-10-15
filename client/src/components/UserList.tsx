@@ -146,6 +146,8 @@ const UserList: React.FC<UserListProps> = observer(({
     switch (phase) {
       case 'creation':
         return 'создал(а) карточки';
+      case 'grouping':
+        return 'сгруппировал(а) карточки';
       case 'voting':
         return 'проголосовал(а)';
       case 'discussion':

@@ -19,7 +19,7 @@ interface Props {
 const BoardColumns: React.FC<Props> = observer(({ store, isMobile, onAddCardStart }) => {
   const handleDragEnd = (result: DropResult) => {
     const { destination, source, draggableId, combine } = result;
-    if (store.phase !== 'creation') return;
+    if (store.phase !== 'creation' && store.phase !== 'grouping') return;
     const draggedCard = store.cards.find((card) => card.id === draggableId);
     if (!draggedCard || !store.canMoveCard(draggedCard)) return;
 
@@ -84,6 +84,7 @@ const PhaseContent: React.FC<Props> = observer((props) => {
       phaseView = <RetroRatingView store={store} />;
       break;
     case 'creation':
+    case 'grouping':
     case 'voting':
     default:
       phaseView = <BoardColumns {...props} />;

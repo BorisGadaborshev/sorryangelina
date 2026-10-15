@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { RoomModel } from '../models/Room';
 import { TeamModel } from '../models/Team';
-import { Room, RoomDocument, User, Card, CardComment, Phase, CreateRoomOptions, RetroTemplateId, RoomFeatures, TeamRoomSettings, CARD_REACTION_EMOJIS, getColumnCount, getRetroTemplate, isRetroTemplateId, normalizeColumnColors } from '../types';
+import { Room, RoomDocument, User, Card, CardComment, Phase, CreateRoomOptions, RetroTemplateId, RoomFeatures, TeamRoomSettings, CARD_REACTION_EMOJIS, cloneTaskCardForNextSprint, getColumnCount, getRetroTemplate, isRetroTemplateId, normalizeColumnColors, selectOpenTasksFromPreviousSprints } from '../types';
 import { normalizeRoomFeatures } from '../utils/roomFeatures';
 import {
   changedRoomFeatures,
@@ -69,8 +69,12 @@ export class RoomService {
         ));
       }
 
-      const convertedRoom = this.convertToRoom(room);
-          return convertedRoom;
+      if (options.teamId) {
+        await this.copyOpenTasksFromPreviousSprint(options.teamId, room.id, settings.template);
+      }
+
+      const stored = await RoomModel.findOne({ id: room.id });
+      return this.convertToRoom(stored ?? room);
       } finally {
       RoomCache.invalidate(roomId);
     }
@@ -695,6 +699,26 @@ export class RoomService {
       RoomCache.invalidate(roomId);
     }
 }
+
+  private static async copyOpenTasksFromPreviousSprint(
+    teamId: string,
+    roomId: string,
+    templateId: RetroTemplateId
+  ): Promise<void> {
+    try {
+      const previous = await RoomModel.listRecentTeamRooms(teamId, roomId);
+      const sourceCards = selectOpenTasksFromPreviousSprints(previous);
+      if (sourceCards.length === 0) return;
+
+      const template = getRetroTemplate(templateId);
+      for (const card of sourceCards) {
+        const clone = cloneTaskCardForNextSprint(card, template, crypto.randomUUID());
+        await RoomModel.insertCard(roomId, clone);
+      }
+    } catch (error) {
+      logger.error({ err: error, teamId, roomId }, 'failed to carry open tasks into the next sprint');
+    }
+  }
 
   private static async rememberTeamRoomSettings(
     teamId: string | undefined,

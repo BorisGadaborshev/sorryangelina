@@ -1,5 +1,9 @@
 export type Mood = 'great' | 'good' | 'neutral' | 'bad' | 'awful';
-export type Phase = 'creation' | 'voting' | 'discussion' | 'roadmap' | 'rating';
+export const PHASES = ['creation', 'grouping', 'voting', 'discussion', 'roadmap', 'rating'] as const;
+export type Phase = (typeof PHASES)[number];
+
+export const isOrganizePhase = (phase: Phase): boolean =>
+  phase === 'creation' || phase === 'grouping';
 
 export const COLUMN_COLOR_IDS = [
   'none',
@@ -27,6 +31,7 @@ export type CardType = 'liked' | 'disliked' | 'suggestion';
 export interface RetroTemplateColumn {
   title: string;
   hint?: string;
+  tooltip?: string;
   color: ColumnColorId;
   kind: ColumnKind;
 }
@@ -37,8 +42,53 @@ export interface RetroTemplate {
   description: string;
   columns: RetroTemplateColumn[];
   actionColumnIndex: number | null;
-  roadmapColumns?: RetroTemplateColumn[];
+  roadmapColumns: RetroTemplateColumn[];
 }
+
+export const ROADMAP_TASK_INDEX = 1;
+
+export const getRoadmapTaskColumn = (template: RetroTemplate): number =>
+  template.columns.length + ROADMAP_TASK_INDEX;
+
+export const isRoadmapTaskColumn = (template: RetroTemplate, column: number): boolean =>
+  column === getRoadmapTaskColumn(template);
+
+export const isDiscussionCard = (card: { column: number }, template: RetroTemplate): boolean =>
+  card.column >= 0 && card.column < template.columns.length;
+
+export const sortCardsByVotes = (cards: Card[]): Card[] =>
+  [...cards].sort((left, right) => {
+    const scoreLeft = (left.likes?.length || 0) + (left.dislikes?.length || 0);
+    const scoreRight = (right.likes?.length || 0) + (right.dislikes?.length || 0);
+    return scoreRight - scoreLeft;
+  });
+
+export const getDiscussionCards = (cards: Card[], template: RetroTemplate): Card[] =>
+  sortCardsByVotes(cards.filter((card) => isDiscussionCard(card, template)));
+
+export const ROADMAP_COLUMNS: RetroTemplateColumn[] = [
+  {
+    title: 'Анализ',
+    hint: 'В чём проблема и что может её решить?',
+    tooltip: 'Анализ — в чём проблема и что может её решить.',
+    color: 'indigo',
+    kind: 'suggestion'
+  },
+  {
+    title: 'Задача',
+    hint: 'Как проверить это на практике?',
+    tooltip: 'Задача — как проверить на практике.',
+    color: 'purple',
+    kind: 'suggestion'
+  },
+  {
+    title: 'Результат',
+    hint: 'Что получилось после внедрения?',
+    tooltip: 'Результат — что получилось после внедрения (заполняется на следующей ретроспективе).',
+    color: 'green',
+    kind: 'suggestion'
+  }
+];
 
 export const RETRO_TEMPLATES: Record<RetroTemplateId, RetroTemplate> = {
   classic: {
@@ -46,6 +96,7 @@ export const RETRO_TEMPLATES: Record<RetroTemplateId, RetroTemplate> = {
     name: 'Классика',
     description: 'Что получилось, что мешало и какие действия берём',
     actionColumnIndex: 2,
+    roadmapColumns: ROADMAP_COLUMNS,
     columns: [
       { title: 'Было хорошо', hint: 'Что получилось хорошо и стоит повторить?', color: 'teal', kind: 'positive' },
       { title: 'Было не очень', hint: 'Что мешало и что хочется изменить?', color: 'pink', kind: 'negative' },
@@ -57,10 +108,29 @@ export const RETRO_TEMPLATES: Record<RetroTemplateId, RetroTemplate> = {
     name: 'Start / Stop / Continue',
     description: 'Что начать, что прекратить и что продолжить',
     actionColumnIndex: 0,
+    roadmapColumns: ROADMAP_COLUMNS,
     columns: [
-      { title: 'Start', hint: 'Какие новые практики помогут работать эффективнее?', color: 'green', kind: 'suggestion' },
-      { title: 'Stop', hint: 'От чего стоит отказаться?', color: 'pink', kind: 'negative' },
-      { title: 'Continue', hint: 'Что уже работает и нужно продолжать?', color: 'teal', kind: 'positive' }
+      {
+        title: 'Start',
+        hint: 'Какие новые практики, инструменты и подходы помогут работать эффективнее?',
+        tooltip: 'Start (начать).\nКакие новые практики, инструменты и подходы помогут работать эффективнее?',
+        color: 'green',
+        kind: 'suggestion'
+      },
+      {
+        title: 'Stop',
+        hint: 'От каких действий, встреч или сложившихся практик нужно отказаться?',
+        tooltip: 'Stop (прекратить).\nОт каких действий, встреч или сложившихся практик нужно отказаться, потому что они тратят время, демотивируют и не несут пользы?',
+        color: 'pink',
+        kind: 'negative'
+      },
+      {
+        title: 'Continue',
+        hint: 'Какие существующие практики отлично работают, и нужно их сохранить?',
+        tooltip: 'Continue (продолжить).\nКакие существующие практики отлично работают, и нужно их сохранить?',
+        color: 'teal',
+        kind: 'positive'
+      }
     ]
   },
   sailboat: {
@@ -68,11 +138,36 @@ export const RETRO_TEMPLATES: Record<RetroTemplateId, RetroTemplate> = {
     name: 'Парусник',
     description: 'Что двигает вперёд, что тормозит, какие риски и куда плывём',
     actionColumnIndex: 3,
+    roadmapColumns: ROADMAP_COLUMNS,
     columns: [
-      { title: 'Паруса', hint: 'Что помогает нам двигаться вперёд?', color: 'teal', kind: 'positive' },
-      { title: 'Якоря', hint: 'Что нас тормозит?', color: 'slate', kind: 'negative' },
-      { title: 'Рифы', hint: 'Какие риски могут помешать?', color: 'orange', kind: 'negative' },
-      { title: 'Земля', hint: 'К какому результату мы идём?', color: 'blue', kind: 'suggestion' }
+      {
+        title: 'Паруса',
+        hint: 'Что даёт энергию и ускоряет процессы?',
+        tooltip: 'Паруса (движущая сила).\nДают энергию и ускоряют процессы — успешные практики, мотивация, инструменты.',
+        color: 'teal',
+        kind: 'positive'
+      },
+      {
+        title: 'Якоря',
+        hint: 'Что замедляет или останавливает работу?',
+        tooltip: 'Якоря (тормозящие факторы).\nЗамедляют или останавливают работу — рутина, блокеры, бюрократия, ошибки.',
+        color: 'slate',
+        kind: 'negative'
+      },
+      {
+        title: 'Рифы',
+        hint: 'Что может пойти не так?',
+        tooltip: 'Рифы (риски).\nПоказывают, что может пойти не так — препятствия, ограничения, внешние угрозы.',
+        color: 'orange',
+        kind: 'negative'
+      },
+      {
+        title: 'Земля',
+        hint: 'К какому результату плывёт команда?',
+        tooltip: 'Земля (цели).\nУказывают на результат, к которому «плывёт» команда — видение команды, цель спринта или проекта.',
+        color: 'blue',
+        kind: 'suggestion'
+      }
     ]
   },
   'four-ls': {
@@ -80,11 +175,36 @@ export const RETRO_TEMPLATES: Record<RetroTemplateId, RetroTemplate> = {
     name: '4L',
     description: 'Что понравилось, чему научились, чего не хватило и чего хотим',
     actionColumnIndex: 3,
+    roadmapColumns: ROADMAP_COLUMNS,
     columns: [
-      { title: 'Liked', hint: 'Что понравилось в этом спринте?', color: 'teal', kind: 'positive' },
-      { title: 'Learned', hint: 'Чему мы научились?', color: 'cyan', kind: 'positive' },
-      { title: 'Lacked', hint: 'Чего нам не хватало?', color: 'pink', kind: 'negative' },
-      { title: 'Longed For', hint: 'Чего хотим в следующий раз?', color: 'purple', kind: 'suggestion' }
+      {
+        title: 'Liked',
+        hint: 'Какие события, действия или результаты вызвали положительные эмоции?',
+        tooltip: 'Liked (понравилось, закрепляем успех).\nКакие события, действия или результаты вызвали положительные эмоции.',
+        color: 'teal',
+        kind: 'positive'
+      },
+      {
+        title: 'Learned',
+        hint: 'Чему научились, что поняли о проекте или друг о друге?',
+        tooltip: 'Learned (изучили, фиксируем рост).\nЧему научились, что поняли о проекте или друг о друге.',
+        color: 'cyan',
+        kind: 'positive'
+      },
+      {
+        title: 'Lacked',
+        hint: 'Какого ресурса, информации, инструмента не хватило для эффективной работы?',
+        tooltip: 'Lacked (не хватило, выделяем дефициты).\nКакого ресурса, информации, инструмента не хватило для эффективной работы.',
+        color: 'pink',
+        kind: 'negative'
+      },
+      {
+        title: 'Longed For',
+        hint: 'Какие амбициозные улучшения нужны для идеального сценария выполнения?',
+        tooltip: 'Longed For (желаемое, формулируем потребности).\nКакие амбициозные улучшения нужны для идеального сценария выполнения.',
+        color: 'purple',
+        kind: 'suggestion'
+      }
     ]
   },
   'traffic-light': {
@@ -92,15 +212,29 @@ export const RETRO_TEMPLATES: Record<RetroTemplateId, RetroTemplate> = {
     name: 'Светофор',
     description: 'Зелёный, жёлтый и красный, затем дорожная карта',
     actionColumnIndex: null,
+    roadmapColumns: ROADMAP_COLUMNS,
     columns: [
-      { title: 'Зелёный', hint: 'Что продолжаем делать?', color: 'green', kind: 'positive' },
-      { title: 'Жёлтый', hint: 'Что нужно изменить?', color: 'amber', kind: 'negative' },
-      { title: 'Красный', hint: 'Что нужно прекратить?', color: 'pink', kind: 'negative' }
-    ],
-    roadmapColumns: [
-      { title: 'Анализ', hint: 'Почему это происходит?', color: 'indigo', kind: 'suggestion' },
-      { title: 'Эксперимент', hint: 'Какой эксперимент проведём?', color: 'purple', kind: 'suggestion' },
-      { title: 'Результат', hint: 'Какой результат хотим получить?', color: 'green', kind: 'suggestion' }
+      {
+        title: 'Зелёный',
+        hint: 'Что работает отлично и не требует изменений?',
+        tooltip: '🟢 Зелёный — работает отлично и не требует изменений.',
+        color: 'green',
+        kind: 'positive'
+      },
+      {
+        title: 'Жёлтый',
+        hint: 'Что работает с напряжением и требует постоянного контроля?',
+        tooltip: '🟡 Жёлтый — работает с напряжением и требует постоянного контроля.',
+        color: 'amber',
+        kind: 'negative'
+      },
+      {
+        title: 'Красный',
+        hint: 'Что работает плохо, постоянно мешает и требует вмешательства?',
+        tooltip: '🔴 Красный — работает плохо, постоянно мешает и требует вмешательства.',
+        color: 'pink',
+        kind: 'negative'
+      }
     ]
   }
 };
@@ -172,6 +306,8 @@ export interface RoomFeatures {
   dislikeIcon: DislikeIconId;
   dislikesEnabled: boolean;
   musicEnabled: boolean;
+  groupingEnabled: boolean;
+  roadmapEnabled: boolean;
   retroRatingEnabled: boolean;
   sprintVipEnabled: boolean;
   drawingEnabled: boolean;
@@ -199,6 +335,8 @@ export const DEFAULT_ROOM_FEATURES: RoomFeatures = {
   dislikeIcon: 'eggplant',
   dislikesEnabled: true,
   musicEnabled: true,
+  groupingEnabled: true,
+  roadmapEnabled: true,
   retroRatingEnabled: true,
   sprintVipEnabled: true,
   drawingEnabled: true,
@@ -294,6 +432,118 @@ export const isCardSegmentAuthor = (
   return alignSegmentAuthors(card.text, card.createdBy, card.segmentAuthors).includes(normalized);
 };
 
+export const CARD_TASK_STATUSES = [
+  'analysis',
+  'execution',
+  'testing',
+  'done',
+  'closed'
+] as const;
+
+export type CardTaskStatus = (typeof CARD_TASK_STATUSES)[number];
+
+export const DEFAULT_CARD_TASK_STATUS: CardTaskStatus = 'analysis';
+
+export const CARD_TASK_STATUS_LABELS: Record<CardTaskStatus, string> = {
+  analysis: 'Анализ',
+  execution: 'Исполнение',
+  testing: 'Тестирование',
+  done: 'Выполнено',
+  closed: 'Закрыто'
+};
+
+export const isCardTaskStatus = (value: unknown): value is CardTaskStatus =>
+  typeof value === 'string' && (CARD_TASK_STATUSES as readonly string[]).includes(value);
+
+export interface CardTask {
+  assignees: string[];
+  status?: CardTaskStatus;
+  dueDate?: string;
+  sprint?: string;
+  effortDays?: number;
+}
+
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+export const isOpenCardTaskStatus = (status?: CardTaskStatus): boolean =>
+  status !== 'done' && status !== 'closed';
+
+export const isOpenRoadmapTaskCard = (card: Card, template: RetroTemplate): boolean =>
+  isRoadmapTaskColumn(template, card.column) && isOpenCardTaskStatus(card.task?.status);
+
+export interface RoomSnapshotForTaskCarry {
+  id: string;
+  template?: RetroTemplateId;
+  cards: Card[];
+}
+
+export const selectOpenTasksFromPreviousSprints = (
+  previousRoomsNewestFirst: RoomSnapshotForTaskCarry[]
+): Card[] => {
+  for (const room of previousRoomsNewestFirst) {
+    const template = getRetroTemplate(room.template);
+    const taskCards = room.cards.filter((card) => isRoadmapTaskColumn(template, card.column));
+    if (taskCards.length === 0) continue;
+    return taskCards.filter((card) => isOpenCardTaskStatus(card.task?.status));
+  }
+  return [];
+};
+
+export const cloneTaskCardForNextSprint = (
+  card: Card,
+  nextTemplate: RetroTemplate,
+  nextId: string
+): Card => {
+  const column = getRoadmapTaskColumn(nextTemplate);
+  const originInRange = card.originColumn != null
+    && card.originColumn >= 0
+    && card.originColumn < nextTemplate.columns.length;
+  return {
+    id: nextId,
+    text: card.text,
+    type: getCardTypeByColumn(nextTemplate, column),
+    createdBy: card.createdBy,
+    likes: [],
+    dislikes: [],
+    column,
+    originColumn: originInRange ? card.originColumn : undefined,
+    authorRevealed: card.authorRevealed,
+    segmentAuthors: card.segmentAuthors,
+    task: card.task
+      ? { ...card.task, assignees: [...card.task.assignees] }
+      : { assignees: [], status: DEFAULT_CARD_TASK_STATUS }
+  };
+};
+
+export const normalizeCardTask = (raw: unknown): CardTask | undefined => {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const source = raw as Record<string, unknown>;
+  const assignees = Array.isArray(source.assignees)
+    ? [...new Set(
+      source.assignees
+        .map((item) => (typeof item === 'string' ? item.trim() : ''))
+        .filter((item) => item.length > 0 && item.length <= 80)
+    )].slice(0, 12)
+    : [];
+  const dueDate = typeof source.dueDate === 'string' && DATE_ONLY.test(source.dueDate)
+    ? source.dueDate
+    : undefined;
+  const sprint = typeof source.sprint === 'string' ? source.sprint.trim().slice(0, 40) : '';
+  const effort = Number(source.effortDays);
+  const effortDays = Number.isFinite(effort) && effort > 0
+    ? Math.min(100, Math.round(effort * 2) / 2)
+    : undefined;
+  const status = isCardTaskStatus(source.status) ? source.status : undefined;
+  if (assignees.length === 0 && !dueDate && !sprint && effortDays == null && !status) return undefined;
+  return {
+    assignees,
+    status: status ?? DEFAULT_CARD_TASK_STATUS,
+    dueDate,
+    sprint: sprint || undefined,
+    effortDays
+  };
+};
+
 export interface Card {
   id: string;
   text: string;
@@ -308,6 +558,7 @@ export interface Card {
   reactions?: CardReaction[];
   authorRevealed?: boolean;
   segmentAuthors?: string[];
+  task?: CardTask;
 }
 
 export interface Room {

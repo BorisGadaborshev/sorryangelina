@@ -123,9 +123,11 @@ const PhaseSwitcher: React.FC<Props> = observer(({ store, isMobile, isDarkMode, 
             : 'inset 0 1px 0 rgba(255,255,255,0.9), 0 1px 3px rgba(20, 24, 40, 0.04)',
         }}
       >
-        {PHASE_OPTIONS.filter((option) => option.value !== 'roadmap' || store.template === 'traffic-light').map(({ value, label, shortLabel, icon: PhaseIcon }) => {
+        {PHASE_OPTIONS.map(({ value, label, shortLabel, icon: PhaseIcon }) => {
           const isActive = store.phase === value;
-          const isUnavailable = value === 'rating' && !store.roomFeatures.retroRatingEnabled;
+          const isUnavailable = (value === 'rating' && !store.roomFeatures.retroRatingEnabled)
+            || (value === 'grouping' && !store.roomFeatures.groupingEnabled)
+            || (value === 'roadmap' && !store.roomFeatures.roadmapEnabled);
 
           return (
             <Button

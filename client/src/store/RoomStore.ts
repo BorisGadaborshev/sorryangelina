@@ -19,6 +19,7 @@ import {
   User,
   getCardTypeByColumn,
   getColumnCount,
+  getDiscussionCards,
   getRetroTemplate,
   getTemplateColumn,
   isCardSegmentAuthor,
@@ -84,6 +85,10 @@ export class RoomStore {
     });
   }
 
+  get discussionCards() {
+    return getDiscussionCards(this.cards, this.templateConfig);
+  }
+
   get isCardLimitReached(): boolean {
     const name = this.currentUser?.name;
     if (!name) return false;
@@ -91,6 +96,7 @@ export class RoomStore {
   }
 
   get canUseCardDragDrop(): boolean {
+    if (this.phase === 'grouping') return this.currentUser?.role === 'admin';
     if (this.phase !== 'creation') return false;
     if (this.currentUser?.role === 'admin') return true;
     return this.roomFeatures.moveCardsEnabled;
@@ -98,7 +104,7 @@ export class RoomStore {
 
   get canMergeCards(): boolean {
     return (
-      this.phase === 'creation' &&
+      (this.phase === 'creation' || this.phase === 'grouping') &&
       this.currentUser?.role === 'admin' &&
       this.roomFeatures.cardEditingEnabled
     );
@@ -343,6 +349,11 @@ export class RoomStore {
 
   getColumnHint(index: number): string | undefined {
     return getTemplateColumn(this.templateConfig, index)?.hint;
+  }
+
+  getColumnTooltip(index: number): string | undefined {
+    const column = getTemplateColumn(this.templateConfig, index);
+    return column?.tooltip || column?.hint;
   }
 
   getColumnKind(index: number): ColumnKind {

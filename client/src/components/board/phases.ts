@@ -1,10 +1,11 @@
 import React from 'react';
 import EditNoteRoundedIcon from '@mui/icons-material/EditNoteRounded';
+import JoinInnerRoundedIcon from '@mui/icons-material/JoinInnerRounded';
 import HowToVoteRoundedIcon from '@mui/icons-material/HowToVoteRounded';
 import ForumRoundedIcon from '@mui/icons-material/ForumRounded';
 import AutoAwesomeRoundedIcon from '@mui/icons-material/AutoAwesomeRounded';
 import AccountTreeRoundedIcon from '@mui/icons-material/AccountTreeRounded';
-import { Phase, RetroTemplateId } from '../../types';
+import { Phase } from '../../types';
 
 export const PHASE_OPTIONS: Array<{
   value: Phase;
@@ -13,6 +14,7 @@ export const PHASE_OPTIONS: Array<{
   icon: React.ElementType;
 }> = [
   { value: 'creation', label: 'Создание', shortLabel: 'Создание', icon: EditNoteRoundedIcon },
+  { value: 'grouping', label: 'Группировка', shortLabel: 'Группы', icon: JoinInnerRoundedIcon },
   { value: 'voting', label: 'Голосование', shortLabel: 'Голоса', icon: HowToVoteRoundedIcon },
   { value: 'discussion', label: 'Обсуждение', shortLabel: 'Обсуждение', icon: ForumRoundedIcon },
   { value: 'roadmap', label: 'Дорожная карта', shortLabel: 'Карта', icon: AccountTreeRoundedIcon },
@@ -21,6 +23,7 @@ export const PHASE_OPTIONS: Array<{
 
 const PHASE_LABELS: Record<Phase, string> = {
   creation: 'Создание',
+  grouping: 'Группировка',
   voting: 'Голосование',
   discussion: 'Обсуждение',
   roadmap: 'Дорожная карта',
@@ -29,10 +32,16 @@ const PHASE_LABELS: Record<Phase, string> = {
 
 export const getPhaseLabel = (phase: Phase): string => PHASE_LABELS[phase];
 
-export const getNextPhase = (phase: Phase, templateId: RetroTemplateId, retroRatingEnabled: boolean): Phase | null => {
-  if (phase === 'creation') return 'voting';
+export const getNextPhase = (
+  phase: Phase,
+  retroRatingEnabled: boolean,
+  groupingEnabled = true,
+  roadmapEnabled = true
+): Phase | null => {
+  if (phase === 'creation') return groupingEnabled ? 'grouping' : 'voting';
+  if (phase === 'grouping') return 'voting';
   if (phase === 'voting') return 'discussion';
-  if (phase === 'discussion') return templateId === 'traffic-light' ? 'roadmap' : (retroRatingEnabled ? 'rating' : null);
+  if (phase === 'discussion') return roadmapEnabled ? 'roadmap' : (retroRatingEnabled ? 'rating' : null);
   if (phase === 'roadmap') return retroRatingEnabled ? 'rating' : null;
   return null;
 };

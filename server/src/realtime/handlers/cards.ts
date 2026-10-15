@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import { Socket } from 'socket.io';
 import { on, rejectAction } from '../on';
 import { RealtimeSession } from '../session';
-import { Card, alignSegmentAuthors, compactSegmentAuthors, getCardTextSegments, getCardTypeByColumn, getRetroTemplate } from '../../types';
+import { Card, alignSegmentAuthors, compactSegmentAuthors, getCardTextSegments, getCardTypeByColumn, getRetroTemplate, isOrganizePhase, isRoadmapTaskColumn, normalizeCardTask } from '../../types';
 import { RoomService } from '../../services/RoomService';
 import { assertCardSlotAvailable, UsageLimitError } from '../../services/UsageLimits';
 import { ContentModerationError } from '../../services/ContentModeration';
@@ -87,7 +87,7 @@ export function registerCardsHandlers(socket: Socket, session: RealtimeSession):
 
     try {
       const room = await RoomService.getRoom(session.currentUser.roomId);
-      if (!room || (room.phase !== 'creation' && room.phase !== 'discussion' && room.phase !== 'roadmap')) return;
+      if (!room || (room.phase !== 'creation' && room.phase !== 'grouping' && room.phase !== 'discussion' && room.phase !== 'roadmap')) return;
 
       const features = getRoomFeatures(room);
       if (!features.cardEditingEnabled) return;
@@ -131,13 +131,37 @@ export function registerCardsHandlers(socket: Socket, session: RealtimeSession):
   });
 
 
+  on(socket, 'update-card-task', async ({ cardId, task }) => {
+    if (!session.currentUser) return;
+
+    try {
+      const room = await RoomService.getRoom(session.currentUser.roomId);
+      if (!room) return;
+      const card = room.cards.find((currentCard) => currentCard.id === cardId);
+      if (!card) return;
+      if (!isRoadmapTaskColumn(getRetroTemplate(room.template), card.column)) return;
+
+      const updatedRoom = await RoomService.updateCard(session.currentUser.roomId, cardId, {
+        task: normalizeCardTask(task)
+      });
+      const updatedCard = updatedRoom?.cards.find((currentCard) => currentCard.id === cardId);
+      if (!updatedCard) return;
+      io.to(session.currentUser.roomId).emit('card-updated', updatedCard);
+      bumpRoomVersion(session.currentUser.roomId);
+    } catch (error) {
+      logger.error({ err: error }, 'failed to update card task');
+      rejectAction(socket, 'Failed to update card');
+    }
+  });
+
+
   on(socket, 'delete-card', async ({ cardId }) => {
     if (!session.currentUser) return;
     const currentUserName = session.currentUser.name;
 
     try {
       const room = await RoomService.getRoom(session.currentUser.roomId);
-      if (!room || (room.phase !== 'creation' && room.phase !== 'discussion' && room.phase !== 'roadmap')) return;
+      if (!room || (room.phase !== 'creation' && room.phase !== 'grouping' && room.phase !== 'discussion' && room.phase !== 'roadmap')) return;
       if (!getRoomFeatures(room).cardEditingEnabled) return;
 
       const card = room.cards.find(c => c.id === cardId);
@@ -187,7 +211,7 @@ export function registerCardsHandlers(socket: Socket, session: RealtimeSession):
 
     try {
       const room = await RoomService.getRoom(session.currentUser.roomId);
-      if (!room || room.phase !== 'creation') return;
+      if (!room || !isOrganizePhase(room.phase)) return;
       if (!getRoomFeatures(room).cardEditingEnabled) return;
 
       if (!isRoomAdmin(room, session.currentUser.name)) return;
@@ -217,7 +241,7 @@ export function registerCardsHandlers(socket: Socket, session: RealtimeSession):
 
     try {
       const room = await RoomService.getRoom(session.currentUser.roomId);
-      if (!room || room.phase !== 'creation') return;
+      if (!room || !isOrganizePhase(room.phase)) return;
       if (!getRoomFeatures(room).cardEditingEnabled) return;
       if (!isRoomAdmin(room, session.currentUser.name)) return;
 
@@ -256,17 +280,20 @@ export function registerCardsHandlers(socket: Socket, session: RealtimeSession):
         && Boolean(template.roadmapColumns)
         && Number.isInteger(targetColumn)
         && (isNegativeColumn(template, targetColumn) || isRoadmapColumn(template, targetColumn));
-      const creationMove = room?.phase === 'creation'
+      const boardMove = room != null
+        && isOrganizePhase(room.phase)
         && Number.isInteger(targetColumn)
         && targetColumn >= 0
         && targetColumn < template.columns.length;
-      if (!room || (!creationMove && !roadmapMove)) return;
+      if (!room || (!boardMove && !roadmapMove)) return;
 
       const card = room.cards.find((currentCard) => currentCard.id === cardId);
       if (!card) return;
 
-      if (creationMove) {
-        if (!isRoomAdmin(room, currentUserName)) {
+      if (boardMove) {
+        if (room.phase === 'grouping') {
+          if (!isRoomAdmin(room, currentUserName)) return;
+        } else if (!isRoomAdmin(room, currentUserName)) {
           if (!getRoomFeatures(room).moveCardsEnabled) return;
           if (card.createdBy !== currentUserName) return;
         }

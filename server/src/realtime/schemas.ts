@@ -42,6 +42,16 @@ export const eventSchemas: Record<ClientEventName, z.ZodTypeAny> = {
     text: cardText.optional(),
     imageUrl: imageRef.nullish()
   }).passthrough(),
+  'update-card-task': z.object({
+    cardId: id,
+    task: z.object({
+      assignees: z.array(z.string().max(80)).max(12).optional(),
+      status: z.enum(['analysis', 'execution', 'testing', 'done', 'closed']).optional(),
+      dueDate: z.string().max(32).optional(),
+      sprint: z.string().max(40).optional(),
+      effortDays: z.number().finite().optional()
+    }).passthrough().nullable()
+  }).passthrough(),
   'delete-card': z.object({ cardId: id }).passthrough(),
   'delete-all-cards': z.object({}).passthrough(),
   'merge-cards': z.object({ targetCardId: id, sourceCardId: id }).passthrough(),
@@ -71,7 +81,7 @@ export const eventSchemas: Record<ClientEventName, z.ZodTypeAny> = {
     emoji: z.enum(CARD_REACTION_EMOJIS)
   }).passthrough(),
   'change-phase': z.object({
-    phase: z.enum(['creation', 'voting', 'discussion', 'roadmap', 'rating'])
+    phase: z.enum(['creation', 'grouping', 'voting', 'discussion', 'roadmap', 'rating'])
   }).passthrough(),
   'set-column-titles': z.object({
     titles: z.array(z.string().trim().min(1).max(80)).min(1).max(12)
@@ -143,7 +153,8 @@ const MAX_PER_SECOND: Record<string, number> = {
   'vote-card': 8,
   'send-chat-message': 4,
   'toggle-card-reaction': 8,
-  'add-card-comment': 4
+  'add-card-comment': 4,
+  'update-card-task': 8
 };
 
 export const maxEventsPerSecond = (event: string): number => MAX_PER_SECOND[event] ?? 15;
