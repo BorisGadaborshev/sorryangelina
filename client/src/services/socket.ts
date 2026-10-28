@@ -1,7 +1,7 @@
 import { io, Socket } from 'socket.io-client';
 import { isPhaseTimerDuration, type ClientToServerEvents, type ServerToClientEvents } from '@sorryangelina/shared';
 import { RetroStore } from '../store/RetroStore';
-import { Room, RoomState, User, Card, CardComment, CardReaction, CardTask, FacilitatorAnnouncement, DiscussionBurst, DiscussionHand, DiscussionNavigationState, Phase, PhaseTimerState, ChatMessage, Mood, RetroRatingState, RoomFeatures, SprintVipState, ArkanoidScoreEntry, WhiteboardStroke, CreateRoomOptions, ColumnColorId } from '../types';
+import { Room, RoomState, User, Card, CardComment, CardReaction, CardTask, FacilitatorAnnouncement, DiscussionBurst, DiscussionHand, DiscussionNavigationState, Phase, PhaseTimerState, ChatMessage, Mood, RetroRatingState, RoomFeatures, SprintVipState, ArkanoidScoreEntry, CatRunScoreEntry, WhiteboardStroke, CreateRoomOptions, ColumnColorId } from '../types';
 import { getApiBase } from '../utils/apiBase';
 import { log } from '../utils/logger';
 import { classifyServerError, mapServerError, SessionError } from '../utils/errors';
@@ -337,6 +337,10 @@ export class SocketService {
 
     this.socket.on('arkanoid-scores', ({ scores }: { scores?: ArkanoidScoreEntry[] }) => {
       this.store.setArkanoidScores(scores || []);
+    });
+
+    this.socket.on('cat-run-scores', ({ scores }: { scores?: CatRunScoreEntry[] }) => {
+      this.store.setCatRunScores(scores || []);
     });
   }
 
@@ -730,6 +734,11 @@ export class SocketService {
   submitArkanoidScore(score: number, cardsBroken: number): void {
     if (!this.socket.connected || score < 0) return;
     this.socket.emit('arkanoid-score', { score, cardsBroken });
+  }
+
+  submitCatRunScore(score: number, level: number): void {
+    if (!this.socket.connected || score < 0) return;
+    this.socket.emit('cat-run-score', { score, level });
   }
 
   voteSprintVip(userName: string): void {

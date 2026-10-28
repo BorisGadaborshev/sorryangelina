@@ -17,6 +17,7 @@ import {
   registerInvalidRoomPassword,
   roomPasswordRetryAfterMs,
   emitArkanoidScoresToSocket,
+  emitCatRunScoresToSocket,
   emitDiscussionHandsToSocket,
   emitDiscussionNavigationToSocket,
   hydrateRoomEphemeral,
@@ -100,6 +101,7 @@ export function registerSessionHandlers(socket: Socket, session: RealtimeSession
       emitRetroRatingStateToSocket(socket, room);
       emitSprintVipStateToSocket(socket, room);
       emitArkanoidScoresToSocket(socket, roomId);
+      emitCatRunScoresToSocket(socket, roomId);
       emitDiscussionNavigationToSocket(socket, roomId, room);
       emitFacilitatorToSocket(socket, roomId, room);
       emitDiscussionHandsToSocket(socket, roomId);
@@ -183,6 +185,7 @@ export function registerSessionHandlers(socket: Socket, session: RealtimeSession
       emitRetroRatingStateToSocket(socket, room);
       emitSprintVipStateToSocket(socket, room);
       emitArkanoidScoresToSocket(socket, roomId);
+      emitCatRunScoresToSocket(socket, roomId);
     } catch (error) {
       const limitMessage = error instanceof ContentModerationError || error instanceof UsageLimitError
         ? error.message
@@ -282,6 +285,7 @@ export function registerSessionHandlers(socket: Socket, session: RealtimeSession
       emitRetroRatingStateToSocket(socket, room);
       emitSprintVipStateToSocket(socket, room);
       emitArkanoidScoresToSocket(socket, roomId);
+      emitCatRunScoresToSocket(socket, roomId);
       emitDiscussionNavigationToSocket(socket, roomId, room);
       emitFacilitatorToSocket(socket, roomId, room);
       emitDiscussionHandsToSocket(socket, roomId);

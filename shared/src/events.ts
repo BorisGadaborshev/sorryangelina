@@ -1,5 +1,6 @@
 import type {
   ArkanoidScoreEntry,
+  CatRunScoreEntry,
   Card,
   CardComment,
   CardTask,
@@ -160,6 +161,11 @@ export interface ArkanoidScorePayload {
   cardsBroken: number;
 }
 
+export interface CatRunScorePayload {
+  score: number;
+  level: number;
+}
+
 export interface MoodPayload {
   mood: Mood;
 }
@@ -214,6 +220,7 @@ export interface ClientToServerEvents {
   'show-retro-rating-results': (payload?: EmptyPayload) => void;
   'vote-sprint-vip': (payload: SprintVipPayload) => void;
   'arkanoid-score': (payload: ArkanoidScorePayload) => void;
+  'cat-run-score': (payload: CatRunScorePayload) => void;
   'set-user-mood': (payload: MoodPayload) => void;
   'send-chat-message': (payload: ChatPayload) => void;
   'whiteboard-stroke': (payload: WhiteboardStroke) => void;
@@ -274,4 +281,5 @@ export interface ServerToClientEvents {
   'room-background-updated': (payload: { backgroundImage: string }) => void;
   'sprint-vip-state': (state: SprintVipState) => void;
   'arkanoid-scores': (payload: { scores: ArkanoidScoreEntry[] }) => void;
+  'cat-run-scores': (payload: { scores: CatRunScoreEntry[] }) => void;
 }

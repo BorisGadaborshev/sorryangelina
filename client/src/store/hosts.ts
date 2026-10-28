@@ -17,4 +17,5 @@ export interface ExtrasHost {
   roomId(): string | undefined;
   userName(): string | undefined;
   submitArkanoidScore(score: number, cardsBroken: number): void;
+  submitCatRunScore(score: number, level: number): void;
 }

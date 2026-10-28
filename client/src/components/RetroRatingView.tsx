@@ -4,7 +4,7 @@ import { Box, Button, LinearProgress, Paper, Radio, Step, StepLabel, Stepper, Ty
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import { RetroStore } from '../store/RetroStore';
 import { teamApi } from '../services/teamApi';
-import { ArkanoidScoreEntry, AvailableRoom, Card, ChatMessage, ColumnKind, Mood, RetroTemplate, User, getCardTextSegments, getTemplateColumn } from '../types';
+import { ArkanoidScoreEntry, AvailableRoom, Card, CatRunScoreEntry, ChatMessage, ColumnKind, Mood, RetroTemplate, User, getCardTextSegments, getTemplateColumn } from '../types';
 
 interface Props {
   store: RetroStore;
@@ -476,6 +476,50 @@ const buildArkanoidStatSection = (
   };
 };
 
+const buildCatRunStatSection = (
+  remote: CatRunScoreEntry[],
+  local: { userName?: string; score: number; level: number; played: boolean }
+): RetroStatSection | null => {
+  const byName = new Map<string, CatRunScoreEntry>();
+  remote.forEach((entry) => {
+    const name = entry.userName?.trim();
+    const score = Math.max(0, Math.floor(Number(entry.score) || 0));
+    if (!name || !Number.isFinite(score)) return;
+    const level = Math.max(1, Math.floor(Number(entry.level) || 1));
+    const existing = byName.get(name);
+    if (!existing || score > existing.score) {
+      byName.set(name, { userName: name, score, level });
+    }
+  });
+
+  const localName = local.userName?.trim();
+  if (localName && (local.score > 0 || local.played)) {
+    const existing = byName.get(localName);
+    const localScore = Math.max(0, Math.floor(local.score || 0));
+    if (!existing || localScore > existing.score) {
+      byName.set(localName, {
+        userName: localName,
+        score: localScore,
+        level: Math.max(1, Math.floor(local.level || 1))
+      });
+    }
+  }
+
+  const entries = Array.from(byName.values()).sort((a, b) => b.score - a.score || a.userName.localeCompare(b.userName, 'ru'));
+  if (entries.length === 0) return null;
+  const bestScore = entries[0].score;
+  return {
+    id: 'cat-run',
+    title: 'Раннер с котом',
+    items: entries.map((entry) => ({
+      id: `cat-run-${entry.userName}`,
+      label: bestScore > 0 && entry.score === bestScore ? 'Дальше всех пробежал в раннере' : 'Играл в раннер с котом',
+      primary: entry.userName,
+      secondary: `${countLabel(entry.score, 'метр', 'метра', 'метров')} · уровень ${entry.level}`
+    }))
+  };
+};
+
 const RetroRatingView: React.FC<Props> = observer(({ store }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
@@ -486,6 +530,7 @@ const RetroRatingView: React.FC<Props> = observer(({ store }) => {
   const [selectedRating, setSelectedRating] = useState<1 | 2 | 3 | 4 | 5 | null>(null);
   useEffect(() => {
     store.ensureArkanoidStats();
+    store.ensureCatRunStats();
   }, [store, store.room?.id, store.currentUser?.name]);
   const rating = store.retroRating;
   const isAdmin = store.currentUser?.role === 'admin';
@@ -515,6 +560,13 @@ const RetroRatingView: React.FC<Props> = observer(({ store }) => {
       });
       if (arkanoidSection) sections.push(arkanoidSection);
     }
+    const catRunSection = buildCatRunStatSection(store.catRunScores, {
+      userName: store.currentUser?.name,
+      score: store.catRunBestScore,
+      level: store.catRunBestLevel,
+      played: store.catRunHasPlayed
+    });
+    if (catRunSection) sections.push(catRunSection);
     return sections;
   }, [
     rating.resultsVisible,
@@ -535,6 +587,10 @@ const RetroRatingView: React.FC<Props> = observer(({ store }) => {
     store.arkanoidBestScore,
     store.arkanoidBestCardsBroken,
     store.arkanoidHasPlayed,
+    store.catRunScores,
+    store.catRunBestScore,
+    store.catRunBestLevel,
+    store.catRunHasPlayed,
     store.currentUser?.name
   ]);
   const hasCards = store.cards.length > 0;
@@ -695,7 +751,7 @@ const RetroRatingView: React.FC<Props> = observer(({ store }) => {
                   Статистика ретро
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                  Кто был админом{store.roomFeatures.facilitatorEnabled ? ' и ведущим' : ''}, какое это ретро команды, кто писал карточки, кто голосовал, кто больше всех обсуждал{store.roomFeatures.arkanoidEnabled ? ' и кто играл в Arkanoid' : ''}.
+                  Кто был админом{store.roomFeatures.facilitatorEnabled ? ' и ведущим' : ''}, какое это ретро команды, кто писал карточки, кто голосовал, кто больше всех обсуждал{store.roomFeatures.arkanoidEnabled ? ', кто играл в Arkanoid' : ''} и кто играл в раннер с котом.
                   {store.roomFeatures.anonymousEnabled ? ' На доске авторы скрыты, в этой сводке имена видны.' : ''}
                 </Typography>
 

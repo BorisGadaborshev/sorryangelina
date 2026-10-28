@@ -14,6 +14,7 @@ import {
   cancelPendingUserDeparture,
   clearRoomRuntimeState,
   emitArkanoidScoresToRoom,
+  emitCatRunScoresToRoom,
   emitRetroRatingStateToRoom,
   emitSprintVipStateToRoom,
   getPresentUserNames,
@@ -23,6 +24,7 @@ import {
   normalizeWhiteboardStroke,
   resolveSocketActor,
   roomArkanoidScores,
+  roomCatRunScores,
   roomSprintVipVotes,
   roomWhiteboards
 } from '../runtime';
@@ -77,6 +79,22 @@ export function registerExtrasHandlers(socket: Socket, session: RealtimeSession)
     byUser.set(session.currentUser.name, { userName: session.currentUser.name, score: safeScore, cardsBroken: broken });
     roomArkanoidScores.set(roomId, byUser);
     emitArkanoidScoresToRoom(roomId);
+  });
+
+
+  on(socket, 'cat-run-score', ({ score, level }: { score?: number; level?: number }) => {
+    if (!session.currentUser?.roomId || !session.currentUser.name) return;
+    const safeScore = Math.floor(Number(score));
+    const safeLevel = Math.floor(Number(level));
+    if (!Number.isFinite(safeScore) || safeScore < 0 || safeScore > 1_000_000) return;
+    const nextLevel = Number.isFinite(safeLevel) ? Math.max(1, Math.min(10_000, safeLevel)) : 1;
+    const roomId = session.currentUser.roomId;
+    const byUser = roomCatRunScores.get(roomId) || new Map<string, { userName: string; score: number; level: number }>();
+    const previous = byUser.get(session.currentUser.name);
+    if (previous && previous.score >= safeScore) return;
+    byUser.set(session.currentUser.name, { userName: session.currentUser.name, score: safeScore, level: nextLevel });
+    roomCatRunScores.set(roomId, byUser);
+    emitCatRunScoresToRoom(roomId);
   });
 
 

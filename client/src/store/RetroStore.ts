@@ -22,7 +22,8 @@ import {
   Team,
   User,
   WhiteboardStroke,
-  ArkanoidScoreEntry
+  ArkanoidScoreEntry,
+  CatRunScoreEntry
 } from '../types';
 import type { AppSocket } from '../services/socket';
 import { SocketService } from '../services/socket';
@@ -80,6 +81,9 @@ export class RetroStore {
       userName: () => this.board.currentUser?.name,
       submitArkanoidScore: (score, cardsBroken) => {
         this.socketService?.submitArkanoidScore(score, cardsBroken);
+      },
+      submitCatRunScore: (score, level) => {
+        this.socketService?.submitCatRunScore(score, level);
       }
     });
     makeAutoObservable(this, {
@@ -121,6 +125,10 @@ export class RetroStore {
       arkanoidBestCardsBroken: delegated,
       arkanoidHasPlayed: delegated,
       arkanoidScores: delegated,
+      catRunBestScore: delegated,
+      catRunBestLevel: delegated,
+      catRunHasPlayed: delegated,
+      catRunScores: delegated,
       isOwner: delegated,
       sortedCards: delegated,
       discussionCards: delegated,
@@ -183,6 +191,10 @@ export class RetroStore {
   get arkanoidBestCardsBroken() { return this.extras.arkanoidBestCardsBroken; }
   get arkanoidHasPlayed() { return this.extras.arkanoidHasPlayed; }
   get arkanoidScores() { return this.extras.arkanoidScores; }
+  get catRunBestScore() { return this.extras.catRunBestScore; }
+  get catRunBestLevel() { return this.extras.catRunBestLevel; }
+  get catRunHasPlayed() { return this.extras.catRunHasPlayed; }
+  get catRunScores() { return this.extras.catRunScores; }
   get isOwner() { return this.board.isOwner; }
   get sortedCards() { return this.board.sortedCards; }
   get discussionCards() { return this.board.discussionCards; }
@@ -397,6 +409,10 @@ export class RetroStore {
   saveUserMood(roomId: string, username: string, mood: Mood) { this.board.saveUserMood(roomId, username, mood); }
 
   ensureArkanoidStats() { this.extras.ensureArkanoidStats(); }
+  ensureCatRunStats() { this.extras.ensureCatRunStats(); }
+  beginCatRunRound() { this.extras.beginCatRunRound(); }
+  recordCatRunScore(score: number, level: number) { this.extras.recordCatRunScore(score, level); }
+  setCatRunScores(scores: CatRunScoreEntry[]) { this.extras.setCatRunScores(scores); }
   beginArkanoidRound() { this.extras.beginArkanoidRound(); }
   restartArkanoidRound() { this.extras.restartArkanoidRound(); }
   finishArkanoidRound() { this.extras.finishArkanoidRound(); }
@@ -413,6 +429,7 @@ export class RetroStore {
       this.discussion.clearPresence();
       if (roomChanged) this.extras.resetScores();
       this.extras.ensureArkanoidStats();
+      this.extras.ensureCatRunStats();
       this.persistBoardState();
       return;
     }
@@ -489,6 +506,7 @@ export class RetroStore {
       if (parsed.roomId !== roomId || !parsed.room) return;
       this.board.hydrate(parsed);
       this.extras.ensureArkanoidStats();
+      this.extras.ensureCatRunStats();
     } catch {
       sessionStorage.removeItem(BOARD_STATE_KEY);
       localStorage.removeItem(BOARD_STATE_KEY);

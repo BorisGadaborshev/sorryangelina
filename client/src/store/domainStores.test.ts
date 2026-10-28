@@ -149,7 +149,8 @@ describe('ExtrasStore', () => {
     const extras = new ExtrasStore({
       roomId: () => 'room',
       userName: () => 'Ann',
-      submitArkanoidScore: () => {}
+      submitArkanoidScore: () => {},
+      submitCatRunScore: () => {}
     });
     for (let index = 0; index < 205; index += 1) {
       extras.addChatMessage({

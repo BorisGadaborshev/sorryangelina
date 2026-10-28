@@ -23,6 +23,7 @@ import FloorCat from './FloorCat';
 
 const CollaborativeWhiteboard = lazy(() => import('./CollaborativeWhiteboard'));
 const ArkanoidGame = lazy(() => import('./ArkanoidGame'));
+const CatRunGame = lazy(() => import('./CatRunGame'));
 
 interface Props {
   store: RetroStore;
@@ -36,6 +37,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   const [isChatVisible, setIsChatVisible] = useState(false);
   const [isDrawEnabled, setIsDrawEnabled] = useState(false);
   const [isArkanoidEnabled, setIsArkanoidEnabled] = useState(false);
+  const [isCatRunEnabled, setIsCatRunEnabled] = useState(false);
   const [whiteboardTool, setWhiteboardTool] = useState<WhiteboardTool>('pen');
   const [whiteboardColor, setWhiteboardColor] = useState(WHITEBOARD_COLORS[0]);
   const isMobile = useMediaQuery('(max-width:600px)');
@@ -84,6 +86,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   const canPlayArkanoid = !isMobile
     && features.arkanoidEnabled
     && (store.phase === 'creation' || store.phase === 'grouping' || store.phase === 'voting');
+  const canPlayCatRun = !isMobile;
   const canUseChat = features.chatEnabled;
   const canPlayTimerMusic = features.musicEnabled;
   const readyEnabled = features.readyEnabled;
@@ -134,9 +137,15 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   }, [canPlayArkanoid, isArkanoidEnabled]);
 
   useEffect(() => {
-    setFloorCatArkanoidActive(isArkanoidEnabled);
+    if (!canPlayCatRun && isCatRunEnabled) {
+      setIsCatRunEnabled(false);
+    }
+  }, [canPlayCatRun, isCatRunEnabled]);
+
+  useEffect(() => {
+    setFloorCatArkanoidActive(isArkanoidEnabled || isCatRunEnabled);
     return () => setFloorCatArkanoidActive(false);
-  }, [isArkanoidEnabled]);
+  }, [isArkanoidEnabled, isCatRunEnabled]);
 
   const submitRejoin = async () => {
     const session = readStoredSession();
@@ -337,9 +346,11 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                 canUseChat={canUseChat}
                 canDraw={canDrawOnBoard}
                 canPlayArkanoid={canPlayArkanoid}
+                canPlayCatRun={canPlayCatRun}
                 isChatVisible={isChatVisible}
                 isDrawEnabled={isDrawEnabled}
                 isArkanoidEnabled={isArkanoidEnabled}
+                isCatRunEnabled={isCatRunEnabled}
                 tool={whiteboardTool}
                 color={whiteboardColor}
                 onToggleChat={toggleChat}
@@ -350,12 +361,19 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                 onToggleArkanoid={() => {
                   setIsArkanoidEnabled((prev) => !prev);
                   setIsDrawEnabled(false);
+                  setIsCatRunEnabled(false);
+                }}
+                onToggleCatRun={() => {
+                  setIsCatRunEnabled((prev) => !prev);
+                  setIsArkanoidEnabled(false);
                 }}
                 onTool={setWhiteboardTool}
                 onColor={setWhiteboardColor}
               />
             </Box>
-            <Box sx={{
+            <Box
+              data-cat-run-board
+              sx={{
               flexGrow: 1,
               minWidth: 0,
               minHeight: 0,
@@ -451,7 +469,15 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
       />
 
       {rejoinDialog}
-      <FloorCat />
+      {isCatRunEnabled && canPlayCatRun ? (
+        <ErrorBoundary title="Игру не удалось показать">
+          <Suspense fallback={null}>
+            <CatRunGame />
+          </Suspense>
+        </ErrorBoundary>
+      ) : (
+        <FloorCat />
+      )}
     </Box>
   );
 });

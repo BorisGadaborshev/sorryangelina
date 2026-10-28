@@ -632,6 +632,12 @@ export interface ArkanoidScoreEntry {
   cardsBroken: number;
 }
 
+export interface CatRunScoreEntry {
+  userName: string;
+  score: number;
+  level: number;
+}
+
 export interface ChatMessage {
   id: string;
   roomId: string;

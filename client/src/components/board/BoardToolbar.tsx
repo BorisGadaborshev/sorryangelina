@@ -94,6 +94,24 @@ export const ChatToolbarButton: React.FC<{
   );
 };
 
+export const CatRunToolbarIcon: React.FC = () => (
+  <Box
+    component="svg"
+    viewBox="0 0 24 24"
+    aria-hidden
+    sx={{ width: 22, height: 22, display: 'block', flexShrink: 0 }}
+  >
+    <path
+      fill="currentColor"
+      d="M3.2 11.4c.2-1.8 1.4-2.6 2.8-2.2.4-1.4 1.7-2.4 3.4-2.4h.4l-.3-1.4c0-.3.3-.5.6-.4l1.4.4c.4-.2.8-.2 1.2-.2.5 0 .9.1 1.3.3l1.5-.5c.3-.1.6.1.5.4l-.4 1.5c1.5.4 2.5 1.5 2.8 2.9 1.4-.2 2.6.7 2.6 2.4 0 2.4-2.2 4.2-6.7 4.6-1.4.1-2.9.1-4.4 0-3.6-.3-6.5-2.2-6.3-5.4Zm5.2 1.1c0-.5-.3-.9-.8-.9s-.8.4-.8.9.3.9.8.9.8-.4.8-.9Zm5.8 0c0-.5-.3-.9-.8-.9s-.8.4-.8.9.3.9.8.9.8-.4.8-.9Z"
+    />
+    <path
+      fill="currentColor"
+      d="M7.2 18.2c.1-.8.4-1.2.8-1.2s.6.6.5 1.4c1.1-.2 2.2-.2 3.2 0-.1-.8.1-1.4.5-1.4s.7.4.8 1.2c.9.2 1.7.5 2.2.9-.8.6-2.6 1-5.2 1-2.4 0-3.6-.5-2.8-1.9Z"
+    />
+  </Box>
+);
+
 export const chatButtonSx = (active: boolean) => ({
   borderRadius: '10px',
   bgcolor: (theme: { palette: { mode: string } }) => (
@@ -115,14 +133,17 @@ interface Props {
   canUseChat: boolean;
   canDraw: boolean;
   canPlayArkanoid: boolean;
+  canPlayCatRun: boolean;
   isChatVisible: boolean;
   isDrawEnabled: boolean;
   isArkanoidEnabled: boolean;
+  isCatRunEnabled: boolean;
   tool: WhiteboardTool;
   color: string;
   onToggleChat: () => void;
   onToggleDraw: () => void;
   onToggleArkanoid: () => void;
+  onToggleCatRun: () => void;
   onTool: (tool: WhiteboardTool) => void;
   onColor: (color: string) => void;
 }
@@ -165,14 +186,17 @@ const BoardToolbar: React.FC<Props> = observer(({
   canUseChat,
   canDraw,
   canPlayArkanoid,
+  canPlayCatRun,
   isChatVisible,
   isDrawEnabled,
   isArkanoidEnabled,
+  isCatRunEnabled,
   tool,
   color,
   onToggleChat,
   onToggleDraw,
   onToggleArkanoid,
+  onToggleCatRun,
   onTool,
   onColor
 }) => {
@@ -226,6 +250,27 @@ const BoardToolbar: React.FC<Props> = observer(({
             onClick={onToggleArkanoid}
           >
             <SportsEsportsIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      )}
+      {canPlayCatRun && (
+        <Tooltip title={isCatRunEnabled ? 'Выйти из игры с котом' : 'Запустить игру с котом'}>
+          <IconButton
+            size="small"
+            color={isCatRunEnabled ? 'primary' : 'default'}
+            aria-label={isCatRunEnabled ? 'Выйти из игры с котом' : 'Запустить игру с котом'}
+            onClick={(event) => {
+              event.currentTarget.blur();
+              onToggleCatRun();
+            }}
+            onKeyDown={(event) => {
+              if (event.code === 'Space' || event.code === 'ArrowUp') {
+                event.preventDefault();
+              }
+            }}
+            sx={chatButtonSx(isCatRunEnabled)}
+          >
+            <CatRunToolbarIcon />
           </IconButton>
         </Tooltip>
       )}

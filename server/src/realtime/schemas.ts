@@ -119,6 +119,10 @@ export const eventSchemas: Record<ClientEventName, z.ZodTypeAny> = {
     score: z.number().finite().min(0).max(1_000_000),
     cardsBroken: z.number().finite().min(0).max(100_000)
   }).passthrough(),
+  'cat-run-score': z.object({
+    score: z.number().finite().min(0).max(1_000_000),
+    level: z.number().finite().min(1).max(10_000)
+  }).passthrough(),
   'set-user-mood': z.object({
     mood: z.enum(['great', 'good', 'neutral', 'bad', 'awful'])
   }).passthrough(),
@@ -149,6 +153,7 @@ const MAX_PER_SECOND: Record<string, number> = {
   'whiteboard-stroke': 30,
   'discussion-burst': 6,
   'arkanoid-score': 4,
+  'cat-run-score': 4,
   'add-card': 4,
   'vote-card': 8,
   'send-chat-message': 4,

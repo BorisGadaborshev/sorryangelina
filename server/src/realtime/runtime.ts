@@ -264,6 +264,7 @@ export const roomRaisedHands = new Map<string, Map<string, string>>();
 export const discussionBurstTimestamps = new Map<string, Map<string, number[]>>();
 export const roomSprintVipVotes = new Map<string, Map<string, string>>();
 export const roomArkanoidScores = new Map<string, Map<string, { userName: string; score: number; cardsBroken: number }>>();
+export const roomCatRunScores = new Map<string, Map<string, { userName: string; score: number; level: number }>>();
 export const roomUserSocketPresence = new Map<string, Map<string, Set<string>>>();
 export const pendingUserDepartures = new Map<string, ReturnType<typeof setTimeout>>();
 export const USER_DISCONNECT_GRACE_MS = Math.max(
@@ -651,6 +652,18 @@ export const emitArkanoidScoresToSocket = (target: Socket, roomId: string): void
   target.emit('arkanoid-scores', arkanoidScoresPayload(roomId));
 };
 
+export const catRunScoresPayload = (roomId: string) => ({
+  scores: Array.from(roomCatRunScores.get(roomId)?.values() || [])
+});
+
+export const emitCatRunScoresToRoom = (roomId: string): void => {
+  io.to(roomId).emit('cat-run-scores', catRunScoresPayload(roomId));
+};
+
+export const emitCatRunScoresToSocket = (target: Socket, roomId: string): void => {
+  target.emit('cat-run-scores', catRunScoresPayload(roomId));
+};
+
 export const persistUserLeave = async (
   user: User,
   roomId: string,
@@ -694,6 +707,7 @@ export const persistUserLeave = async (
   if (updatedRoom.users.length === 0) {
     roomSprintVipVotes.delete(roomId);
     roomArkanoidScores.delete(roomId);
+    roomCatRunScores.delete(roomId);
     roomUserSocketPresence.delete(roomId);
     roomRaisedHands.delete(roomId);
     discussionBurstTimestamps.delete(roomId);
@@ -798,6 +812,7 @@ export function clearRoomRuntimeState(roomId: string, emitTimerReset = false): v
   discussionBurstTimestamps.delete(roomId);
   roomSprintVipVotes.delete(roomId);
   roomArkanoidScores.delete(roomId);
+  roomCatRunScores.delete(roomId);
   cancelPendingDeparturesForRoom(roomId);
   roomHydrations.delete(roomId);
   clearRoomVersion(roomId);
