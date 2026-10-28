@@ -167,6 +167,23 @@ export class AccountService {
     return (await this.getAccountByName(normalizedName)) !== null;
   }
 
+  static async listRegisteredNames(names: string[]): Promise<string[]> {
+    const normalized = Array.from(new Set(names.map((name) => normalizeAuthName(name)).filter(Boolean)));
+    if (normalized.length === 0) return [];
+
+    const { rows } = await pool.query(
+      `select name from accounts where type = 'registered' and lower(name) = any($1::text[])`,
+      [normalized.map((name) => name.toLowerCase())]
+    );
+    const registered = new Map(
+      (rows as Array<{ name: string }>).map((row) => [row.name.toLowerCase(), row.name])
+    );
+    return normalized.flatMap((name) => {
+      const stored = registered.get(name.toLowerCase());
+      return stored ? [stored] : [];
+    });
+  }
+
   private static generateTemporaryPassword(): string {
     const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
     const bytes = crypto.randomBytes(10);

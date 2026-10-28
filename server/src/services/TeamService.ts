@@ -224,16 +224,21 @@ export class TeamService {
 
   static async getTeamRosterNames(teamId: string): Promise<string[]> {
     await this.ensureBuiltinTeam();
-    if (teamId === BUILTIN_TEAM_ID) {
-      return [...FIXED_AUTH_NAMES];
-    }
-
     const team = await TeamModel.findOne({ id: teamId });
     if (!team) {
-      return [];
+      return teamId === BUILTIN_TEAM_ID ? [...FIXED_AUTH_NAMES] : [];
     }
 
-    return team.members.map((member) => member.name);
+    if (teamId !== BUILTIN_TEAM_ID) {
+      return team.members.map((member) => member.name);
+    }
+
+    const fixedNames = new Set(FIXED_AUTH_NAMES);
+    const registeredNames = await AccountService.listRegisteredNames(
+      team.members.map((member) => member.name).filter((name) => !fixedNames.has(name))
+    );
+    registeredNames.sort((left, right) => left.localeCompare(right, 'ru'));
+    return [...FIXED_AUTH_NAMES, ...registeredNames];
   }
 
   static async getUserRole(teamId: string, username: string): Promise<TeamMember['role'] | null> {

@@ -1,9 +1,22 @@
 import { Router } from 'express';
 import { logger } from '../../utils/logger';
 import { AccountService } from '../../services/AccountService';
-import { TeamService } from '../../services/TeamService';
+import { BUILTIN_TEAM_ID, TeamService } from '../../services/TeamService';
+import { isFixedAuthName, normalizeAuthName } from '../../config/authNames';
 import { signAuthToken } from '../../config/jwt';
 import { authRateLimit } from '../rateLimit';
+
+const loginRegisteredBuiltinMember = async (name: string, password: string) => {
+  const team = await TeamService.getTeam(BUILTIN_TEAM_ID);
+  if (!team || !TeamService.isTeamMember(team, name)) {
+    throw new Error('Name is not in fixed list');
+  }
+  const profile = await AccountService.login(name, password);
+  if (profile.type !== 'registered') {
+    throw new Error('Name is not in fixed list');
+  }
+  return { profile, isFirstLogin: false };
+};
 
 const buildAuthResponse = (profile: { name: string; type: 'fixed' | 'registered' | 'guest' }) => {
   const { token, expiresAt } = signAuthToken(profile.name, profile.type);
@@ -38,7 +51,10 @@ authRouter.post('/fixed-login', async (req, res) => {
   }
 
   try {
-    const result = await AccountService.fixedLogin(name, password);
+    const normalizedName = normalizeAuthName(name);
+    const result = isFixedAuthName(normalizedName)
+      ? await AccountService.fixedLogin(normalizedName, password)
+      : await loginRegisteredBuiltinMember(normalizedName, password);
     res.json({
       ...buildAuthResponse(result.profile),
       isFirstLogin: result.isFirstLogin
