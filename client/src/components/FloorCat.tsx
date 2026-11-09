@@ -3,6 +3,10 @@ import { observer } from 'mobx-react-lite';
 import { useTheme } from '@mui/material/styles';
 import './FloorCat.css';
 import { FLOOR_CAT_VISIBILITY_EVENT, isFloorCatVisible } from './floorCatPreference';
+import {
+  BOARD_WEATHER_KIND_EVENT,
+  readActiveBoardWeatherKind
+} from './boardWeatherPreference';
 import { useRetroStore } from '../store/StoreContext';
 import { isFemininePersonName } from '../utils/feminineName';
 
@@ -23,7 +27,20 @@ const FloorCatActor: React.FC = observer(() => {
   const flipRef = useRef<HTMLDivElement>(null);
   const liftRef = useRef<HTMLDivElement>(null);
   const catRef = useRef<HTMLDivElement>(null);
+  const printsRef = useRef<HTMLCanvasElement>(null);
   const puzzledUntilRef = useRef(0);
+  const snowingRef = useRef(readActiveBoardWeatherKind() === 'snow');
+  const [snowing, setSnowing] = useState(() => snowingRef.current);
+
+  useEffect(() => {
+    const sync = () => {
+      const next = readActiveBoardWeatherKind() === 'snow';
+      snowingRef.current = next;
+      setSnowing(next);
+    };
+    window.addEventListener(BOARD_WEATHER_KIND_EVENT, sync);
+    return () => window.removeEventListener(BOARD_WEATHER_KIND_EVENT, sync);
+  }, []);
 
   const poke = () => {
     puzzledUntilRef.current = performance.now() + 5600;
@@ -34,6 +51,7 @@ const FloorCatActor: React.FC = observer(() => {
     const flip = flipRef.current;
     const lift = liftRef.current;
     const cat = catRef.current;
+    const prints = printsRef.current;
     if (!actor || !flip || !lift || !cat) return;
 
     const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -48,6 +66,46 @@ const FloorCatActor: React.FC = observer(() => {
     let wasSwatting = false;
     let pounceBackAt = 0;
     let raf = 0;
+    let lastPrintX = -999;
+    const pawPrints: Array<{ x: number; y: number; dir: number; at: number }> = [];
+
+    const sizePrints = () => {
+      if (!prints) return;
+      const ratio = window.devicePixelRatio || 1;
+      prints.width = Math.floor(window.innerWidth * ratio);
+      prints.height = Math.floor(18 * ratio);
+      prints.style.width = `${window.innerWidth}px`;
+      prints.style.height = '18px';
+    };
+    sizePrints();
+
+    const drawPrints = (now: number) => {
+      if (!prints) return;
+      const ctx = prints.getContext('2d');
+      if (!ctx) return;
+      const ratio = window.devicePixelRatio || 1;
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      ctx.clearRect(0, 0, prints.width, prints.height);
+      const live = pawPrints.filter((print) => now - print.at < 14000);
+      pawPrints.length = 0;
+      pawPrints.push(...live);
+      for (const print of live) {
+        const age = (now - print.at) / 14000;
+        ctx.save();
+        ctx.translate(print.x, print.y);
+        ctx.rotate(print.dir < 0 ? -0.35 : 0.35);
+        ctx.fillStyle = `rgba(90, 104, 128, ${0.28 * (1 - age)})`;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 3.4, 2.1, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(-2.2 * print.dir, -2.4, 1.3, 1.1, 0, 0, Math.PI * 2);
+        ctx.ellipse(0.2 * print.dir, -2.8, 1.2, 1.05, 0, 0, Math.PI * 2);
+        ctx.ellipse(2.4 * print.dir, -2.3, 1.2, 1.05, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    };
 
     const onMove = (event: PointerEvent) => {
       pointer.x = event.clientX;
@@ -181,10 +239,24 @@ const FloorCatActor: React.FC = observer(() => {
       if (cat.dataset.action !== action) cat.dataset.action = action;
       const look = mood === 'play' && pointer.y < height - 48 ? 'up' : 'ahead';
       if (cat.dataset.look !== look) cat.dataset.look = look;
+
+      if (snowingRef.current && (mood === 'walk' || mood === 'play') && Math.abs(x - lastPrintX) > 11) {
+        const hind = dir === 1 ? x + 14 : x + 30;
+        const front = dir === 1 ? x + 27 : x + 18;
+        pawPrints.push({ x: hind, y: 12, dir, at: now });
+        pawPrints.push({ x: front, y: 11, dir, at: now });
+        lastPrintX = x;
+      }
+      if (!snowingRef.current && pawPrints.length) {
+        pawPrints.length = 0;
+        lastPrintX = -999;
+      }
+      drawPrints(now);
     };
 
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerout', onLeave);
+    window.addEventListener('resize', sizePrints);
     motion.addEventListener('change', onMotion);
     raf = requestAnimationFrame(tick);
 
@@ -192,12 +264,14 @@ const FloorCatActor: React.FC = observer(() => {
       cancelAnimationFrame(raf);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerout', onLeave);
+      window.removeEventListener('resize', sizePrints);
       motion.removeEventListener('change', onMotion);
     };
   }, []);
 
   return (
-    <div className="floor-cat" data-theme={themeMode} data-bow={withBow ? '1' : '0'}>
+    <div className="floor-cat" data-theme={themeMode} data-bow={withBow ? '1' : '0'} data-snow={snowing ? '1' : '0'}>
+      <canvas className="floor-cat__snow-prints" ref={printsRef} aria-hidden="true" />
       <button type="button" className="floor-cat__actor" ref={actorRef} aria-label="Котик" onClick={poke}>
         <div className="floor-cat__flip" ref={flipRef}>
           <div className="floor-cat__lift" ref={liftRef}>
@@ -213,6 +287,7 @@ const FloorCatActor: React.FC = observer(() => {
                 <div className="head">
                   <div className="ear ear-left" />
                   <div className="ear ear-right" />
+                  <div className="snow-hat" aria-hidden="true" />
                   <div className="bow" aria-hidden="true" />
                   <div className="eye eye-left" />
                   <div className="eye eye-right" />

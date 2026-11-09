@@ -6,6 +6,13 @@ export interface AppVersion {
 
 export const APP_CHANGELOG: AppVersion[] = [
   {
+    version: '1.21.28',
+    date: '09.11.2026',
+    changes: [
+      'За карточками на доске появляется тихая погода: облака, дождь или снег, по данным о реальной погоде. В настройках интерфейса её можно выключить'
+    ]
+  },
+  {
     version: '1.21.27',
     date: '28.10.2026',
     changes: [

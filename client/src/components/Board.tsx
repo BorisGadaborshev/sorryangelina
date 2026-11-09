@@ -20,6 +20,7 @@ import { useBoardMood } from './board/useBoardMood';
 import { useAllReadyPrompt } from './board/useAllReadyPrompt';
 import { setFloorCatArkanoidActive } from './floorCatPreference';
 import FloorCat from './FloorCat';
+import BoardWeather from './BoardWeather';
 
 const CollaborativeWhiteboard = lazy(() => import('./CollaborativeWhiteboard'));
 const ArkanoidGame = lazy(() => import('./ArkanoidGame'));
@@ -279,6 +280,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
         p: 1.25, 
         gap: 1.25,
         minWidth: 0,
+        position: 'relative',
         ...(store.roomFeatures.backgroundImage
           ? {
               backgroundImage: toCssBackgroundUrl(store.roomFeatures.backgroundImage),
@@ -289,8 +291,9 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
             }
           : {})
       }}>
+        <BoardWeather themeMode={themeMode} />
         {isMobile ? (
-          <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1, minHeight: 0, overflow: 'hidden', gap: 1 }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1, minHeight: 0, overflow: 'hidden', gap: 1, position: 'relative', zIndex: 1 }}>
             {mobileTab === 1 ? (
               <Box sx={{ flexGrow: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
                 <UserList 
@@ -314,7 +317,16 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
             )}
           </Box>
         ) : (
-          <>
+          <Box sx={{
+            display: 'flex',
+            flexGrow: 1,
+            minWidth: 0,
+            minHeight: 0,
+            overflow: 'hidden',
+            gap: 1.25,
+            position: 'relative',
+            zIndex: 1
+          }}>
             <Box sx={{ 
               width: isUserListVisible ? 300 : 0,
               flexShrink: 0,
@@ -420,7 +432,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                 <ChatTerminal store={store} />
               </Box>
             )}
-          </>
+          </Box>
         )}
       </Box>
 

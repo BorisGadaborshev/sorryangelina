@@ -20,10 +20,25 @@
   --cat-mark: #1a1a1a;
 }
 
+.floor-cat__snow-prints {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 18px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.floor-cat[data-snow='1'] .floor-cat__actor {
+  bottom: 11px;
+}
+
 .floor-cat__actor {
   position: absolute;
   left: 0;
   bottom: 0;
+  z-index: 2;
   width: 46px;
   height: 32px;
   margin: 0;
@@ -361,6 +376,48 @@
   height: 7px;
   background: var(--cat-fur);
   clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+
+.snow-hat {
+  display: none;
+  position: absolute;
+  left: 1px;
+  top: -6px;
+  width: 14px;
+  height: 9px;
+  background: #fbf8f2;
+  border-radius: 9px 9px 5px 5px;
+  z-index: 5;
+  box-shadow:
+    5px 3px 0 -2px #fbf8f2,
+    -4px 4px 0 -3px #f7f4ec,
+    1px -3px 0 -2px #fff;
+}
+
+.floor-cat[data-snow='1'] .snow-hat {
+  display: block;
+}
+
+.floor-cat[data-theme='light'] .snow-hat {
+  background: #fff;
+  box-shadow:
+    5px 3px 0 -2px #fff,
+    -4px 4px 0 -3px #f4f1ea,
+    1px -3px 0 -2px #fff,
+    0 0 0 0.5px rgba(40, 48, 70, 0.12);
+}
+
+.cat[data-mood='sit'] .snow-hat {
+  left: 2px;
+  top: -7px;
+  width: 15px;
+}
+
+.cat[data-mood='sleep'] .snow-hat {
+  left: 2px;
+  top: -5px;
+  width: 15px;
+  height: 8px;
 }
 
 .ear-left {
