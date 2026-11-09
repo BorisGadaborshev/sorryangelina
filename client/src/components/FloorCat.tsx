@@ -324,8 +324,8 @@ const FloorCatActor: React.FC = observer(() => {
             </div>
           </div>
           <div className="floor-cat__zzz" aria-hidden="true">Zzz</div>
-          <div className="floor-cat__ask" aria-hidden="true">?</div>
         </div>
+        <div className="floor-cat__ask" aria-hidden="true">мяу...м..гав-гав?</div>
       </button>
     </div>
   );
