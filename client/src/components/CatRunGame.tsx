@@ -4,6 +4,7 @@ import { Box, Button, Typography } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import { useRetroStore } from '../store/StoreContext';
 import { isFemininePersonName } from '../utils/feminineName';
+import { isNewYearThemeActive } from './newYearThemePreference';
 import './FloorCat.css';
 
 type GameStatus = 'ready' | 'play' | 'lost';
@@ -88,6 +89,7 @@ const CatRunGame: React.FC = observer(() => {
   const themeMode = useTheme().palette.mode;
   const store = useRetroStore();
   const withBow = isFemininePersonName(store.currentUser?.name || store.authProfile?.name);
+  const festive = isNewYearThemeActive();
   const actorRef = useRef<HTMLButtonElement | null>(null);
   const catRef = useRef<HTMLDivElement | null>(null);
   const trackRef = useRef<HTMLDivElement | null>(null);
@@ -376,6 +378,7 @@ const CatRunGame: React.FC = observer(() => {
       className="floor-cat"
       data-theme={themeMode}
       data-bow={withBow ? '1' : '0'}
+      data-ny={festive ? '1' : '0'}
       sx={{ zIndex: 1160 }}
     >
       <Box ref={trackRef} sx={{ position: 'absolute', inset: 'auto 0 0 0', height: 0, overflow: 'visible', pointerEvents: 'none' }} />
@@ -405,6 +408,7 @@ const CatRunGame: React.FC = observer(() => {
                 <div className="head">
                   <div className="ear ear-left" />
                   <div className="ear ear-right" />
+                  <div className="ny-hat" aria-hidden="true" />
                   <div className="bow" aria-hidden="true" />
                   <div className="eye eye-left" />
                   <div className="eye eye-right" />

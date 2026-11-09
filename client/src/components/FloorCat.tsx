@@ -7,6 +7,10 @@ import {
   BOARD_WEATHER_KIND_EVENT,
   readActiveBoardWeatherKind
 } from './boardWeatherPreference';
+import {
+  NEW_YEAR_THEME_EVENT,
+  isNewYearThemeActive
+} from './newYearThemePreference';
 import { useRetroStore } from '../store/StoreContext';
 import { isFemininePersonName } from '../utils/feminineName';
 
@@ -31,6 +35,7 @@ const FloorCatActor: React.FC = observer(() => {
   const puzzledUntilRef = useRef(0);
   const snowingRef = useRef(readActiveBoardWeatherKind() === 'snow');
   const [snowing, setSnowing] = useState(() => snowingRef.current);
+  const [festive, setFestive] = useState(isNewYearThemeActive);
 
   useEffect(() => {
     const sync = () => {
@@ -40,6 +45,12 @@ const FloorCatActor: React.FC = observer(() => {
     };
     window.addEventListener(BOARD_WEATHER_KIND_EVENT, sync);
     return () => window.removeEventListener(BOARD_WEATHER_KIND_EVENT, sync);
+  }, []);
+
+  useEffect(() => {
+    const sync = () => setFestive(isNewYearThemeActive());
+    window.addEventListener(NEW_YEAR_THEME_EVENT, sync);
+    return () => window.removeEventListener(NEW_YEAR_THEME_EVENT, sync);
   }, []);
 
   const poke = () => {
@@ -270,8 +281,24 @@ const FloorCatActor: React.FC = observer(() => {
   }, []);
 
   return (
-    <div className="floor-cat" data-theme={themeMode} data-bow={withBow ? '1' : '0'} data-snow={snowing ? '1' : '0'}>
+    <div className="floor-cat" data-theme={themeMode} data-bow={withBow ? '1' : '0'} data-snow={snowing ? '1' : '0'} data-ny={festive ? '1' : '0'}>
       <canvas className="floor-cat__snow-prints" ref={printsRef} aria-hidden="true" />
+      {festive ? (
+        <svg className="floor-cat__tree" viewBox="0 0 80 100" aria-hidden="true">
+          <ellipse className="floor-cat__tree-base" cx="40" cy="94" rx="22" ry="5" />
+          <rect className="floor-cat__tree-trunk" x="36" y="78" width="8" height="16" rx="1.2" />
+          <path className="floor-cat__tree-layer floor-cat__tree-layer--back" d="M40 42 L76 80 H4 Z" />
+          <path className="floor-cat__tree-layer" d="M40 26 L68 60 H12 Z" />
+          <path className="floor-cat__tree-layer floor-cat__tree-layer--lit" d="M40 12 L58 40 H22 Z" />
+          <polygon className="floor-cat__tree-star" points="40,2 42.2,8.4 49,8.6 43.6,12.6 45.6,19 40,15.4 34.4,19 36.4,12.6 31,8.6 37.8,8.4" />
+          <circle className="floor-cat__tree-bauble floor-cat__tree-bauble--red" cx="32" cy="36" r="2.1" />
+          <circle className="floor-cat__tree-bauble floor-cat__tree-bauble--gold" cx="48" cy="38" r="2" />
+          <circle className="floor-cat__tree-bauble floor-cat__tree-bauble--blue" cx="28" cy="54" r="2.2" />
+          <circle className="floor-cat__tree-bauble floor-cat__tree-bauble--gold" cx="52" cy="56" r="2.1" />
+          <circle className="floor-cat__tree-bauble floor-cat__tree-bauble--red" cx="38" cy="68" r="2.2" />
+          <circle className="floor-cat__tree-bauble floor-cat__tree-bauble--blue" cx="58" cy="70" r="2" />
+        </svg>
+      ) : null}
       <button type="button" className="floor-cat__actor" ref={actorRef} aria-label="Котик" onClick={poke}>
         <div className="floor-cat__flip" ref={flipRef}>
           <div className="floor-cat__lift" ref={liftRef}>
@@ -288,6 +315,7 @@ const FloorCatActor: React.FC = observer(() => {
                   <div className="ear ear-left" />
                   <div className="ear ear-right" />
                   <div className="snow-hat" aria-hidden="true" />
+                  <div className="ny-hat" aria-hidden="true" />
                   <div className="bow" aria-hidden="true" />
                   <div className="eye eye-left" />
                   <div className="eye eye-right" />

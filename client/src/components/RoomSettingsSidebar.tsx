@@ -51,6 +51,7 @@ import AutoModeIcon from '@mui/icons-material/AutoMode';
 import CloudIcon from '@mui/icons-material/Cloud';
 import WaterDropIcon from '@mui/icons-material/WaterDrop';
 import AcUnitIcon from '@mui/icons-material/AcUnit';
+import CelebrationIcon from '@mui/icons-material/Celebration';
 import { RetroStore } from '../store/RetroStore';
 import { ACCENT_GRADIENT, ACCENT_GRADIENT_HOVER, ACCENT_SHADOW } from './readyButtonStyles';
 import { DislikeIconId, LikeIconId, MAX_VOTE_LIMIT, MIN_VOTE_LIMIT, RoomFeatures } from '../types';
@@ -67,6 +68,11 @@ import {
   setBoardWeatherEnabled,
   setBoardWeatherPreview
 } from './boardWeatherPreference';
+import {
+  NewYearThemePreview,
+  readNewYearThemePreview,
+  setNewYearThemePreview
+} from './newYearThemePreference';
 
 const AboutAppDialog = lazy(() => import('./AboutAppDialog'));
 const BackgroundImageDialog = lazy(() => import('./BackgroundImageDialog'));
@@ -100,6 +106,16 @@ const WEATHER_PREVIEW_OPTIONS: Array<{
   { id: 'clouds', label: 'Облака', icon: <CloudIcon fontSize="small" /> },
   { id: 'rain', label: 'Дождь', icon: <WaterDropIcon fontSize="small" /> },
   { id: 'snow', label: 'Снег', icon: <AcUnitIcon fontSize="small" /> }
+];
+
+const NEW_YEAR_PREVIEW_OPTIONS: Array<{
+  id: NewYearThemePreview;
+  label: string;
+  icon: React.ReactNode;
+}> = [
+  { id: 'auto', label: 'По календарю', icon: <AutoModeIcon fontSize="small" /> },
+  { id: 'on', label: 'Показать', icon: <CelebrationIcon fontSize="small" /> },
+  { id: 'off', label: 'Скрыть', icon: <VisibilityOffIcon fontSize="small" /> }
 ];
 
 const FeatureToggle: React.FC<FeatureToggleProps> = ({ active, label, tooltip, icon, onClick, showTooltip, disabled = false }) => (
@@ -156,6 +172,7 @@ const RoomSettingsSidebar: React.FC<Props> = observer(({ store, open, onClose, t
   const [catEnabled, setCatEnabled] = useState(readFloorCatEnabled);
   const [weatherEnabled, setWeatherEnabled] = useState(readBoardWeatherEnabled);
   const [weatherPreview, setWeatherPreview] = useState(readBoardWeatherPreview);
+  const [newYearPreview, setNewYearPreview] = useState(readNewYearThemePreview);
   const showTooltips = useMediaQuery('(hover: hover) and (pointer: fine)');
   const features = store.roomFeatures;
   const canEditFeatures = store.isAdmin;
@@ -401,6 +418,48 @@ const RoomSettingsSidebar: React.FC<Props> = observer(({ store, open, onClose, t
                 showTooltip={showTooltips}
                 disabled={!canEditFeatures}
               />
+            </Box>
+
+            <Box sx={{ mb: 2 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                Новогодняя тема с декабря до середины января
+              </Typography>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
+                {NEW_YEAR_PREVIEW_OPTIONS.map((option) => {
+                  const active = newYearPreview === option.id;
+                  return (
+                    <Button
+                      key={option.id}
+                      size="small"
+                      variant="outlined"
+                      onClick={() => {
+                        setNewYearPreview(option.id);
+                        setNewYearThemePreview(option.id);
+                      }}
+                      startIcon={option.icon}
+                      sx={{
+                        textTransform: 'none',
+                        borderRadius: 2,
+                        px: 1,
+                        minWidth: 0,
+                        borderColor: active ? 'transparent' : 'divider',
+                        bgcolor: active ? '#5b54e8' : 'background.paper',
+                        backgroundImage: active ? ACCENT_GRADIENT : 'none',
+                        boxShadow: active ? ACCENT_SHADOW : 'none',
+                        color: active ? '#fff' : 'text.secondary',
+                        '&:hover': {
+                          bgcolor: active ? '#655df0' : 'action.hover',
+                          backgroundImage: active ? ACCENT_GRADIENT_HOVER : 'none',
+                          borderColor: active ? 'transparent' : 'text.disabled',
+                          boxShadow: active ? ACCENT_SHADOW : 'none'
+                        }
+                      }}
+                    >
+                      {option.label}
+                    </Button>
+                  );
+                })}
+              </Box>
             </Box>
 
             {weatherEnabled && (

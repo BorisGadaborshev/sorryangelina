@@ -1,0 +1,64 @@
+html[data-ny='1'] .MuiAppBar-root {
+  padding-top: 36px;
+}
+
+.new-year-theme {
+  --ny-wire: rgba(244, 239, 230, 0.55);
+  --ny-glow: rgba(255, 214, 120, 0.35);
+  position: fixed;
+  inset: 0;
+  z-index: 1140;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.new-year-theme[data-theme='light'] {
+  --ny-wire: rgba(40, 48, 70, 0.28);
+  --ny-glow: rgba(200, 120, 40, 0.18);
+}
+
+.new-year-theme__garland {
+  position: absolute;
+  top: 0;
+  left: -2%;
+  width: 104%;
+  height: 34px;
+  overflow: visible;
+}
+
+.new-year-theme__wire {
+  fill: none;
+  stroke: var(--ny-wire);
+  stroke-width: 1.4;
+}
+
+.new-year-theme__bulb {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: ny-glow 2.4s ease-in-out infinite;
+}
+
+.new-year-theme__bulb--gold { fill: #f4c95d; }
+.new-year-theme__bulb--red { fill: #e25b5b; }
+.new-year-theme__bulb--green { fill: #5bb98a; }
+.new-year-theme__bulb--blue { fill: #6ea8e8; }
+
+.new-year-theme__glow {
+  position: absolute;
+  top: -40px;
+  left: 10%;
+  right: 10%;
+  height: 90px;
+  background: radial-gradient(ellipse at top, var(--ny-glow), transparent 70%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .new-year-theme__bulb {
+    animation: none;
+  }
+}
+
+@keyframes ny-glow {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}

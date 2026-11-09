@@ -7,6 +7,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 
 const Login = lazy(() => import('./components/Login'));
 const Board = lazy(() => import('./components/Board'));
+const NewYearTheme = lazy(() => import('./components/NewYearTheme'));
 
 type ThemePreference = 'system' | 'light' | 'dark';
 type ThemeMode = 'light' | 'dark';
@@ -76,6 +77,7 @@ const App = observer(() => {
               <CircularProgress />
             </Box>
           )}>
+            <NewYearTheme themeMode={themeMode} />
             {store.hasBoardSession ? (
               <Board store={store} themeMode={themeMode} onToggleTheme={handleToggleTheme} />
             ) : (
