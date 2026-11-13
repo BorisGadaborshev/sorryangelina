@@ -14,11 +14,16 @@ import {
   SprintVipState,
   WhiteboardPoint,
   WhiteboardStroke,
+  collectAnonymousWarmupAnswers,
   getDiscussionCards,
   getRetroTemplate,
   isDiscussionCard,
-  sortCardsByVotes
+  normalizeWarmupQuestions,
+  sortCardsByVotes,
+  WarmupState,
+  visibleWarmupQuestions
 } from '../types';
+import { clearCharades, ensureCharadesPlaying, restoreCharades, serializeCharades } from './charades';
 import { normalizeRoomFeatures } from '../utils/roomFeatures';
 import { RoomCache } from '../services/RoomCache';
 import { RoomService } from '../services/RoomService';
@@ -253,10 +258,16 @@ export interface RetroRatingRoomState {
   resultsVisible: boolean;
 }
 
+export interface WarmupRoomState {
+  answers: Map<string, string[]>;
+  resultsVisible: boolean;
+}
+
 export const roomTimers = new Map<string, RoomTimerSession>();
 export const roomChats = new Map<string, ChatMessage[]>();
 export const roomWhiteboards = new Map<string, WhiteboardStroke[]>();
 export const roomRetroRatings = new Map<string, RetroRatingRoomState>();
+export const roomWarmups = new Map<string, WarmupRoomState>();
 export const roomFacilitators = new Map<string, FacilitatorAnnouncement>();
 export const roomLastFacilitators = new Map<string, FacilitatorAnnouncement>();
 export const roomDiscussionNavigation = new Map<string, DiscussionNavigationState>();
@@ -420,6 +431,7 @@ const roomHydrations = new Map<string, Promise<void>>();
 export const persistRoomEphemeral = async (roomId: string): Promise<void> => {
   const timer = roomTimers.get(roomId);
   const rating = roomRetroRatings.get(roomId);
+  const warmup = roomWarmups.get(roomId);
   const facilitator = roomLastFacilitators.get(roomId) ?? roomFacilitators.get(roomId);
   const discussion = roomDiscussionNavigation.get(roomId);
   const state: StoredRoomRuntime = {
@@ -430,7 +442,14 @@ export const persistRoomEphemeral = async (roomId: string): Promise<void> => {
       ? { votes: Array.from(rating.votes.entries()), resultsVisible: rating.resultsVisible }
       : null,
     facilitator: facilitator ?? null,
-    discussion: discussion ?? null
+    discussion: discussion ?? null,
+    warmup: warmup || serializeCharades(roomId)
+      ? {
+          answers: Array.from((warmup?.answers ?? new Map()).entries()),
+          resultsVisible: warmup?.resultsVisible ?? false,
+          charades: serializeCharades(roomId)
+        }
+      : null
   };
   await writeRoomRuntime(roomId, state);
 };
@@ -447,6 +466,15 @@ export const hydrateRoomEphemeral = (roomId: string): Promise<void> => {
           votes: new Map(stored.rating.votes),
           resultsVisible: stored.rating.resultsVisible
         });
+      }
+      if (stored.warmup && !roomWarmups.has(roomId)) {
+        roomWarmups.set(roomId, {
+          answers: new Map(stored.warmup.answers),
+          resultsVisible: stored.warmup.resultsVisible
+        });
+      }
+      if (stored.warmup?.charades) {
+        restoreCharades(roomId, stored.warmup.charades);
       }
       if (stored.facilitator && !roomLastFacilitators.has(roomId)) {
         roomLastFacilitators.set(roomId, stored.facilitator);
@@ -549,6 +577,66 @@ export const emitRetroRatingStateToRoom = async (roomId: string): Promise<void> 
 export const emitRetroRatingStateToSocket = (socket: Socket, room: Room): void => {
   const userId = typeof socket.data.userId === 'string' ? socket.data.userId : socket.id;
   socket.emit('retro-rating-state', buildRetroRatingPayload(room, userId));
+};
+
+export const getWarmupRoomState = (roomId: string): WarmupRoomState => {
+  const existing = roomWarmups.get(roomId);
+  if (existing) return existing;
+  const created: WarmupRoomState = { answers: new Map(), resultsVisible: false };
+  roomWarmups.set(roomId, created);
+  return created;
+};
+
+export const maybeRevealWarmup = (room: Room): boolean => {
+  const questions = visibleWarmupQuestions(normalizeWarmupQuestions(room.warmupQuestions));
+  if (questions.length === 0) return false;
+  const warmup = getWarmupRoomState(room.id);
+  if (warmup.resultsVisible) return false;
+  const presentNames = new Set(room.users.map((user) => user.name));
+  const submittedCount = [...warmup.answers.keys()].filter((name) => presentNames.has(name)).length;
+  if (room.users.length > 0 && submittedCount >= room.users.length) {
+    warmup.resultsVisible = true;
+    return true;
+  }
+  return false;
+};
+
+export const buildWarmupPayload = (room: Room, userName?: string): WarmupState => {
+  const questions = visibleWarmupQuestions(normalizeWarmupQuestions(room.warmupQuestions));
+  const warmup = getWarmupRoomState(room.id);
+  const presentNames = new Set(room.users.map((user) => user.name));
+  const submittedCount = [...warmup.answers.keys()].filter((name) => presentNames.has(name)).length;
+  const submitted = Boolean(userName && warmup.answers.has(userName));
+  const payload: WarmupState = {
+    questions,
+    submitted,
+    submittedCount,
+    totalCount: room.users.length,
+    resultsVisible: warmup.resultsVisible
+  };
+  if (warmup.resultsVisible) {
+    payload.answers = collectAnonymousWarmupAnswers(questions.length, warmup.answers.values());
+  }
+  return payload;
+};
+
+export const emitWarmupStateToRoom = async (roomId: string): Promise<void> => {
+  const room = await RoomService.getRoom(roomId);
+  if (!room) return;
+  if (maybeRevealWarmup(room)) {
+    await persistRoomEphemeral(roomId);
+  }
+  const sockets = await io.in(roomId).fetchSockets();
+  sockets.forEach((connectedSocket) => {
+    const userName = typeof connectedSocket.data.userName === 'string' ? connectedSocket.data.userName : undefined;
+    connectedSocket.emit('warmup-state', buildWarmupPayload(room, userName));
+  });
+};
+
+export const emitWarmupStateToSocket = (socket: Socket, room: Room): void => {
+  maybeRevealWarmup(room);
+  const userName = typeof socket.data.userName === 'string' ? socket.data.userName : undefined;
+  socket.emit('warmup-state', buildWarmupPayload(room, userName));
 };
 
 export const selectRandomFacilitator = (room: Room): FacilitatorAnnouncement | null => {
@@ -723,6 +811,7 @@ export const persistUserLeave = async (
     });
     await emitRetroRatingStateToRoom(roomId);
     await emitSprintVipStateToRoom(roomId);
+    await ensureCharadesPlaying(roomId);
   }
 
   return updatedRoom;
@@ -805,6 +894,8 @@ export function clearRoomRuntimeState(roomId: string, emitTimerReset = false): v
   roomChats.delete(roomId);
   roomWhiteboards.delete(roomId);
   roomRetroRatings.delete(roomId);
+  roomWarmups.delete(roomId);
+  clearCharades(roomId);
   roomFacilitators.delete(roomId);
   roomLastFacilitators.delete(roomId);
   roomDiscussionNavigation.delete(roomId);

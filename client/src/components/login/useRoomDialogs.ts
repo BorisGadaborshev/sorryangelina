@@ -1,9 +1,10 @@
 import { useRef, useState } from 'react';
 import { RetroStore } from '../../store/RetroStore';
 import { teamApi } from '../../services/teamApi';
-import { AvailableRoom, RetroTemplateId } from '../../types';
+import { AvailableRoom, CHARADES_WARMUP_MARKER, RetroTemplateChoice } from '../../types';
 import type {
   CreateRoomDialogState,
+  CreateWarmupKind,
   DeleteRoomDialogState,
   InviteDialogState,
   PasswordDialogState
@@ -24,7 +25,12 @@ export function useRoomDialogs({ store, availableRooms, refreshRooms, setIsLoadi
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [createRoomId, setCreateRoomId] = useState('');
   const [createPassword, setCreatePassword] = useState('');
-  const [createTemplate, setCreateTemplate] = useState<RetroTemplateId>('classic');
+  const [createTemplate, setCreateTemplate] = useState<RetroTemplateChoice>('classic');
+  const createTemplateRef = useRef<RetroTemplateChoice>(createTemplate);
+  createTemplateRef.current = createTemplate;
+  const [createWarmupKind, setCreateWarmupKind] = useState<CreateWarmupKind>('none');
+  const [createWarmupQuestions, setCreateWarmupQuestions] = useState<string[]>(['']);
+  const [isQuestionsOpen, setIsQuestionsOpen] = useState(false);
   const [teamSettingsLoaded, setTeamSettingsLoaded] = useState(false);
   const templateTouched = useRef(false);
 
@@ -48,6 +54,9 @@ export function useRoomDialogs({ store, availableRooms, refreshRooms, setIsLoadi
     setTeamSettingsLoaded(false);
     setCreateRoomId('');
     setCreatePassword('');
+    setCreateWarmupKind('none');
+    setCreateWarmupQuestions(['']);
+    setIsQuestionsOpen(false);
     setCreateTemplate(store.selectedTeam?.roomSettings?.template ?? 'classic');
     store.setError(null);
     setIsCreateOpen(true);
@@ -66,9 +75,24 @@ export function useRoomDialogs({ store, availableRooms, refreshRooms, setIsLoadi
     }).catch(() => undefined).finally(() => setTeamSettingsLoaded(true));
   };
 
-  const chooseTemplate = (template: RetroTemplateId) => {
+  const chooseTemplate = (template: RetroTemplateChoice) => {
     templateTouched.current = true;
     setCreateTemplate(template);
+  };
+
+  const chooseWarmupKind = (kind: CreateWarmupKind) => {
+    setCreateWarmupKind(kind);
+    if (kind === 'questions') {
+      setIsQuestionsOpen(true);
+      return;
+    }
+    setIsQuestionsOpen(false);
+  };
+
+  const closeQuestions = () => {
+    const hasQuestions = createWarmupQuestions.some((question) => question.trim());
+    if (!hasQuestions) setCreateWarmupKind('none');
+    setIsQuestionsOpen(false);
   };
 
   const openJoin = (roomId: string) => {
@@ -104,7 +128,13 @@ export function useRoomDialogs({ store, availableRooms, refreshRooms, setIsLoadi
         createPassword.trim() || undefined,
         profile.name,
         profile.token,
-        { teamId: team.id, template: createTemplate }
+        {
+          teamId: team.id,
+          template: createTemplateRef.current,
+          warmupQuestions: createWarmupKind === 'questions'
+            ? createWarmupQuestions
+            : (createWarmupKind === 'charades' ? [CHARADES_WARMUP_MARKER] : [])
+        }
       );
       setIsCreateOpen(false);
     } catch (error) {
@@ -194,11 +224,21 @@ export function useRoomDialogs({ store, availableRooms, refreshRooms, setIsLoadi
     roomId: createRoomId,
     password: createPassword,
     template: createTemplate,
+    warmupKind: createWarmupKind,
+    warmupQuestions: createWarmupQuestions,
+    questionsOpen: isQuestionsOpen,
     settingsLoaded: teamSettingsLoaded,
     onRoomId: setCreateRoomId,
     onPassword: setCreatePassword,
     onTemplate: chooseTemplate,
-    onClose: () => setIsCreateOpen(false),
+    onWarmupKind: chooseWarmupKind,
+    onWarmupQuestions: setCreateWarmupQuestions,
+    onOpenQuestions: () => setIsQuestionsOpen(true),
+    onCloseQuestions: closeQuestions,
+    onClose: () => {
+      setIsQuestionsOpen(false);
+      setIsCreateOpen(false);
+    },
     onSubmit: () => { void createRoom(); }
   };
 

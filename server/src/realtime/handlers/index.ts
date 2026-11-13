@@ -7,6 +7,7 @@ import { registerPhaseHandlers } from './phase';
 import { registerDiscussionHandlers } from './discussion';
 import { registerTimerHandlers } from './timer';
 import { registerRatingHandlers } from './rating';
+import { registerWarmupHandlers } from './warmup';
 import { registerExtrasHandlers } from './extras';
 
 export function registerSocketHandlers(socket: Socket, session: RealtimeSession): void {
@@ -17,5 +18,6 @@ export function registerSocketHandlers(socket: Socket, session: RealtimeSession)
   registerDiscussionHandlers(socket, session);
   registerTimerHandlers(socket, session);
   registerRatingHandlers(socket, session);
+  registerWarmupHandlers(socket, session);
   registerExtrasHandlers(socket, session);
 }

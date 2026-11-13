@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { RoomModel } from '../models/Room';
 import { TeamModel } from '../models/Team';
-import { Room, RoomDocument, User, Card, CardComment, Phase, CreateRoomOptions, RetroTemplateId, RoomFeatures, TeamRoomSettings, CARD_REACTION_EMOJIS, cloneTaskCardForNextSprint, getColumnCount, getRetroTemplate, isRetroTemplateId, normalizeColumnColors, selectOpenTasksFromPreviousSprints } from '../types';
+import { Room, RoomDocument, User, Card, CardComment, Phase, CreateRoomOptions, RetroTemplateId, RoomFeatures, TeamRoomSettings, CARD_REACTION_EMOJIS, cloneTaskCardForNextSprint, getColumnCount, getRetroTemplate, isRetroTemplateId, normalizeColumnColors, normalizeWarmupQuestions, resolveRetroTemplateId, selectOpenTasksFromPreviousSprints } from '../types';
 import { normalizeRoomFeatures } from '../utils/roomFeatures';
 import {
   changedRoomFeatures,
@@ -39,14 +39,18 @@ export class RoomService {
       };
     
         
-      if (options.template && !isRetroTemplateId(options.template)) {
+      const requestedTemplate = options.template === 'random'
+        ? resolveRetroTemplateId(options.template)
+        : options.template;
+      if (requestedTemplate && !isRetroTemplateId(requestedTemplate)) {
         throw new Error('Invalid retro template');
       }
 
       const storedSettings = normalizeTeamRoomSettings(
         options.teamId ? await TeamModel.getRoomSettings(options.teamId) : null
       );
-      const { settings, templateChanged } = roomSettingsForNewRoom(storedSettings, options.template);
+      const { settings, templateChanged } = roomSettingsForNewRoom(storedSettings, requestedTemplate);
+      const warmupQuestions = normalizeWarmupQuestions(options.warmupQuestions);
 
       const room = await RoomModel.create({
         id: roomId,
@@ -54,11 +58,12 @@ export class RoomService {
         hasPassword,
         teamId: options.teamId,
         owner: username,
-        phase: 'creation',
+        phase: warmupQuestions.length > 0 ? 'warmup' : 'creation',
         template: settings.template,
         columnTitles: settings.columnTitles,
         columnColors: settings.columnColors,
         features: settings.features,
+        warmupQuestions,
         users: [user],
         cards: []
       });
@@ -153,6 +158,16 @@ export class RoomService {
       RoomCache.invalidate(roomId);
     }
 }
+
+  static async updateWarmupQuestions(roomId: string, warmupQuestions: string[]): Promise<Room | null> {
+    RoomCache.invalidate(roomId);
+    try {
+      const room = await RoomModel.updateWarmupQuestions(roomId, normalizeWarmupQuestions(warmupQuestions));
+      return room ? this.convertToRoom(room) : null;
+    } finally {
+      RoomCache.invalidate(roomId);
+    }
+  }
 
   static async updateRoomFeatures(roomId: string, features: Partial<RoomFeatures>): Promise<Room | null> {
     RoomCache.invalidate(roomId);
@@ -740,6 +755,7 @@ export class RoomService {
     const template = getRetroTemplate(doc.template);
     const features = normalizeRoomFeatures(doc.features);
     const hasAdmin = Boolean(users?.some((user) => user.role === 'admin'));
+    const warmupQuestions = normalizeWarmupQuestions(doc.warmupQuestions);
         
     const convertedRoom = {
       id,
@@ -750,6 +766,7 @@ export class RoomService {
       columnTitles: doc.columnTitles,
       columnColors: normalizeColumnColors(columnColors, template),
       features,
+      warmupQuestions: warmupQuestions.length > 0 ? warmupQuestions : undefined,
       createdAt,
       users: users ? users.map(user => ({
         id: user.id,

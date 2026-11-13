@@ -4,7 +4,11 @@ import {
   DiscussionHand,
   DiscussionNavigationState,
   FacilitatorAnnouncement,
-  RetroRatingState
+  EMPTY_CHARADES_STATE,
+  EMPTY_WARMUP_STATE,
+  CharadesState,
+  RetroRatingState,
+  WarmupState
 } from '../types';
 import { readStoredSession } from '../services/session';
 
@@ -23,6 +27,8 @@ export class DiscussionStore {
   discussionHands: string[] = [];
   discussionBursts: DiscussionBurst[] = [];
   retroRating: RetroRatingState = { ...EMPTY_RATING };
+  warmup: WarmupState = { ...EMPTY_WARMUP_STATE };
+  charades: CharadesState = { ...EMPTY_CHARADES_STATE };
 
   constructor(private readonly joinedRoomId: () => string | undefined) {
     makeAutoObservable(this, { joinedRoomId: false } as object, { autoBind: true });
@@ -49,6 +55,14 @@ export class DiscussionStore {
 
   setRetroRating(rating: RetroRatingState) {
     this.retroRating = rating;
+  }
+
+  setWarmup(warmup: WarmupState) {
+    this.warmup = warmup;
+  }
+
+  setCharades(charades: CharadesState) {
+    this.charades = charades;
   }
 
   setFacilitatorAnnouncement(announcement: FacilitatorAnnouncement | null, announce = true) {
@@ -117,5 +131,7 @@ export class DiscussionStore {
     this.sessionFacilitatorName = '';
     this.leaveDiscussion();
     this.retroRating = { ...EMPTY_RATING };
+    this.warmup = { ...EMPTY_WARMUP_STATE };
+    this.charades = { ...EMPTY_CHARADES_STATE };
   }
 }

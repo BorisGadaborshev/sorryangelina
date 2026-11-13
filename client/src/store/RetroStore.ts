@@ -14,6 +14,8 @@ import {
   Phase,
   PhaseTimerState,
   RetroRatingState,
+  WarmupState,
+  CharadesState,
   RetroTemplateId,
   Room,
   RoomFeatures,
@@ -117,6 +119,7 @@ export class RetroStore {
       roomFeatures: delegated,
       sprintVip: delegated,
       retroRating: delegated,
+      warmup: delegated,
       arkanoidActive: delegated,
       arkanoidHits: delegated,
       arkanoidScore: delegated,
@@ -177,6 +180,8 @@ export class RetroStore {
   get whiteboardStrokes() { return this.extras.whiteboardStrokes; }
   get sprintVip() { return this.extras.sprintVip; }
   get retroRating() { return this.discussion.retroRating; }
+  get warmup() { return this.discussion.warmup; }
+  get charades() { return this.discussion.charades; }
   get facilitatorAnnouncement() { return this.discussion.facilitatorAnnouncement; }
   get sessionFacilitatorName() { return this.discussion.sessionFacilitatorName; }
   get isFacilitatorDialogOpen() { return this.discussion.isFacilitatorDialogOpen; }
@@ -307,6 +312,14 @@ export class RetroStore {
     this.discussion.setRetroRating(rating);
   }
 
+  setWarmup(warmup: WarmupState) {
+    this.discussion.setWarmup(warmup);
+  }
+
+  setCharades(charades: CharadesState) {
+    this.discussion.setCharades(charades);
+  }
+
   setFacilitatorAnnouncement(announcement: FacilitatorAnnouncement | null) {
     const announce = this.phase === 'discussion' && this.roomFeatures.facilitatorEnabled;
     this.discussion.setFacilitatorAnnouncement(announcement, announce);
@@ -393,6 +406,7 @@ export class RetroStore {
   getColumnTooltip(index: number) { return this.board.getColumnTooltip(index); }
   getColumnKind(index: number) { return this.board.getColumnKind(index); }
   setColumnTitles(titles: string[]) { this.board.setColumnTitles(titles); }
+  setWarmupQuestions(questions: string[]) { this.board.setWarmupQuestions(questions); }
   requestColumnTitlesUpdate(titles: string[]) { this.board.requestColumnTitlesUpdate(titles); }
   getColumnColor(index: number) { return this.board.getColumnColor(index); }
   setColumnColors(colors: ColumnColorId[]) { this.board.setColumnColors(colors); }

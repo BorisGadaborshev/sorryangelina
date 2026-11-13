@@ -5,6 +5,7 @@ import HowToVoteRoundedIcon from '@mui/icons-material/HowToVoteRounded';
 import ForumRoundedIcon from '@mui/icons-material/ForumRounded';
 import AutoAwesomeRoundedIcon from '@mui/icons-material/AutoAwesomeRounded';
 import AccountTreeRoundedIcon from '@mui/icons-material/AccountTreeRounded';
+import WavingHandRoundedIcon from '@mui/icons-material/WavingHandRounded';
 import { Phase } from '../../types';
 
 export const PHASE_OPTIONS: Array<{
@@ -13,6 +14,7 @@ export const PHASE_OPTIONS: Array<{
   shortLabel: string;
   icon: React.ElementType;
 }> = [
+  { value: 'warmup', label: 'Разминка', shortLabel: 'Разминка', icon: WavingHandRoundedIcon },
   { value: 'creation', label: 'Создание', shortLabel: 'Создание', icon: EditNoteRoundedIcon },
   { value: 'grouping', label: 'Группировка', shortLabel: 'Группы', icon: JoinInnerRoundedIcon },
   { value: 'voting', label: 'Голосование', shortLabel: 'Голоса', icon: HowToVoteRoundedIcon },
@@ -22,6 +24,7 @@ export const PHASE_OPTIONS: Array<{
 ];
 
 const PHASE_LABELS: Record<Phase, string> = {
+  warmup: 'Разминка',
   creation: 'Создание',
   grouping: 'Группировка',
   voting: 'Голосование',
@@ -38,6 +41,7 @@ export const getNextPhase = (
   groupingEnabled = true,
   roadmapEnabled = true
 ): Phase | null => {
+  if (phase === 'warmup') return 'creation';
   if (phase === 'creation') return groupingEnabled ? 'grouping' : 'voting';
   if (phase === 'grouping') return 'voting';
   if (phase === 'voting') return 'discussion';

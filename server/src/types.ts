@@ -1,4 +1,4 @@
-import type { Card, ColumnColorId, Phase, RetroTemplateId, RoomFeatures, Team, TeamRole, User } from '@sorryangelina/shared';
+import type { Card, ColumnColorId, Phase, RetroTemplateChoice, RetroTemplateId, RoomFeatures, Team, TeamRole, User } from '@sorryangelina/shared';
 
 export * from '@sorryangelina/shared';
 
@@ -14,6 +14,7 @@ export interface RoomDocument {
   columnTitles?: string[];
   columnColors?: ColumnColorId[];
   features?: RoomFeatures;
+  warmupQuestions?: string[];
   createdAt?: string;
   users: User[];
   cards: Card[];
@@ -22,7 +23,8 @@ export interface RoomDocument {
 export interface CreateRoomOptions {
   teamId?: string;
   userRole?: TeamRole;
-  template?: RetroTemplateId;
+  template?: RetroTemplateChoice;
+  warmupQuestions?: string[];
 }
 
 export interface TeamDocument extends Team {

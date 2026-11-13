@@ -9,6 +9,7 @@ import RetroColumn from '../RetroColumn';
 const DiscussionView = lazy(() => import('../DiscussionView'));
 const RetroRatingView = lazy(() => import('../RetroRatingView'));
 const RoadmapView = lazy(() => import('../RoadmapView'));
+const WarmupView = lazy(() => import('../WarmupView'));
 
 interface Props {
   store: RetroStore;
@@ -74,6 +75,11 @@ const PhaseContent: React.FC<Props> = observer((props) => {
   const { store } = props;
   let phaseView: React.ReactNode;
   switch (store.phase) {
+    case 'warmup':
+      phaseView = store.charades.active
+        ? <Box sx={{ height: '100%', minHeight: 280 }} />
+        : <WarmupView store={store} />;
+      break;
     case 'discussion':
       phaseView = <DiscussionView store={store} />;
       break;

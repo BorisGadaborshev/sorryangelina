@@ -16,7 +16,9 @@ interface Props {
 }
 
 const phaseLabel: Record<string, string> = {
+  warmup: 'Разминка',
   creation: 'Создание',
+  grouping: 'Группировка',
   voting: 'Голосование',
   discussion: 'Обсуждение',
   roadmap: 'Дорожная карта',
@@ -108,6 +110,7 @@ const RoomTiles: React.FC<Props> = ({ rooms, currentUserName, onRoomClick, onCre
           sx={filterInputSx}
         >
           <MenuItem value="all">Все</MenuItem>
+          <MenuItem value="warmup">Разминка</MenuItem>
           <MenuItem value="creation">Создание</MenuItem>
           <MenuItem value="voting">Голосование</MenuItem>
           <MenuItem value="discussion">Обсуждение</MenuItem>
@@ -127,6 +130,18 @@ const RoomTiles: React.FC<Props> = ({ rooms, currentUserName, onRoomClick, onCre
         </TextField>
       </Box>
       <Grid container spacing={2}>
+        <Grid item xs={12} sm={6} md={4} lg={3}>
+          <Card variant="outlined" sx={{ ...tileSx, ...roomTileSx }}>
+            <CardActionArea onClick={onCreateClick} sx={{ height: '100%' }}>
+              <CardContent sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
+                <AddIcon color="primary" fontSize="large" />
+                <Typography variant="subtitle1" color="primary">
+                  Создать комнату
+                </Typography>
+              </CardContent>
+            </CardActionArea>
+          </Card>
+        </Grid>
         {visibleRooms.map((room) => (
           <Grid item xs={12} sm={6} md={4} lg={3} key={room.id}>
             <Card variant="outlined" sx={{ ...tileSx, ...roomTileSx, position: 'relative' }}>
@@ -175,18 +190,6 @@ const RoomTiles: React.FC<Props> = ({ rooms, currentUserName, onRoomClick, onCre
             </Card>
           </Grid>
         ))}
-        <Grid item xs={12} sm={6} md={4} lg={3}>
-          <Card variant="outlined" sx={{ ...tileSx, ...roomTileSx }}>
-            <CardActionArea onClick={onCreateClick} sx={{ height: '100%' }}>
-              <CardContent sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
-                <AddIcon color="primary" fontSize="large" />
-                <Typography variant="subtitle1" color="primary">
-                  Создать комнату
-                </Typography>
-              </CardContent>
-            </CardActionArea>
-          </Card>
-        </Grid>
       </Grid>
     </Box>
   );

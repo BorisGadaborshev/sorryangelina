@@ -196,6 +196,13 @@ export class RoomStore {
     this.phase = state.phase;
     this.users = this.normalizeUsers(state.users);
     this.syncCurrentUser();
+    if (state.template || state.columnTitles || state.columnColors) {
+      this.applyBoardColumns(
+        state.template ?? this.template,
+        state.columnTitles ?? this.columnTitles,
+        state.columnColors ?? this.columnColors
+      );
+    }
   }
 
   addCard(card: Card) {
@@ -363,6 +370,10 @@ export class RoomStore {
   setColumnTitles(titles: string[]) {
     this.columnTitles = titles;
     if (this.room) this.room = { ...this.room, columnTitles: titles };
+  }
+
+  setWarmupQuestions(questions: string[]) {
+    if (this.room) this.room = { ...this.room, warmupQuestions: questions };
   }
 
   requestColumnTitlesUpdate(titles: string[]) {

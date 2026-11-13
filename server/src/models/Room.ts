@@ -1,7 +1,7 @@
 // Postgres access helpers
 import crypto from 'crypto';
 import { pool } from '../config/database';
-import { Room, RoomDocument, User, Card, CardComment, CardReaction, RoomFeatures, ColumnColorId, mergeCardTexts, mergeSegmentAuthors, alignSegmentAuthors, getCardTextSegments, getColumnCount, getRetroTemplate, normalizeColumnColors, normalizeCardTask } from '../types';
+import { Room, RoomDocument, User, Card, CardComment, CardReaction, RoomFeatures, ColumnColorId, mergeCardTexts, mergeSegmentAuthors, alignSegmentAuthors, getCardTextSegments, getColumnCount, getRetroTemplate, normalizeColumnColors, normalizeCardTask, normalizeWarmupQuestions } from '../types';
 import { normalizeRoomFeatures } from '../utils/roomFeatures';
 import { CARDS_PER_PERSON_PER_ROOM, CARD_LIMIT_MESSAGE, lockAndAssertCardSlot, reserveCreationSlot, UsageLimitError } from '../services/UsageLimits';
 
@@ -38,6 +38,7 @@ const ROOM_WITH_CHILDREN_SQL = `
     r.column_titles,
     r.column_colors,
     r.features,
+    r.warmup_questions,
     coalesce((
       select json_agg(json_build_object(
         'id', u.id,
@@ -134,8 +135,8 @@ export const RoomModel = {
     try {
       await client.query('BEGIN');
       const insertedRoom = await client.query(
-        `insert into rooms (id, password, has_password, team_id, owner, phase, template, column_titles, column_colors, features)
-         values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb)
+        `insert into rooms (id, password, has_password, team_id, owner, phase, template, column_titles, column_colors, features, warmup_questions)
+         values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb,$11::jsonb)
          on conflict (id) do nothing
          returning id`,
         [
@@ -148,7 +149,8 @@ export const RoomModel = {
           doc.template ?? 'classic',
           JSON.stringify(doc.columnTitles ?? null),
           JSON.stringify(doc.columnColors ?? null),
-          JSON.stringify(doc.features ?? null)
+          JSON.stringify(doc.features ?? null),
+          JSON.stringify(doc.warmupQuestions ?? [])
         ]
       );
       if (insertedRoom.rows.length > 0) {
@@ -186,6 +188,7 @@ export const RoomModel = {
       column_titles: string[] | null;
       column_colors: string[] | null;
       features: RoomFeatures | null;
+      warmup_questions: unknown;
       users: RoomUserJson[];
       cards: RoomCardJson[];
     };
@@ -231,6 +234,7 @@ export const RoomModel = {
         : undefined,
       columnColors: normalizeColumnColors(roomRow.column_colors, template),
       features: normalizeRoomFeatures(roomRow.features),
+      warmupQuestions: normalizeWarmupQuestions(roomRow.warmup_questions),
       createdAt: roomRow.created_at,
       users,
       cards
@@ -256,6 +260,14 @@ export const RoomModel = {
   async updateRoomFeatures(roomId: string, features: RoomFeatures): Promise<RoomDocument | null> {
     await pool.query('update rooms set features=$1::jsonb, updated_at=now() where id=$2', [
       JSON.stringify(features),
+      roomId
+    ]);
+    return this.findOne({ id: roomId });
+  },
+
+  async updateWarmupQuestions(roomId: string, warmupQuestions: string[]): Promise<RoomDocument | null> {
+    await pool.query('update rooms set warmup_questions=$1::jsonb, updated_at=now() where id=$2', [
+      JSON.stringify(warmupQuestions),
       roomId
     ]);
     return this.findOne({ id: roomId });

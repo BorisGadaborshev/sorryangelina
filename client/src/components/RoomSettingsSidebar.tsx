@@ -10,6 +10,7 @@ import {
   DialogTitle,
   Drawer,
   IconButton,
+  TextField,
   Tooltip,
   Typography,
   useMediaQuery
@@ -52,9 +53,23 @@ import CloudIcon from '@mui/icons-material/Cloud';
 import WaterDropIcon from '@mui/icons-material/WaterDrop';
 import AcUnitIcon from '@mui/icons-material/AcUnit';
 import CelebrationIcon from '@mui/icons-material/Celebration';
+import QuizIcon from '@mui/icons-material/Quiz';
+import TheaterComedyIcon from '@mui/icons-material/TheaterComedy';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { RetroStore } from '../store/RetroStore';
 import { ACCENT_GRADIENT, ACCENT_GRADIENT_HOVER, ACCENT_SHADOW } from './readyButtonStyles';
-import { DislikeIconId, LikeIconId, MAX_VOTE_LIMIT, MIN_VOTE_LIMIT, RoomFeatures } from '../types';
+import {
+  CHARADES_WARMUP_MARKER,
+  DislikeIconId,
+  LikeIconId,
+  MAX_VOTE_LIMIT,
+  MAX_WARMUP_QUESTION_LENGTH,
+  MAX_WARMUP_QUESTIONS,
+  MIN_VOTE_LIMIT,
+  RoomFeatures,
+  isCharadesWarmup,
+  visibleWarmupQuestions
+} from '../types';
 import {
   DISLIKE_ICON_OPTIONS,
   LIKE_ICON_OPTIONS,
@@ -173,10 +188,43 @@ const RoomSettingsSidebar: React.FC<Props> = observer(({ store, open, onClose, t
   const [weatherEnabled, setWeatherEnabled] = useState(readBoardWeatherEnabled);
   const [weatherPreview, setWeatherPreview] = useState(readBoardWeatherPreview);
   const [newYearPreview, setNewYearPreview] = useState(readNewYearThemePreview);
+  const [isQuestionsOpen, setIsQuestionsOpen] = useState(false);
+  const [questionDrafts, setQuestionDrafts] = useState<string[]>(['']);
   const showTooltips = useMediaQuery('(hover: hover) and (pointer: fine)');
   const features = store.roomFeatures;
   const canEditFeatures = store.isAdmin;
   const canDeleteRoom = store.canChangePhase();
+  const warmupQuestions = store.room?.warmupQuestions ?? [];
+  const questionsEnabled = visibleWarmupQuestions(warmupQuestions).length > 0;
+  const charadesEnabled = isCharadesWarmup(warmupQuestions);
+
+  const persistWarmupQuestions = (questions: string[]) => {
+    if (!canEditFeatures) return;
+    store.socketService?.setWarmupQuestions(questions);
+  };
+
+  const openQuestionsEditor = () => {
+    const current = visibleWarmupQuestions(warmupQuestions);
+    setQuestionDrafts(current.length > 0 ? current : ['']);
+    setIsQuestionsOpen(true);
+  };
+
+  const saveQuestions = () => {
+    const next = questionDrafts.map((question) => question.trim()).filter(Boolean);
+    if (next.length === 0) return;
+    persistWarmupQuestions(next);
+    setIsQuestionsOpen(false);
+  };
+
+  const toggleQuestions = () => {
+    if (!canEditFeatures) return;
+    openQuestionsEditor();
+  };
+
+  const toggleCharades = () => {
+    if (!canEditFeatures) return;
+    persistWarmupQuestions(charadesEnabled ? [] : [CHARADES_WARMUP_MARKER]);
+  };
 
   const updateFeature = <K extends keyof RoomFeatures>(key: K, value: RoomFeatures[K]) => {
     if (!canEditFeatures) return;
@@ -606,6 +654,24 @@ const RoomSettingsSidebar: React.FC<Props> = observer(({ store, open, onClose, t
                 disabled={!canEditFeatures}
               />
               <FeatureToggle
+                active={questionsEnabled}
+                label="Вопросы"
+                tooltip="Разминка с вопросами: команда отвечает, затем видит ответы анонимно. Можно включить уже в созданной комнате"
+                icon={<QuizIcon fontSize="inherit" />}
+                onClick={toggleQuestions}
+                showTooltip={showTooltips}
+                disabled={!canEditFeatures}
+              />
+              <FeatureToggle
+                active={charadesEnabled}
+                label="Шарады"
+                tooltip="Разминка-шарады: случайный игрок рисует слово, остальные угадывают в чате. Можно включить уже в созданной комнате"
+                icon={<TheaterComedyIcon fontSize="inherit" />}
+                onClick={toggleCharades}
+                showTooltip={showTooltips}
+                disabled={!canEditFeatures}
+              />
+              <FeatureToggle
                 active={features.roadmapEnabled}
                 label="Дорожная карта"
                 tooltip="Добавить этап дорожной карты: разобрать проблемные карточки в анализе, задаче и результате"
@@ -777,6 +843,73 @@ const RoomSettingsSidebar: React.FC<Props> = observer(({ store, open, onClose, t
           </Box>
         </Box>
       </Drawer>
+
+      <Dialog open={isQuestionsOpen} onClose={() => setIsQuestionsOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle>Вопросы для разминки</DialogTitle>
+        <DialogContent>
+          <DialogContentText sx={{ mb: 1 }}>
+            Команда сначала ответит на эти вопросы, потом увидит ответы анонимно. Шарады при сохранении выключатся.
+          </DialogContentText>
+          {questionDrafts.map((question, index) => (
+            <Box key={index} sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
+              <TextField
+                autoFocus={index === 0}
+                fullWidth
+                label={`Вопрос ${index + 1}`}
+                margin="dense"
+                value={question}
+                inputProps={{ maxLength: MAX_WARMUP_QUESTION_LENGTH }}
+                onChange={(event) => {
+                  const next = [...questionDrafts];
+                  next[index] = event.target.value;
+                  setQuestionDrafts(next);
+                }}
+              />
+              <IconButton
+                sx={{ mt: 1.25 }}
+                aria-label="Удалить вопрос"
+                disabled={questionDrafts.length <= 1 && !question.trim()}
+                onClick={() => {
+                  const next = questionDrafts.filter((_, itemIndex) => itemIndex !== index);
+                  setQuestionDrafts(next.length > 0 ? next : ['']);
+                }}
+              >
+                <DeleteOutlineIcon />
+              </IconButton>
+            </Box>
+          ))}
+          <Button
+            startIcon={<AddIcon />}
+            onClick={() => setQuestionDrafts([...questionDrafts, ''])}
+            disabled={questionDrafts.length >= MAX_WARMUP_QUESTIONS}
+            sx={{ mt: 0.5 }}
+          >
+            Добавить вопрос
+          </Button>
+        </DialogContent>
+        <DialogActions>
+          {questionsEnabled && (
+            <Button
+              color="inherit"
+              onClick={() => {
+                persistWarmupQuestions([]);
+                setIsQuestionsOpen(false);
+              }}
+              sx={{ mr: 'auto' }}
+            >
+              Выключить
+            </Button>
+          )}
+          <Button onClick={() => setIsQuestionsOpen(false)}>Отмена</Button>
+          <Button
+            variant="contained"
+            onClick={saveQuestions}
+            disabled={!questionDrafts.some((question) => question.trim())}
+          >
+            Сохранить
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={isDeleteAllCardsDialogOpen} onClose={() => setIsDeleteAllCardsDialogOpen(false)}>
         <DialogTitle>Удалить все карточки?</DialogTitle>

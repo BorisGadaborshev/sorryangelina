@@ -15,6 +15,10 @@ export function useBoardMood(store: RetroStore) {
 
   useEffect(() => {
     if (!currentRoomId || !currentUserName) return;
+    if (store.phase === 'warmup') {
+      setIsOpen(false);
+      return;
+    }
 
     if (currentUserMood) {
       setSelectedMood(currentUserMood);
@@ -37,7 +41,7 @@ export function useBoardMood(store: RetroStore) {
 
     setSelectedMood(null);
     setIsOpen(true);
-  }, [currentRoomId, currentUserName, currentUserMood, store]);
+  }, [currentRoomId, currentUserName, currentUserMood, store, store.phase]);
 
   const save = () => {
     if (!selectedMood || !currentUserName || !currentRoomId) return;

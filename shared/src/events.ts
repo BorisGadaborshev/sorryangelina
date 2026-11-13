@@ -17,6 +17,8 @@ import type {
   PhaseTimerState,
   RetroRatingState,
   Room,
+  WarmupState,
+  CharadesState,
   RoomFeatures,
   RoomState,
   SprintVipState,
@@ -104,6 +106,7 @@ export interface CreateRoomPayload {
   token?: string;
   teamId?: string;
   template?: string;
+  warmupQuestions?: string[];
 }
 
 export interface JoinRoomPayload {
@@ -150,6 +153,14 @@ export interface DiscussionBurstPayload {
 
 export interface RetroRatingPayload {
   value: 1 | 2 | 3 | 4 | 5;
+}
+
+export interface SubmitWarmupPayload {
+  answers: string[];
+}
+
+export interface SetWarmupQuestionsPayload {
+  warmupQuestions: string[];
 }
 
 export interface SprintVipPayload {
@@ -217,6 +228,8 @@ export interface ClientToServerEvents {
   'discussion-burst': (payload: DiscussionBurstPayload) => void;
   'toggle-discussion-hand': (payload?: EmptyPayload) => void;
   'submit-retro-rating': (payload: RetroRatingPayload) => void;
+  'submit-warmup-answers': (payload: SubmitWarmupPayload) => void;
+  'set-warmup-questions': (payload: SetWarmupQuestionsPayload) => void;
   'show-retro-rating-results': (payload?: EmptyPayload) => void;
   'vote-sprint-vip': (payload: SprintVipPayload) => void;
   'arkanoid-score': (payload: ArkanoidScorePayload) => void;
@@ -271,6 +284,9 @@ export interface ServerToClientEvents {
   'whiteboard-stroke': (stroke: WhiteboardStroke) => void;
   'whiteboard-cleared': () => void;
   'retro-rating-state': (rating: RetroRatingState) => void;
+  'warmup-state': (warmup: WarmupState) => void;
+  'warmup-questions-updated': (payload: { warmupQuestions: string[] }) => void;
+  'charades-state': (charades: CharadesState) => void;
   'facilitator-selected': (announcement: FacilitatorAnnouncement | null) => void;
   'discussion-navigation': (state: DiscussionNavigationState) => void;
   'discussion-hands': (payload: { hands: DiscussionHand[] }) => void;

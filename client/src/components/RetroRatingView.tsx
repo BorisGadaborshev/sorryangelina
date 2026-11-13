@@ -4,7 +4,7 @@ import { Box, Button, LinearProgress, Paper, Radio, Step, StepLabel, Stepper, Ty
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import { RetroStore } from '../store/RetroStore';
 import { teamApi } from '../services/teamApi';
-import { ArkanoidScoreEntry, AvailableRoom, Card, CatRunScoreEntry, ChatMessage, ColumnKind, Mood, RetroTemplate, User, getCardTextSegments, getTemplateColumn } from '../types';
+import { ArkanoidScoreEntry, AvailableRoom, Card, CatRunScoreEntry, CharadesScoreEntry, ChatMessage, ColumnKind, Mood, RetroTemplate, User, getCardTextSegments, getTemplateColumn } from '../types';
 
 interface Props {
   store: RetroStore;
@@ -520,6 +520,28 @@ const buildCatRunStatSection = (
   };
 };
 
+const buildCharadesStatSection = (scores: CharadesScoreEntry[]): RetroStatSection | null => {
+  const entries = scores
+    .map((entry) => ({
+      userName: entry.userName?.trim() || '',
+      score: Math.max(0, Math.floor(Number(entry.score) || 0))
+    }))
+    .filter((entry) => entry.userName && entry.score > 0)
+    .sort((left, right) => right.score - left.score || left.userName.localeCompare(right.userName, 'ru'));
+  if (entries.length === 0) return null;
+  const bestScore = entries[0].score;
+  return {
+    id: 'charades',
+    title: 'Шарады',
+    items: entries.map((entry) => ({
+      id: `charades-${entry.userName}`,
+      label: bestScore > 0 && entry.score === bestScore ? 'Больше всех угадал в шарадах' : 'Угадывал в шарадах',
+      primary: entry.userName,
+      secondary: countLabel(entry.score, 'очко', 'очка', 'очков')
+    }))
+  };
+};
+
 const RetroRatingView: React.FC<Props> = observer(({ store }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
@@ -567,6 +589,8 @@ const RetroRatingView: React.FC<Props> = observer(({ store }) => {
       played: store.catRunHasPlayed
     });
     if (catRunSection) sections.push(catRunSection);
+    const charadesSection = buildCharadesStatSection(store.charades.scores);
+    if (charadesSection) sections.push(charadesSection);
     return sections;
   }, [
     rating.resultsVisible,
@@ -591,6 +615,7 @@ const RetroRatingView: React.FC<Props> = observer(({ store }) => {
     store.catRunBestScore,
     store.catRunBestLevel,
     store.catRunHasPlayed,
+    store.charades.scores,
     store.currentUser?.name
   ]);
   const hasCards = store.cards.length > 0;
@@ -751,7 +776,7 @@ const RetroRatingView: React.FC<Props> = observer(({ store }) => {
                   Статистика ретро
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                  Кто был админом{store.roomFeatures.facilitatorEnabled ? ' и ведущим' : ''}, какое это ретро команды, кто писал карточки, кто голосовал, кто больше всех обсуждал{store.roomFeatures.arkanoidEnabled ? ', кто играл в Arkanoid' : ''} и кто играл в раннер с котом.
+                  Кто был админом{store.roomFeatures.facilitatorEnabled ? ' и ведущим' : ''}, какое это ретро команды, кто писал карточки, кто голосовал, кто больше всех обсуждал{store.roomFeatures.arkanoidEnabled ? ', кто играл в Arkanoid' : ''}, кто играл в раннер с котом и кто угадывал в шарадах.
                   {store.roomFeatures.anonymousEnabled ? ' На доске авторы скрыты, в этой сводке имена видны.' : ''}
                 </Typography>
 

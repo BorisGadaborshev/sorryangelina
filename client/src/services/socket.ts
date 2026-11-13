@@ -1,7 +1,7 @@
 import { io, Socket } from 'socket.io-client';
 import { isPhaseTimerDuration, type ClientToServerEvents, type ServerToClientEvents } from '@sorryangelina/shared';
 import { RetroStore } from '../store/RetroStore';
-import { Room, RoomState, User, Card, CardComment, CardReaction, CardTask, FacilitatorAnnouncement, DiscussionBurst, DiscussionHand, DiscussionNavigationState, Phase, PhaseTimerState, ChatMessage, Mood, RetroRatingState, RoomFeatures, SprintVipState, ArkanoidScoreEntry, CatRunScoreEntry, WhiteboardStroke, CreateRoomOptions, ColumnColorId } from '../types';
+import { Room, RoomState, User, Card, CardComment, CardReaction, CardTask, FacilitatorAnnouncement, DiscussionBurst, DiscussionHand, DiscussionNavigationState, Phase, PhaseTimerState, ChatMessage, Mood, RetroRatingState, WarmupState, CharadesState, RoomFeatures, SprintVipState, ArkanoidScoreEntry, CatRunScoreEntry, WhiteboardStroke, CreateRoomOptions, ColumnColorId } from '../types';
 import { getApiBase } from '../utils/apiBase';
 import { log } from '../utils/logger';
 import { classifyServerError, mapServerError, SessionError } from '../utils/errors';
@@ -294,6 +294,18 @@ export class SocketService {
 
     this.socket.on('retro-rating-state', (rating: RetroRatingState) => {
       this.store.setRetroRating(rating);
+    });
+
+    this.socket.on('warmup-state', (warmup: WarmupState) => {
+      this.store.setWarmup(warmup);
+    });
+
+    this.socket.on('warmup-questions-updated', ({ warmupQuestions }: { warmupQuestions?: string[] }) => {
+      this.store.setWarmupQuestions(Array.isArray(warmupQuestions) ? warmupQuestions : []);
+    });
+
+    this.socket.on('charades-state', (charades: CharadesState) => {
+      this.store.setCharades(charades);
     });
 
     this.socket.on('facilitator-selected', (announcement: FacilitatorAnnouncement | null) => {
@@ -764,6 +776,16 @@ export class SocketService {
 
   submitRetroRating(value: 1 | 2 | 3 | 4 | 5): void {
     this.socket.emit('submit-retro-rating', { value });
+  }
+
+  submitWarmupAnswers(answers: string[]): void {
+    this.socket.emit('submit-warmup-answers', { answers });
+  }
+
+  setWarmupQuestions(warmupQuestions: string[]): void {
+    if (!this.socket || !this.store.isAdmin) return;
+    this.store.setWarmupQuestions(warmupQuestions);
+    this.socket.emit('set-warmup-questions', { warmupQuestions });
   }
 
   showRetroRatingResults(): void {

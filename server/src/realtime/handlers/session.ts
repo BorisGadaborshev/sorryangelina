@@ -2,7 +2,8 @@ import { Socket } from 'socket.io';
 import { logger } from '../../utils/logger';
 import { on, rejectAction } from '../on';
 import { RealtimeSession } from '../session';
-import { User, isRetroTemplateId } from '../../types';
+import { User, CHARADES_WARMUP_MARKER, isRetroTemplateChoice, resolveRetroTemplateId, normalizeWarmupQuestions, toRoomBoardState } from '../../types';
+import { emitCharadesStateToSocket, ensureCharadesPlaying } from '../charades';
 import { RoomService } from '../../services/RoomService';
 import { TeamService } from '../../services/TeamService';
 import { BUILTIN_TEAM_ID } from '../../services/TeamService';
@@ -24,6 +25,8 @@ import {
   emitFacilitatorToSocket,
   emitRetroRatingStateToRoom,
   emitRetroRatingStateToSocket,
+  emitWarmupStateToRoom,
+  emitWarmupStateToSocket,
   emitSprintVipStateToRoom,
   emitSprintVipStateToSocket,
   emitTimerToSocket,
@@ -82,29 +85,24 @@ export function registerSessionHandlers(socket: Socket, session: RealtimeSession
       logger.debug({ roomId, userId: session.currentUser.id }, 'session restored');
       socket.emit('room-joined', { 
         room, 
-        state: { 
-          cards: room.cards, 
-          phase: room.phase, 
-          users: room.users 
-        },
+        state: toRoomBoardState(room),
         userId: session.currentUser.id
       });
-      socket.to(roomId).emit('state-updated', {
-        cards: room.cards,
-        phase: room.phase,
-        users: room.users
-      });
+      socket.to(roomId).emit('state-updated', toRoomBoardState(room));
       await hydrateRoomEphemeral(roomId);
       emitTimerToSocket(socket, roomId);
       socket.emit('chat-history', { messages: roomChats.get(roomId) || [] });
       socket.emit('whiteboard-history', { strokes: roomWhiteboards.get(roomId) || [] });
       emitRetroRatingStateToSocket(socket, room);
+      emitWarmupStateToSocket(socket, room);
+      emitCharadesStateToSocket(socket, roomId);
       emitSprintVipStateToSocket(socket, room);
       emitArkanoidScoresToSocket(socket, roomId);
       emitCatRunScoresToSocket(socket, roomId);
       emitDiscussionNavigationToSocket(socket, roomId, room);
       emitFacilitatorToSocket(socket, roomId, room);
       emitDiscussionHandsToSocket(socket, roomId);
+      await ensureCharadesPlaying(roomId);
     } catch (error) {
       logger.error({ err: error }, 'error restoring session');
       socket.emit('session-expired');
@@ -112,7 +110,7 @@ export function registerSessionHandlers(socket: Socket, session: RealtimeSession
   });
 
 
-  on(socket, 'create-room', async ({ roomId, password, username, token, teamId, template }) => {
+  on(socket, 'create-room', async ({ roomId, password, username, token, teamId, template, warmupQuestions }) => {
     const auth = eventAuth(socket, token);
     if (!auth) {
       rejectAction(socket, 'Unauthorized: token is invalid or expired');
@@ -138,9 +136,14 @@ export function registerSessionHandlers(socket: Socket, session: RealtimeSession
         return;
       }
 
-      if (typeof template !== 'undefined' && !isRetroTemplateId(template)) {
+      if (typeof template !== 'undefined' && !isRetroTemplateChoice(template)) {
         rejectAction(socket, 'Unknown retro template');
         return;
+      }
+      const normalizedWarmupQuestions = normalizeWarmupQuestions(warmupQuestions);
+      const questionsToModerate = normalizedWarmupQuestions.filter((question) => question !== CHARADES_WARMUP_MARKER);
+      if (questionsToModerate.length > 0) {
+        await assertNoProfanity(questionsToModerate.map((text) => ({ kind: 'card' as const, text })));
       }
 
       if (typeof roomId !== 'string' || !roomId.trim()) {
@@ -153,7 +156,8 @@ export function registerSessionHandlers(socket: Socket, session: RealtimeSession
 
       const room = await RoomService.createRoom(roomId, password, socket.id, effectiveUsername, {
         teamId: normalizedTeamId,
-        template: isRetroTemplateId(template) ? template : 'classic'
+        template: typeof template === 'undefined' ? undefined : resolveRetroTemplateId(template),
+        warmupQuestions: normalizedWarmupQuestions
       });
       socket.join(roomId);
       socket.data.userId = socket.id;
@@ -168,14 +172,10 @@ export function registerSessionHandlers(socket: Socket, session: RealtimeSession
       };
       addRoomPresence(roomId, effectiveUsername, socket.id);
       
-      logger.info({ roomId }, 'room created');
+      logger.info({ roomId, template: room.template }, 'room created');
       socket.emit('room-joined', { 
         room, 
-        state: { 
-          cards: room.cards, 
-          phase: room.phase, 
-          users: room.users 
-        },
+        state: toRoomBoardState(room),
         userId: socket.id
       });
       await hydrateRoomEphemeral(roomId);
@@ -183,9 +183,12 @@ export function registerSessionHandlers(socket: Socket, session: RealtimeSession
       socket.emit('chat-history', { messages: roomChats.get(roomId) || [] });
       socket.emit('whiteboard-history', { strokes: roomWhiteboards.get(roomId) || [] });
       emitRetroRatingStateToSocket(socket, room);
+      emitWarmupStateToSocket(socket, room);
+      emitCharadesStateToSocket(socket, roomId);
       emitSprintVipStateToSocket(socket, room);
       emitArkanoidScoresToSocket(socket, roomId);
       emitCatRunScoresToSocket(socket, roomId);
+      await ensureCharadesPlaying(roomId);
     } catch (error) {
       const limitMessage = error instanceof ContentModerationError || error instanceof UsageLimitError
         ? error.message
@@ -271,11 +274,7 @@ export function registerSessionHandlers(socket: Socket, session: RealtimeSession
       
       socket.emit('room-joined', { 
         room, 
-        state: { 
-          cards: room.cards, 
-          phase: room.phase, 
-          users: room.users 
-        },
+        state: toRoomBoardState(room),
         userId: user.id
       });
       await hydrateRoomEphemeral(roomId);
@@ -283,6 +282,8 @@ export function registerSessionHandlers(socket: Socket, session: RealtimeSession
       socket.emit('chat-history', { messages: roomChats.get(roomId) || [] });
       socket.emit('whiteboard-history', { strokes: roomWhiteboards.get(roomId) || [] });
       emitRetroRatingStateToSocket(socket, room);
+      emitWarmupStateToSocket(socket, room);
+      emitCharadesStateToSocket(socket, roomId);
       emitSprintVipStateToSocket(socket, room);
       emitArkanoidScoresToSocket(socket, roomId);
       emitCatRunScoresToSocket(socket, roomId);
@@ -299,6 +300,8 @@ export function registerSessionHandlers(socket: Socket, session: RealtimeSession
         });
       }
       await emitRetroRatingStateToRoom(roomId);
+      await emitWarmupStateToRoom(roomId);
+      await ensureCharadesPlaying(roomId);
       await emitSprintVipStateToRoom(roomId);
     } catch (error) {
       logger.error({ err: error }, 'error joining room');

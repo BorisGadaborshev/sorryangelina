@@ -16,6 +16,8 @@ import PhaseContent from './board/PhaseContent';
 import BoardToolbar, { WHITEBOARD_COLORS, WhiteboardTool } from './board/BoardToolbar';
 import { AllReadyDialog, FacilitatorDialog, MoodDialog, RoomRejoinDialog } from './board/BoardDialogs';
 import { getNextPhase, getPhaseLabel } from './board/phases';
+import { isCharadesWarmup } from '../types';
+import CharadesHud from './CharadesHud';
 import { useBoardMood } from './board/useBoardMood';
 import { useAllReadyPrompt } from './board/useAllReadyPrompt';
 import { setFloorCatArkanoidActive } from './floorCatPreference';
@@ -81,16 +83,17 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   }, [timerMusicVolume]);
 
   const features = store.roomFeatures;
+  const isCharadesPhase = store.phase === 'warmup' && isCharadesWarmup(store.room?.warmupQuestions);
   const canDrawOnBoard = !isMobile
-    && features.drawingEnabled
-    && (store.phase === 'creation' || store.phase === 'grouping' || store.phase === 'voting');
+    && (features.drawingEnabled || isCharadesPhase)
+    && (store.phase === 'creation' || store.phase === 'grouping' || store.phase === 'voting' || isCharadesPhase);
   const canPlayArkanoid = !isMobile
     && features.arkanoidEnabled
     && (store.phase === 'creation' || store.phase === 'grouping' || store.phase === 'voting');
   const canPlayCatRun = !isMobile;
-  const canUseChat = features.chatEnabled;
+  const canUseChat = features.chatEnabled || isCharadesPhase;
   const canPlayTimerMusic = features.musicEnabled;
-  const readyEnabled = features.readyEnabled;
+  const readyEnabled = features.readyEnabled && store.phase !== 'warmup';
   const readyCount = store.getUserReadyCount();
   const totalCount = store.getTotalUserCount();
   const allUsersReady = readyEnabled && totalCount > 0 && readyCount === totalCount;
@@ -124,6 +127,13 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
     store.setChatPanelOpen(canUseChat && isChatVisible);
     return () => store.setChatPanelOpen(false);
   }, [store, canUseChat, isChatVisible]);
+
+  useEffect(() => {
+    if (isCharadesPhase) {
+      setIsChatVisible(true);
+      if (canDrawOnBoard) setIsDrawEnabled(true);
+    }
+  }, [isCharadesPhase, canDrawOnBoard]);
 
   useEffect(() => {
     if (!canDrawOnBoard && isDrawEnabled) {
@@ -295,7 +305,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
         {isMobile ? (
           <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1, minHeight: 0, overflow: 'hidden', gap: 1, position: 'relative', zIndex: 1 }}>
             {mobileTab === 1 ? (
-              <Box sx={{ flexGrow: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+              <Box data-cat-run-board sx={{ flexGrow: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
                 <UserList 
                   users={store.users}
                   currentUserId={currentUser.id}
@@ -306,7 +316,12 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                 />
               </Box>
             ) : (
-              <Box sx={{ flexGrow: 1, minHeight: 0, overflowY: 'auto' }}>
+              <Box data-cat-run-board sx={{ flexGrow: 1, minHeight: 0, overflowY: 'auto', position: 'relative' }}>
+                {isCharadesPhase && (
+                  <Box sx={{ position: 'sticky', top: 0, zIndex: 2, mb: 1, pointerEvents: 'none' }}>
+                    <CharadesHud store={store} />
+                  </Box>
+                )}
                 {renderContent()}
               </Box>
             )}
@@ -406,6 +421,11 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                     />
                   </Suspense>
                 </ErrorBoundary>
+              )}
+              {isCharadesPhase && (
+                <Box sx={{ position: 'absolute', top: 8, left: 8, right: 8, zIndex: 8, pointerEvents: 'none' }}>
+                  <CharadesHud store={store} />
+                </Box>
               )}
               {isArkanoidEnabled && canPlayArkanoid && (
                 <ErrorBoundary title="Игру не удалось показать">

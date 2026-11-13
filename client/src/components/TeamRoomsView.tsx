@@ -9,24 +9,39 @@ import {
   DialogContent,
   DialogContentText,
   DialogTitle,
+  ButtonBase,
+  IconButton,
   Paper,
   TextField,
+  ToggleButton,
+  ToggleButtonGroup,
   Typography
 } from '@mui/material';
-import { AvailableRoom, RETRO_TEMPLATE_LIST, RetroTemplateId } from '../types';
+import AddIcon from '@mui/icons-material/Add';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import { AvailableRoom, COLUMN_COLOR_PRESETS, MAX_WARMUP_QUESTIONS, MAX_WARMUP_QUESTION_LENGTH, RETRO_TEMPLATE_PICKER, RetroTemplateChoice } from '../types';
 import { RetroStore } from '../store/RetroStore';
 import RoomTiles from './RoomTiles';
 import TeamMembersPanel from './TeamMembersPanel';
+
+export type CreateWarmupKind = 'none' | 'questions' | 'charades';
 
 export interface CreateRoomDialogState {
   open: boolean;
   roomId: string;
   password: string;
-  template: RetroTemplateId;
+  template: RetroTemplateChoice;
+  warmupKind: CreateWarmupKind;
+  warmupQuestions: string[];
+  questionsOpen: boolean;
   settingsLoaded: boolean;
   onRoomId: (value: string) => void;
   onPassword: (value: string) => void;
-  onTemplate: (value: RetroTemplateId) => void;
+  onTemplate: (value: RetroTemplateChoice) => void;
+  onWarmupKind: (value: CreateWarmupKind) => void;
+  onWarmupQuestions: (value: string[]) => void;
+  onOpenQuestions: () => void;
+  onCloseQuestions: () => void;
   onClose: () => void;
   onSubmit: () => void;
 }
@@ -242,69 +257,142 @@ const TeamRoomsView: React.FC<Props> = ({
       />
     </Box>
 
-    <Dialog open={createDialog.open} onClose={createDialog.onClose} fullWidth maxWidth="sm">
-      <DialogTitle>Создать комнату</DialogTitle>
-      <DialogContent>
-        <DialogContentText sx={{ mb: 1 }}>
-          Комната будет создана внутри команды <b>{store.selectedTeam?.name}</b>. Шаблон, колонки и переключатели берутся из настроек команды. Если их изменить в комнате, следующая комната этой команды откроется уже с ними. Незавершённые задачи прошлой ретроспективы — всё, что не выполнено и не закрыто — перенесутся в колонку «Задача».
-        </DialogContentText>
+    <Dialog
+      open={createDialog.open}
+      onClose={createDialog.onClose}
+      fullWidth
+      maxWidth="sm"
+      scroll="paper"
+      PaperProps={{ sx: { maxHeight: '90vh', display: 'flex', flexDirection: 'column' } }}
+    >
+      <DialogTitle sx={{ pb: 0.5 }}>Создать комнату</DialogTitle>
+      <DialogContent sx={{ display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+          Команда <b>{store.selectedTeam?.name}</b> · колонки и настройки подтянутся из команды
+        </Typography>
         {store.error && (
-          <Alert severity="error" sx={{ mb: 1 }}>
+          <Alert severity="error" sx={{ mb: 1.5 }}>
             {store.error}
           </Alert>
         )}
-        <TextField
-          autoFocus
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1.25 }}>
+          <TextField
+            autoFocus
+            fullWidth
+            size="small"
+            label="Название комнаты"
+            value={createDialog.roomId}
+            onChange={(event) => createDialog.onRoomId(event.target.value)}
+          />
+          <TextField
+            fullWidth
+            size="small"
+            type="password"
+            label="Пароль (необязательно)"
+            value={createDialog.password}
+            onChange={(event) => createDialog.onPassword(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                createDialog.onSubmit();
+              }
+            }}
+          />
+        </Box>
+
+        <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>
+          Разминка
+        </Typography>
+        <ToggleButtonGroup
+          exclusive
           fullWidth
-          label="ID комнаты"
-          margin="normal"
-          value={createDialog.roomId}
-          onChange={(event) => createDialog.onRoomId(event.target.value)}
-        />
-        <TextField
-          fullWidth
-          type="password"
-          label="Пароль комнаты (необязательно)"
-          margin="normal"
-          value={createDialog.password}
-          onChange={(event) => createDialog.onPassword(event.target.value)}
-          helperText="Оставьте пустым, если вход в комнату должен быть без пароля"
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault();
-              createDialog.onSubmit();
+          size="small"
+          value={createDialog.warmupKind}
+          onChange={(_, value: CreateWarmupKind | null) => {
+            if (value) createDialog.onWarmupKind(value);
+          }}
+          sx={{
+            '& .MuiToggleButton-root': {
+              textTransform: 'none',
+              fontWeight: 700,
+              py: 0.9
             }
           }}
-        />
+        >
+          <ToggleButton value="none">Без разминки</ToggleButton>
+          <ToggleButton value="questions">Вопросы</ToggleButton>
+          <ToggleButton value="charades">Шарады</ToggleButton>
+        </ToggleButtonGroup>
+        {createDialog.warmupKind === 'charades' && (
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            Случайный игрок рисует или намекает слово, остальные угадывают в чате. Первый правильный ответ получает очко.
+          </Typography>
+        )}
+        {createDialog.warmupKind === 'questions' && (
+          <Box
+            sx={{
+              mt: 1,
+              px: 1.25,
+              py: 1,
+              border: '1px solid',
+              borderColor: 'divider',
+              borderRadius: 1,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 1
+            }}
+          >
+            <Typography variant="body2" color="text.secondary">
+              {createDialog.warmupQuestions.filter((question) => question.trim()).length > 0
+                ? `Задано вопросов: ${createDialog.warmupQuestions.filter((question) => question.trim()).length}`
+                : 'Нужно задать вопросы команде'}
+            </Typography>
+            <Button size="small" variant="outlined" onClick={createDialog.onOpenQuestions}>
+              {createDialog.warmupQuestions.some((question) => question.trim()) ? 'Изменить' : 'Задать'}
+            </Button>
+          </Box>
+        )}
+
         <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>
-          Шаблон
+          Шаблон доски
         </Typography>
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-          {RETRO_TEMPLATE_LIST.map((template) => {
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, overflowY: 'auto', minHeight: 280, flex: 1, pr: 0.5, pb: 1 }}>
+          {RETRO_TEMPLATE_PICKER.map((template) => {
             const selected = createDialog.template === template.id;
+            const tintColor = template.columns[0]?.color;
             return (
               <Paper
                 key={template.id}
+                component={ButtonBase}
                 variant="outlined"
                 onClick={() => createDialog.onTemplate(template.id)}
-                sx={{
+                sx={(theme) => ({
+                  display: 'block',
+                  width: '100%',
+                  textAlign: 'left',
                   p: 1.25,
-                  cursor: 'pointer',
                   borderWidth: 2,
-                  borderColor: selected ? 'primary.main' : 'divider',
-                  bgcolor: selected ? 'action.selected' : 'background.paper'
-                }}
+                  borderColor: selected ? 'primary.main' : 'transparent',
+                  boxShadow: selected ? 2 : 0,
+                  bgcolor: selected
+                    ? 'action.selected'
+                    : tintColor
+                      ? COLUMN_COLOR_PRESETS[tintColor][theme.palette.mode].bg
+                      : theme.palette.mode === 'dark' ? '#261d2c' : '#f3e5f5'
+                })}
               >
-                <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700, lineHeight: 1.3 }}>
                   {template.name}
                 </Typography>
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                <Typography variant="body2" color="text.secondary" sx={{ display: 'block', mt: 0.4, lineHeight: 1.4 }}>
                   {template.description}
                 </Typography>
-                <Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>
-                  {template.columns.map((column) => column.title).join(' · ')}
-                  {template.roadmapColumns ? ` · затем ${template.roadmapColumns.map((column) => column.title).join(' · ')}` : ''}
-                </Typography>
+                {template.columns.length > 0 && (
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.6 }}>
+                    {template.columns.map((column) => column.title).join(' · ')}
+                  </Typography>
+                )}
               </Paper>
             );
           })}
@@ -315,10 +403,68 @@ const TeamRoomsView: React.FC<Props> = ({
         <Button
           variant="contained"
           onClick={createDialog.onSubmit}
-          disabled={isLoading || !createDialog.settingsLoaded || !createDialog.roomId.trim()}
+          disabled={
+            isLoading
+            || !createDialog.settingsLoaded
+            || !createDialog.roomId.trim()
+            || (createDialog.warmupKind === 'questions' && !createDialog.warmupQuestions.some((question) => question.trim()))
+          }
         >
           {isLoading ? <CircularProgress size={18} color="inherit" /> : 'Создать'}
         </Button>
+      </DialogActions>
+    </Dialog>
+
+    <Dialog
+      open={createDialog.questionsOpen}
+      onClose={createDialog.onCloseQuestions}
+      fullWidth
+      maxWidth="sm"
+    >
+      <DialogTitle>Вопросы для разминки</DialogTitle>
+      <DialogContent>
+        <DialogContentText sx={{ mb: 1 }}>
+          Команда сначала ответит на эти вопросы, потом увидит ответы анонимно, и только после этого начнётся обычное ретро.
+        </DialogContentText>
+        {createDialog.warmupQuestions.map((question, index) => (
+          <Box key={index} sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
+            <TextField
+              autoFocus={index === 0}
+              fullWidth
+              label={`Вопрос ${index + 1}`}
+              margin="dense"
+              value={question}
+              inputProps={{ maxLength: MAX_WARMUP_QUESTION_LENGTH }}
+              onChange={(event) => {
+                const next = [...createDialog.warmupQuestions];
+                next[index] = event.target.value;
+                createDialog.onWarmupQuestions(next);
+              }}
+            />
+            <IconButton
+              sx={{ mt: 1.25 }}
+              aria-label="Удалить вопрос"
+              disabled={createDialog.warmupQuestions.length <= 1 && !question.trim()}
+              onClick={() => {
+                const next = createDialog.warmupQuestions.filter((_, itemIndex) => itemIndex !== index);
+                createDialog.onWarmupQuestions(next.length > 0 ? next : ['']);
+              }}
+            >
+              <DeleteOutlineIcon />
+            </IconButton>
+          </Box>
+        ))}
+        <Button
+          startIcon={<AddIcon />}
+          onClick={() => createDialog.onWarmupQuestions([...createDialog.warmupQuestions, ''])}
+          disabled={createDialog.warmupQuestions.length >= MAX_WARMUP_QUESTIONS}
+          sx={{ mt: 0.5 }}
+        >
+          Добавить вопрос
+        </Button>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={createDialog.onCloseQuestions}>Готово</Button>
       </DialogActions>
     </Dialog>
 

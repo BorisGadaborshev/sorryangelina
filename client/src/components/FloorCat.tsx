@@ -20,13 +20,38 @@ const WALK_SPEED = 22;
 const RUN_SPEED = 80;
 const FLOOR_BAND = 150;
 const NEAR_RADIUS = 100;
+const EDGE_PAD = 8;
 
 const rand = (min: number, max: number) => min + Math.random() * (max - min);
+
+const boardWalkLane = () => {
+  const board = document.querySelector('[data-cat-run-board]');
+  if (!(board instanceof HTMLElement)) {
+    const width = window.innerWidth;
+    return {
+      left: 0,
+      width,
+      bottom: 0,
+      minX: EDGE_PAD,
+      maxX: Math.max(EDGE_PAD, width - CAT_W - EDGE_PAD)
+    };
+  }
+  const rect = board.getBoundingClientRect();
+  const width = Math.max(CAT_W + EDGE_PAD * 2, rect.width);
+  return {
+    left: rect.left,
+    width,
+    bottom: Math.max(0, window.innerHeight - rect.bottom),
+    minX: EDGE_PAD,
+    maxX: Math.max(EDGE_PAD, width - CAT_W - EDGE_PAD)
+  };
+};
 
 const FloorCatActor: React.FC = observer(() => {
   const themeMode = useTheme().palette.mode;
   const store = useRetroStore();
   const withBow = isFemininePersonName(store.currentUser?.name || store.authProfile?.name);
+  const rootRef = useRef<HTMLDivElement>(null);
   const actorRef = useRef<HTMLButtonElement>(null);
   const flipRef = useRef<HTMLDivElement>(null);
   const liftRef = useRef<HTMLDivElement>(null);
@@ -58,17 +83,27 @@ const FloorCatActor: React.FC = observer(() => {
   };
 
   useEffect(() => {
+    const root = rootRef.current;
     const actor = actorRef.current;
     const flip = flipRef.current;
     const lift = liftRef.current;
     const cat = catRef.current;
     const prints = printsRef.current;
-    if (!actor || !flip || !lift || !cat) return;
+    if (!root || !actor || !flip || !lift || !cat) return;
 
     const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
     let reduce = motion.matches;
     const pointer = { x: -9999, y: -9999, active: false };
-    let x = Math.min(Math.max(24, window.innerWidth * 0.18), Math.max(4, window.innerWidth - CAT_W - 4));
+    let lane = boardWalkLane();
+    const applyLane = () => {
+      lane = boardWalkLane();
+      root.style.left = `${lane.left}px`;
+      root.style.width = `${lane.width}px`;
+      root.style.right = 'auto';
+      root.style.bottom = `${lane.bottom}px`;
+    };
+    applyLane();
+    let x = Math.min(Math.max(lane.minX, lane.width * 0.18), lane.maxX);
     let dir = 1;
     let mood: 'walk' | 'sit' | 'sleep' | 'play' = reduce ? 'sleep' : 'walk';
     let goingToBed = false;
@@ -83,9 +118,10 @@ const FloorCatActor: React.FC = observer(() => {
     const sizePrints = () => {
       if (!prints) return;
       const ratio = window.devicePixelRatio || 1;
-      prints.width = Math.floor(window.innerWidth * ratio);
+      const width = Math.max(1, lane.width);
+      prints.width = Math.floor(width * ratio);
       prints.height = Math.floor(18 * ratio);
-      prints.style.width = `${window.innerWidth}px`;
+      prints.style.width = `${width}px`;
       prints.style.height = '18px';
     };
     sizePrints();
@@ -140,9 +176,12 @@ const FloorCatActor: React.FC = observer(() => {
 
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
-      const width = window.innerWidth;
-      const height = window.innerHeight;
-      const maxX = Math.max(4, width - CAT_W - 4);
+      applyLane();
+      if (prints && Math.abs(prints.clientWidth - lane.width) > 1) sizePrints();
+      const width = lane.width;
+      const minX = lane.minX;
+      const maxX = lane.maxX;
+      const height = window.innerHeight - lane.bottom;
 
       if (puzzledUntilRef.current > now) {
         mood = 'sit';
@@ -152,7 +191,7 @@ const FloorCatActor: React.FC = observer(() => {
         mood = 'walk';
         moodUntil = now + rand(5000, 11000);
       } else if (!reduce) {
-        const anchorX = x + CAT_W * 0.62;
+        const anchorX = lane.left + x + CAT_W * 0.62;
         const dist = Math.hypot(pointer.x - anchorX, pointer.y - (height - 28));
         const wantsPlay = pointer.active && (pointer.y >= height - FLOOR_BAND || dist < NEAR_RADIUS);
 
@@ -182,38 +221,40 @@ const FloorCatActor: React.FC = observer(() => {
 
         if (mood === 'walk') {
           x += dir * WALK_SPEED * dt;
-          if (goingToBed && (x <= 4 || x >= maxX)) {
-            x = Math.min(maxX, Math.max(4, x));
+          if (goingToBed && (x <= minX || x >= maxX)) {
+            x = Math.min(maxX, Math.max(minX, x));
             goingToBed = false;
             mood = 'sleep';
             moodUntil = now + rand(5500, 9500);
-          } else if (x <= 4) {
-            x = 4;
+          } else if (x <= minX) {
+            x = minX;
             dir = 1;
           } else if (x >= maxX) {
             x = maxX;
             dir = -1;
           }
         } else if (mood === 'play') {
+          const localPointerX = pointer.x - lane.left;
           const center = x + CAT_W / 2;
-          if (Math.abs(pointer.x - center) > 22) {
-            dir = pointer.x >= center ? 1 : -1;
+          if (Math.abs(localPointerX - center) > 22) {
+            dir = localPointerX >= center ? 1 : -1;
           }
           const headOffset = dir === 1 ? HEAD_X : CAT_W - HEAD_X;
-          const goal = pointer.x - headOffset - 10 * dir;
-          const clamped = Math.min(maxX, Math.max(4, goal));
+          const goal = localPointerX - headOffset - 10 * dir;
+          const clamped = Math.min(maxX, Math.max(minX, goal));
           const delta = clamped - x;
           const maxStep = RUN_SPEED * dt;
           x += Math.sign(delta) * Math.min(Math.abs(delta), maxStep);
         }
       }
 
-      x = Math.min(maxX, Math.max(4, x));
+      x = Math.min(maxX, Math.max(minX, x));
       const headX = dir === 1 ? x + HEAD_X : x + CAT_W - HEAD_X;
+      const headScreenX = lane.left + headX;
       const shoulderY = height - 16;
       const swatting = mood === 'play'
         && pointer.active
-        && Math.abs(pointer.x - headX) < 36
+        && Math.abs(pointer.x - headScreenX) < 36
         && pointer.y > height - 180;
 
       if (swatting && !wasSwatting) {
@@ -226,13 +267,13 @@ const FloorCatActor: React.FC = observer(() => {
       wasSwatting = swatting;
 
       if (swatting) {
-        const forward = Math.max(12, (pointer.x - headX) * dir);
+        const forward = Math.max(12, (pointer.x - headScreenX) * dir);
         const aim = Math.atan2(pointer.y - shoulderY, forward) * (180 / Math.PI);
         cat.style.setProperty('--aim', `${Math.max(-55, Math.min(24, aim)).toFixed(1)}deg`);
       }
 
       if (mood === 'play') {
-        const eyeX = Math.max(-1, Math.min(1, ((pointer.x - headX) * dir) / 48));
+        const eyeX = Math.max(-1, Math.min(1, ((pointer.x - headScreenX) * dir) / 48));
         const eyeY = Math.max(-0.6, Math.min(0.6, (pointer.y - (height - 24)) / 70));
         cat.style.setProperty('--eye-x', `${eyeX.toFixed(2)}px`);
         cat.style.setProperty('--eye-y', `${eyeY.toFixed(2)}px`);
@@ -267,7 +308,13 @@ const FloorCatActor: React.FC = observer(() => {
 
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerout', onLeave);
-    window.addEventListener('resize', sizePrints);
+    const onResize = () => {
+      applyLane();
+      sizePrints();
+      x = Math.min(maxXFromLane(), Math.max(lane.minX, x));
+    };
+    const maxXFromLane = () => lane.maxX;
+    window.addEventListener('resize', onResize);
     motion.addEventListener('change', onMotion);
     raf = requestAnimationFrame(tick);
 
@@ -275,13 +322,13 @@ const FloorCatActor: React.FC = observer(() => {
       cancelAnimationFrame(raf);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerout', onLeave);
-      window.removeEventListener('resize', sizePrints);
+      window.removeEventListener('resize', onResize);
       motion.removeEventListener('change', onMotion);
     };
   }, []);
 
   return (
-    <div className="floor-cat" data-theme={themeMode} data-bow={withBow ? '1' : '0'} data-snow={snowing ? '1' : '0'} data-ny={festive ? '1' : '0'}>
+    <div ref={rootRef} className="floor-cat" data-theme={themeMode} data-bow={withBow ? '1' : '0'} data-snow={snowing ? '1' : '0'} data-ny={festive ? '1' : '0'}>
       <canvas className="floor-cat__snow-prints" ref={printsRef} aria-hidden="true" />
       {festive ? (
         <svg className="floor-cat__tree" viewBox="0 0 80 100" aria-hidden="true">

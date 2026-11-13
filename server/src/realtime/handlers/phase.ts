@@ -3,7 +3,8 @@ import { on, rejectAction } from '../on';
 import { isRoomAdmin } from '../access';
 import { logger } from '../../utils/logger';
 import { RealtimeSession } from '../session';
-import { Phase, RoomFeatures, getRetroTemplate } from '../../types';
+import { Phase, PHASES, RoomFeatures, getRetroTemplate, isCharadesWarmup, normalizeWarmupQuestions, visibleWarmupQuestions } from '../../types';
+import { ensureCharadesPlaying } from '../charades';
 import { RoomService } from '../../services/RoomService';
 import {
   buildDiscussionNavigation,
@@ -11,6 +12,7 @@ import {
   clearRoomTimer,
   emitDiscussionHands,
   emitRetroRatingStateToRoom,
+  emitWarmupStateToRoom,
   getRoomFeatures,
   getSortedCards,
   io,
@@ -27,7 +29,7 @@ import {
 
 export function registerPhaseHandlers(socket: Socket, session: RealtimeSession): void {
   on(socket, 'change-phase', async ({ phase }) => {
-    const allowedPhases: Phase[] = ['creation', 'grouping', 'voting', 'discussion', 'roadmap', 'rating'];
+    const allowedPhases: Phase[] = [...PHASES];
     if (!allowedPhases.includes(phase)) {
       rejectAction(socket, 'Invalid phase');
       return;
@@ -57,6 +59,13 @@ export function registerPhaseHandlers(socket: Socket, session: RealtimeSession):
     if (phase === 'rating') {
       if (roomForPhase && !getRoomFeatures(roomForPhase).retroRatingEnabled) {
         rejectAction(socket, 'Оценка ретро отключена в настройках комнаты');
+        return;
+      }
+    }
+    if (phase === 'warmup') {
+      const warmupQuestions = normalizeWarmupQuestions(roomForPhase?.warmupQuestions);
+      if (!roomForPhase || (visibleWarmupQuestions(warmupQuestions).length === 0 && !isCharadesWarmup(warmupQuestions))) {
+        rejectAction(socket, 'Разминка не задана для этой комнаты');
         return;
       }
     }
@@ -118,6 +127,10 @@ export function registerPhaseHandlers(socket: Socket, session: RealtimeSession):
       }
 
       await emitRetroRatingStateToRoom(actor.roomId);
+      if (roomState.phase === 'warmup') {
+        await emitWarmupStateToRoom(actor.roomId);
+        await ensureCharadesPlaying(actor.roomId);
+      }
       await persistRoomEphemeral(actor.roomId);
     } catch (error) {
       logger.error({ err: error }, 'failed to change phase');

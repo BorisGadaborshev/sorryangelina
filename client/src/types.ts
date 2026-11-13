@@ -1,13 +1,11 @@
 import {
-  RETRO_TEMPLATES,
   getCardTextSegments,
   joinCardTextSegments,
   type AuthProfileType,
   type Card,
   type ColumnColorId,
   type Phase,
-  type RetroTemplate,
-  type RetroTemplateId
+  type RetroTemplateChoice
 } from '@sorryangelina/shared';
 
 export * from '@sorryangelina/shared';
@@ -29,14 +27,6 @@ export const COLUMN_COLOR_PRESETS: Record<ColumnColorId, {
   orange: { label: 'Оранжевый', light: { bg: '#fff3e0', accent: '#ef6c00' }, dark: { bg: '#2c2318', accent: '#ffb74d' } },
   slate: { label: 'Серый', light: { bg: '#eceff1', accent: '#546e7a' }, dark: { bg: '#23282c', accent: '#90a4ae' } }
 };
-
-export const RETRO_TEMPLATE_LIST: RetroTemplate[] = [
-  RETRO_TEMPLATES.classic,
-  RETRO_TEMPLATES['start-stop-continue'],
-  RETRO_TEMPLATES.sailboat,
-  RETRO_TEMPLATES['four-ls'],
-  RETRO_TEMPLATES['traffic-light']
-];
 
 export const getColumnColorStyles = (colorId: ColumnColorId, mode: 'light' | 'dark') => {
   const preset = COLUMN_COLOR_PRESETS[colorId] ?? COLUMN_COLOR_PRESETS.none;
@@ -98,7 +88,8 @@ export const buildColumnMarkdown = (cards: Card[]): string =>
 
 export interface CreateRoomOptions {
   teamId?: string;
-  template?: RetroTemplateId;
+  template?: RetroTemplateChoice;
+  warmupQuestions?: string[];
 }
 
 export const BUILTIN_TEAM_ID = 'cards-partners';

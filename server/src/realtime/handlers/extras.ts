@@ -9,6 +9,7 @@ import { ContentModerationError } from '../../services/ContentModeration';
 import { logger } from '../../utils/logger';
 import { isRoomAdmin, moderateRoomText } from '../access';
 import { ChatMessage } from '../../types';
+import { canDrawCharadesStroke, roomAllowsCharadesChat, roomAllowsCharadesDraw, tryCharadesGuess } from '../charades';
 import {
   appendChatMessage,
   cancelPendingUserDeparture,
@@ -128,7 +129,7 @@ export function registerExtrasHandlers(socket: Socket, session: RealtimeSession)
   on(socket, 'send-chat-message', async ({ text }) => {
     if (!session.currentUser?.roomId) return;
     const room = await RoomService.getRoom(session.currentUser.roomId);
-    if (!room || !getRoomFeatures(room).chatEnabled) return;
+    if (!room || (!getRoomFeatures(room).chatEnabled && !roomAllowsCharadesChat(room))) return;
     const normalized = typeof text === 'string' ? text.trim() : '';
     if (!normalized) return;
     try {
@@ -151,13 +152,17 @@ export function registerExtrasHandlers(socket: Socket, session: RealtimeSession)
 
     appendChatMessage(session.currentUser.roomId, message);
     io.to(session.currentUser.roomId).emit('chat-message', message);
+    await tryCharadesGuess(room, session.currentUser.name, message.text);
   });
 
 
   on(socket, 'whiteboard-stroke', async (payload) => {
     if (!session.currentUser?.roomId) return;
     const room = await RoomService.getRoom(session.currentUser.roomId);
-    if (!room || !getRoomFeatures(room).drawingEnabled) return;
+    if (!room) return;
+    const drawingEnabled = getRoomFeatures(room).drawingEnabled || roomAllowsCharadesDraw(room);
+    if (!drawingEnabled) return;
+    if (roomAllowsCharadesDraw(room) && !canDrawCharadesStroke(room, session.currentUser.name)) return;
     const stroke = normalizeWhiteboardStroke(payload);
     if (!stroke) return;
     const current = roomWhiteboards.get(session.currentUser.roomId) || [];
@@ -170,7 +175,10 @@ export function registerExtrasHandlers(socket: Socket, session: RealtimeSession)
   on(socket, 'clear-whiteboard', async () => {
     if (!session.currentUser?.roomId) return;
     const room = await RoomService.getRoom(session.currentUser.roomId);
-    if (!room || !getRoomFeatures(room).drawingEnabled) return;
+    if (!room) return;
+    const drawingEnabled = getRoomFeatures(room).drawingEnabled || roomAllowsCharadesDraw(room);
+    if (!drawingEnabled) return;
+    if (roomAllowsCharadesDraw(room) && !canDrawCharadesStroke(room, session.currentUser.name) && !isRoomAdmin(room, session.currentUser.name)) return;
     roomWhiteboards.set(session.currentUser.roomId, []);
     io.to(session.currentUser.roomId).emit('whiteboard-cleared');
   });

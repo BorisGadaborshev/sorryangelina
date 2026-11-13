@@ -1,6 +1,6 @@
 import type { ClientEventName } from '@sorryangelina/shared';
 import { z } from 'zod';
-import { CARD_REACTION_EMOJIS, COLUMN_COLOR_IDS, DISCUSSION_BURST_EMOJIS } from '../types';
+import { CARD_REACTION_EMOJIS, COLUMN_COLOR_IDS, DISCUSSION_BURST_EMOJIS, PHASES } from '../types';
 
 const id = z.string().trim().min(1).max(200);
 const shortText = z.string().max(500);
@@ -20,7 +20,8 @@ export const eventSchemas: Record<ClientEventName, z.ZodTypeAny> = {
     username: z.string().max(80).optional(),
     token: z.string().max(4000).optional(),
     teamId: z.string().max(200).optional(),
-    template: z.string().max(40).optional()
+    template: z.string().max(40).optional(),
+    warmupQuestions: z.array(z.string().max(200)).max(8).optional()
   }).passthrough(),
   'join-room': z.object({
     roomId: id,
@@ -81,7 +82,7 @@ export const eventSchemas: Record<ClientEventName, z.ZodTypeAny> = {
     emoji: z.enum(CARD_REACTION_EMOJIS)
   }).passthrough(),
   'change-phase': z.object({
-    phase: z.enum(['creation', 'grouping', 'voting', 'discussion', 'roadmap', 'rating'])
+    phase: z.enum(PHASES)
   }).passthrough(),
   'set-column-titles': z.object({
     titles: z.array(z.string().trim().min(1).max(80)).min(1).max(12)
@@ -112,6 +113,12 @@ export const eventSchemas: Record<ClientEventName, z.ZodTypeAny> = {
   'toggle-discussion-hand': z.object({}).passthrough(),
   'submit-retro-rating': z.object({
     value: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)])
+  }).passthrough(),
+  'submit-warmup-answers': z.object({
+    answers: z.array(z.string().max(500)).max(8)
+  }).passthrough(),
+  'set-warmup-questions': z.object({
+    warmupQuestions: z.array(z.string().max(200)).max(8)
   }).passthrough(),
   'show-retro-rating-results': z.object({}).passthrough(),
   'vote-sprint-vip': z.object({ userName: z.string().trim().min(1).max(80) }).passthrough(),
