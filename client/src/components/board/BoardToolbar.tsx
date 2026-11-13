@@ -7,6 +7,7 @@ import SportsEsportsIcon from '@mui/icons-material/SportsEsports';
 import { RetroStore } from '../../store/RetroStore';
 
 export const WHITEBOARD_COLORS = ['#111111', '#006dff', '#00a878', '#ff6b00', '#e11d48', '#7c3aed'];
+export const DEFAULT_WHITEBOARD_COLOR = '#e11d48';
 
 const WHITEBOARD_COLOR_LABELS: Record<string, string> = {
   '#111111': 'Чёрный',

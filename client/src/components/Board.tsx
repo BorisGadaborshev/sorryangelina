@@ -13,7 +13,7 @@ import { readStoredSession } from '../services/session';
 import { mapServerError } from '../utils/errors';
 import BoardHeader from './board/BoardHeader';
 import PhaseContent from './board/PhaseContent';
-import BoardToolbar, { WHITEBOARD_COLORS, WhiteboardTool } from './board/BoardToolbar';
+import BoardToolbar, { DEFAULT_WHITEBOARD_COLOR, WhiteboardTool } from './board/BoardToolbar';
 import { AllReadyDialog, FacilitatorDialog, MoodDialog, RoomRejoinDialog } from './board/BoardDialogs';
 import { getNextPhase, getPhaseLabel } from './board/phases';
 import { isCharadesWarmup } from '../types';
@@ -42,7 +42,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   const [isArkanoidEnabled, setIsArkanoidEnabled] = useState(false);
   const [isCatRunEnabled, setIsCatRunEnabled] = useState(false);
   const [whiteboardTool, setWhiteboardTool] = useState<WhiteboardTool>('pen');
-  const [whiteboardColor, setWhiteboardColor] = useState(WHITEBOARD_COLORS[0]);
+  const [whiteboardColor, setWhiteboardColor] = useState(DEFAULT_WHITEBOARD_COLOR);
   const isMobile = useMediaQuery('(max-width:600px)');
   const isCompactDesktop = useMediaQuery('(max-width:1280px)');
   const [mobileTab, setMobileTab] = useState<number>(0); // 0 - доска, 1 - участники
@@ -131,7 +131,10 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   useEffect(() => {
     if (isCharadesPhase) {
       setIsChatVisible(true);
-      if (canDrawOnBoard) setIsDrawEnabled(true);
+      if (canDrawOnBoard) {
+        setIsDrawEnabled(true);
+        setWhiteboardColor(DEFAULT_WHITEBOARD_COLOR);
+      }
     }
   }, [isCharadesPhase, canDrawOnBoard]);
 
@@ -382,7 +385,11 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                 color={whiteboardColor}
                 onToggleChat={toggleChat}
                 onToggleDraw={() => {
-                  setIsDrawEnabled((prev) => !prev);
+                  setIsDrawEnabled((prev) => {
+                    const next = !prev;
+                    if (next) setWhiteboardColor(DEFAULT_WHITEBOARD_COLOR);
+                    return next;
+                  });
                   setIsArkanoidEnabled(false);
                 }}
                 onToggleArkanoid={() => {
