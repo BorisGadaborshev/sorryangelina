@@ -147,6 +147,7 @@ interface Props {
   onToggleCatRun: () => void;
   onTool: (tool: WhiteboardTool) => void;
   onColor: (color: string) => void;
+  showChat?: boolean;
 }
 
 const ToolGlyph: React.FC<{ children: React.ReactNode }> = ({ children }) => (
@@ -199,7 +200,8 @@ const BoardToolbar: React.FC<Props> = observer(({
   onToggleArkanoid,
   onToggleCatRun,
   onTool,
-  onColor
+  onColor,
+  showChat = true
 }) => {
   const theme = useTheme();
   const isDark = theme.palette.mode === 'dark';
@@ -221,7 +223,7 @@ const BoardToolbar: React.FC<Props> = observer(({
   return (
   <Box sx={{ px: 0.75, py: 0.75, borderTop: '1px solid', borderColor: 'divider', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, justifyContent: 'center' }}>
-      {canUseChat && (
+      {showChat && canUseChat && (
         <ChatToolbarButton
           active={isChatVisible}
           unread={store.unreadChatCount}

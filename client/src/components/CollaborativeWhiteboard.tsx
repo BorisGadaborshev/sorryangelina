@@ -13,6 +13,7 @@ interface Props {
 const CollaborativeWhiteboard: React.FC<Props> = observer(({ store, enabled, tool, color }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawingRef = useRef(false);
+  const activePointerRef = useRef<number | null>(null);
   const activePointsRef = useRef<WhiteboardPoint[]>([]);
 
   const lineWidth = useMemo(() => (tool === 'eraser' ? 20 : 3), [tool]);
@@ -23,8 +24,8 @@ const CollaborativeWhiteboard: React.FC<Props> = observer(({ store, enabled, too
     const parent = canvas.parentElement;
     if (!parent) return;
     const dpr = window.devicePixelRatio || 1;
-    const width = Math.max(300, Math.floor(parent.clientWidth));
-    const height = Math.max(240, Math.floor(parent.clientHeight));
+    const width = Math.max(1, Math.floor(parent.clientWidth));
+    const height = Math.max(1, Math.floor(parent.clientHeight));
     canvas.style.width = `${width}px`;
     canvas.style.height = `${height}px`;
     canvas.width = Math.floor(width * dpr);
@@ -76,7 +77,13 @@ const CollaborativeWhiteboard: React.FC<Props> = observer(({ store, enabled, too
       redraw();
     };
     window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
+    const parent = canvasRef.current?.parentElement;
+    const observer = parent ? new ResizeObserver(onResize) : null;
+    if (parent) observer?.observe(parent);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      observer?.disconnect();
+    };
   }, [redraw, resizeCanvas]);
 
   useEffect(() => {
@@ -96,7 +103,7 @@ const CollaborativeWhiteboard: React.FC<Props> = observer(({ store, enabled, too
     drawnCountRef.current = strokes.length;
   }, [drawStroke, redraw, store.whiteboardStrokes.length]);
 
-  const getPoint = (event: React.MouseEvent<HTMLCanvasElement>): WhiteboardPoint | null => {
+  const getPoint = (event: { clientX: number; clientY: number }): WhiteboardPoint | null => {
     const canvas = canvasRef.current;
     if (!canvas) return null;
     const rect = canvas.getBoundingClientRect();
@@ -121,25 +128,40 @@ const CollaborativeWhiteboard: React.FC<Props> = observer(({ store, enabled, too
     });
   };
 
-  const handleMouseDown = (event: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!enabled) return;
-    const point = getPoint(event);
-    if (!point) return;
-    drawingRef.current = true;
-    activePointsRef.current = [point];
-  };
-
-  const handleMouseMove = (event: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!drawingRef.current) return;
+  const appendPoint = (event: { clientX: number; clientY: number }) => {
     const point = getPoint(event);
     if (!point) return;
     activePointsRef.current.push(point);
     previewSegment(activePointsRef.current);
   };
 
-  const finishStroke = () => {
-    if (!drawingRef.current) return;
+  const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!enabled || !event.isPrimary || event.button !== 0) return;
+    const point = getPoint(event);
+    if (!point) return;
+    event.preventDefault();
+    drawingRef.current = true;
+    activePointerRef.current = event.pointerId;
+    activePointsRef.current = [point];
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Some browsers refuse capture until the pointer is active.
+    }
+  };
+
+  const handlePointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!drawingRef.current || event.pointerId !== activePointerRef.current) return;
+    event.preventDefault();
+    const native = event.nativeEvent;
+    const samples = typeof native.getCoalescedEvents === 'function' ? native.getCoalescedEvents() : [];
+    (samples.length > 0 ? samples : [native]).forEach((sample) => appendPoint(sample));
+  };
+
+  const finishStroke = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (event.pointerId !== activePointerRef.current) return;
     drawingRef.current = false;
+    activePointerRef.current = null;
     const points = activePointsRef.current;
     activePointsRef.current = [];
     if (points.length < 2 || !store.currentUser) {
@@ -161,13 +183,18 @@ const CollaborativeWhiteboard: React.FC<Props> = observer(({ store, enabled, too
   return (
     <canvas
       ref={canvasRef}
-      onMouseDown={handleMouseDown}
-      onMouseMove={handleMouseMove}
-      onMouseUp={finishStroke}
-      onMouseLeave={finishStroke}
+      data-whiteboard="board"
+      aria-label="Холст для рисования"
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={finishStroke}
+      onPointerCancel={finishStroke}
+      onContextMenu={(event) => event.preventDefault()}
       style={{
         position: 'absolute',
         inset: 0,
+        touchAction: 'none',
+        userSelect: 'none',
         pointerEvents: enabled ? 'auto' : 'none',
         cursor: enabled ? (tool === 'eraser' ? 'cell' : 'crosshair') : 'default',
         zIndex: 3

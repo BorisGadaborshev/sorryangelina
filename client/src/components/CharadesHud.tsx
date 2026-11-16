@@ -5,9 +5,10 @@ import { RetroStore } from '../store/RetroStore';
 
 interface Props {
   store: RetroStore;
+  compact?: boolean;
 }
 
-const CharadesHud: React.FC<Props> = observer(({ store }) => {
+const CharadesHud: React.FC<Props> = observer(({ store, compact = false }) => {
   const game = store.charades;
   const myName = store.currentUser?.name;
   const isDrawer = Boolean(myName && game.drawerName === myName);
@@ -30,8 +31,8 @@ const CharadesHud: React.FC<Props> = observer(({ store }) => {
     <Paper
       elevation={0}
       sx={{
-        px: 1.5,
-        py: 1.1,
+        px: compact ? 1.25 : 1.5,
+        py: compact ? 0.75 : 1.1,
         borderRadius: 2,
         border: '1px solid',
         borderColor: 'divider',
@@ -46,7 +47,7 @@ const CharadesHud: React.FC<Props> = observer(({ store }) => {
       <Typography variant="body2" color="text.secondary" sx={{ mt: 0.35 }}>
         {detail}
       </Typography>
-      {scores.reduce((sum, entry) => sum + entry.score, 0) > 0 && (
+      {!compact && scores.reduce((sum, entry) => sum + entry.score, 0) > 0 && (
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
           С каждым угаданным словом задания становятся сложнее: вещи, затем явления, затем эмоции.
         </Typography>
@@ -63,7 +64,7 @@ const CharadesHud: React.FC<Props> = observer(({ store }) => {
           ))}
         </Box>
       )}
-      <Typography variant="body2" sx={{ mt: 1, fontWeight: 700 }}>
+      <Typography variant={compact ? 'caption' : 'body2'} sx={{ mt: compact ? 0.5 : 1, fontWeight: 700, display: 'block' }}>
         Чтобы закончить игру, перейдите на этап «Создание».
       </Typography>
     </Paper>

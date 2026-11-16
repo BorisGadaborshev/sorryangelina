@@ -33,7 +33,7 @@ const MobileBoardHeader: React.FC<Props> = observer(({
   onOpenSettings,
   onTab
 }) => {
-  const readyEnabled = store.roomFeatures.readyEnabled;
+  const readyEnabled = store.roomFeatures.readyEnabled && store.phase !== 'warmup';
   const currentUser = store.currentUser;
 
   return (

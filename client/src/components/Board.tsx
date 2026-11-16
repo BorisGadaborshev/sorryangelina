@@ -84,7 +84,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
 
   const features = store.roomFeatures;
   const isCharadesPhase = store.phase === 'warmup' && isCharadesWarmup(store.room?.warmupQuestions);
-  const canDrawOnBoard = !isMobile
+  const canDrawOnBoard = (!isMobile || isCharadesPhase)
     && (features.drawingEnabled || isCharadesPhase)
     && (store.phase === 'creation' || store.phase === 'grouping' || store.phase === 'voting' || isCharadesPhase);
   const canPlayArkanoid = !isMobile
@@ -238,6 +238,55 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   );
 
   const toggleChat = () => setIsChatVisible(!isChatVisible);
+  const toggleDraw = () => {
+    setIsDrawEnabled((prev) => {
+      const next = !prev;
+      if (next) setWhiteboardColor(DEFAULT_WHITEBOARD_COLOR);
+      return next;
+    });
+    setIsArkanoidEnabled(false);
+  };
+  const whiteboard = canDrawOnBoard && isDrawEnabled && !isArkanoidEnabled ? (
+    <ErrorBoundary title="Доску для рисования не удалось показать">
+      <Suspense fallback={null}>
+        <CollaborativeWhiteboard
+          store={store}
+          enabled
+          tool={whiteboardTool}
+          color={whiteboardColor}
+        />
+      </Suspense>
+    </ErrorBoundary>
+  ) : null;
+  const renderDrawToolbar = (showChat: boolean) => (
+    <BoardToolbar
+      store={store}
+      canUseChat={canUseChat}
+      canDraw={canDrawOnBoard}
+      canPlayArkanoid={canPlayArkanoid}
+      canPlayCatRun={canPlayCatRun}
+      isChatVisible={isChatVisible}
+      isDrawEnabled={isDrawEnabled}
+      isArkanoidEnabled={isArkanoidEnabled}
+      isCatRunEnabled={isCatRunEnabled}
+      tool={whiteboardTool}
+      color={whiteboardColor}
+      showChat={showChat}
+      onToggleChat={toggleChat}
+      onToggleDraw={toggleDraw}
+      onToggleArkanoid={() => {
+        setIsArkanoidEnabled((prev) => !prev);
+        setIsDrawEnabled(false);
+        setIsCatRunEnabled(false);
+      }}
+      onToggleCatRun={() => {
+        setIsCatRunEnabled((prev) => !prev);
+        setIsArkanoidEnabled(false);
+      }}
+      onTool={setWhiteboardTool}
+      onColor={setWhiteboardColor}
+    />
+  );
 
   return (
     <Box sx={{ height: '100vh', maxHeight: '100vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
@@ -319,18 +368,47 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                 />
               </Box>
             ) : (
-              <Box data-cat-run-board sx={{ flexGrow: 1, minHeight: 0, overflowY: 'auto', position: 'relative' }}>
-                {isCharadesPhase && (
-                  <Box sx={{ position: 'sticky', top: 0, zIndex: 2, mb: 1, pointerEvents: 'none' }}>
-                    <CharadesHud store={store} />
+              isCharadesPhase ? (
+              <Box
+                data-cat-run-board
+                sx={{
+                  flexGrow: 1,
+                  minHeight: 0,
+                  overflow: 'hidden',
+                  position: 'relative',
+                  display: 'flex',
+                  flexDirection: 'column'
+                }}
+              >
+                <Box sx={{ flexShrink: 0, zIndex: 4, mb: 0.75 }}>
+                  <CharadesHud store={store} compact />
+                </Box>
+                {canDrawOnBoard && (
+                  <Box sx={{
+                    flexShrink: 0,
+                    mb: 1,
+                    bgcolor: 'background.paper',
+                    borderRadius: '12px',
+                    border: '1px solid',
+                    borderColor: 'divider'
+                  }}>
+                    {renderDrawToolbar(false)}
                   </Box>
                 )}
+                <Box sx={{ flexGrow: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }}>
+                  {renderContent()}
+                  {whiteboard}
+                </Box>
+              </Box>
+              ) : (
+              <Box data-cat-run-board sx={{ flexGrow: 1, minHeight: 0, overflowY: 'auto', position: 'relative' }}>
                 {renderContent()}
               </Box>
+              )
             )}
             {canUseChat && isChatVisible && (
               <Box sx={{ flexShrink: 0 }}>
-                <ChatTerminal store={store} compact />
+                <ChatTerminal store={store} compact height={isCharadesPhase ? 148 : undefined} />
               </Box>
             )}
           </Box>
@@ -371,39 +449,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                   showReadyControl={readyEnabled}
                 />
               </Box>
-              <BoardToolbar
-                store={store}
-                canUseChat={canUseChat}
-                canDraw={canDrawOnBoard}
-                canPlayArkanoid={canPlayArkanoid}
-                canPlayCatRun={canPlayCatRun}
-                isChatVisible={isChatVisible}
-                isDrawEnabled={isDrawEnabled}
-                isArkanoidEnabled={isArkanoidEnabled}
-                isCatRunEnabled={isCatRunEnabled}
-                tool={whiteboardTool}
-                color={whiteboardColor}
-                onToggleChat={toggleChat}
-                onToggleDraw={() => {
-                  setIsDrawEnabled((prev) => {
-                    const next = !prev;
-                    if (next) setWhiteboardColor(DEFAULT_WHITEBOARD_COLOR);
-                    return next;
-                  });
-                  setIsArkanoidEnabled(false);
-                }}
-                onToggleArkanoid={() => {
-                  setIsArkanoidEnabled((prev) => !prev);
-                  setIsDrawEnabled(false);
-                  setIsCatRunEnabled(false);
-                }}
-                onToggleCatRun={() => {
-                  setIsCatRunEnabled((prev) => !prev);
-                  setIsArkanoidEnabled(false);
-                }}
-                onTool={setWhiteboardTool}
-                onColor={setWhiteboardColor}
-              />
+              {renderDrawToolbar(true)}
             </Box>
             <Box
               data-cat-run-board
@@ -417,18 +463,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
               <Box sx={{ height: '100%', overflow: 'auto', overflowX: 'hidden' }}>
                 {renderContent()}
               </Box>
-              {canDrawOnBoard && isDrawEnabled && !isArkanoidEnabled && (
-                <ErrorBoundary title="Доску для рисования не удалось показать">
-                  <Suspense fallback={null}>
-                    <CollaborativeWhiteboard
-                      store={store}
-                      enabled
-                      tool={whiteboardTool}
-                      color={whiteboardColor}
-                    />
-                  </Suspense>
-                </ErrorBoundary>
-              )}
+              {whiteboard}
               {isCharadesPhase && (
                 <Box sx={{ position: 'absolute', top: 8, left: 8, right: 8, zIndex: 8, pointerEvents: 'none' }}>
                   <CharadesHud store={store} />

@@ -6,9 +6,10 @@ import { RetroStore } from '../store/RetroStore';
 interface Props {
   store: RetroStore;
   compact?: boolean;
+  height?: number;
 }
 
-const ChatTerminal: React.FC<Props> = observer(({ store, compact = false }) => {
+const ChatTerminal: React.FC<Props> = observer(({ store, compact = false, height }) => {
   const [draft, setDraft] = useState('');
 
   const messages = store.chatMessages.slice(-200);
@@ -25,8 +26,8 @@ const ChatTerminal: React.FC<Props> = observer(({ store, compact = false }) => {
       sx={{
         display: 'flex',
         flexDirection: 'column',
-        height: compact ? 220 : '100%',
-        minHeight: compact ? 220 : 0,
+        height: height ?? (compact ? 220 : '100%'),
+        minHeight: height ?? (compact ? 220 : 0),
         bgcolor: '#0f111a',
         color: '#d7e0ea',
         borderRadius: 1,
