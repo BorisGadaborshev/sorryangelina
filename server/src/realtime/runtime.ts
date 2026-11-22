@@ -24,6 +24,7 @@ import {
   visibleWarmupQuestions
 } from '../types';
 import { clearCharades, ensureCharadesPlaying, restoreCharades, serializeCharades } from './charades';
+import { RealtimeSession } from './session';
 import { normalizeRoomFeatures } from '../utils/roomFeatures';
 import { RoomCache } from '../services/RoomCache';
 import { RoomService } from '../services/RoomService';
@@ -280,7 +281,7 @@ export const roomUserSocketPresence = new Map<string, Map<string, Set<string>>>(
 export const pendingUserDepartures = new Map<string, ReturnType<typeof setTimeout>>();
 export const USER_DISCONNECT_GRACE_MS = Math.max(
   0,
-  Number(process.env.USER_DISCONNECT_GRACE_MS) || 5 * 60 * 1000
+  Number(process.env.USER_DISCONNECT_GRACE_MS) || 30 * 60 * 1000
 );
 
 export const userPresenceKey = (roomId: string, userName: string): string => `${roomId}:${userName}`;
@@ -851,6 +852,38 @@ export const schedulePendingUserDeparture = (user: User, roomId: string): void =
     void persistUserLeave(user, roomId, { requireAbsent: true });
   }, USER_DISCONNECT_GRACE_MS);
   pendingUserDepartures.set(key, timeout);
+};
+
+export const restoreRecoveredPresence = (socket: Socket, session: RealtimeSession): void => {
+  if (!socket.recovered) return;
+  const roomId = typeof socket.data.roomId === 'string' ? socket.data.roomId : '';
+  const userName = typeof socket.data.userName === 'string' ? socket.data.userName : '';
+  const userId = typeof socket.data.userId === 'string' ? socket.data.userId : socket.id;
+  if (!roomId || !userName) return;
+
+  // The previous socket already scheduled removal. Cancel it before the membership lookup,
+  // otherwise a slow read still drops the user who just came back.
+  addRoomPresence(roomId, userName, socket.id);
+  logger.debug({ roomId, userName, socketId: socket.id }, 'recovered socket, presence restored');
+
+  void (async () => {
+    try {
+      const room = await RoomService.getRoom(roomId);
+      const user = room?.users.find((entry) => entry.name === userName || entry.id === userId);
+      if (!room || !user) {
+        removeRoomPresence(roomId, userName, socket.id);
+        session.currentUser = null;
+        socket.emit('session-expired');
+        return;
+      }
+      session.currentUser = { ...user, roomId };
+      socket.data.userId = user.id;
+      socket.data.userName = user.name;
+      socket.data.roomId = roomId;
+    } catch (error) {
+      logger.error({ err: error, roomId }, 'failed to restore recovered session');
+    }
+  })();
 };
 
 export const handleUserDisconnect = (socket: Socket, user: User): void => {

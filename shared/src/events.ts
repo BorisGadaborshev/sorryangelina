@@ -236,6 +236,7 @@ export interface ClientToServerEvents {
   'cat-run-score': (payload: CatRunScorePayload) => void;
   'set-user-mood': (payload: MoodPayload) => void;
   'send-chat-message': (payload: ChatPayload) => void;
+  'reveal-charades-word': (payload?: EmptyPayload) => void;
   'whiteboard-stroke': (payload: WhiteboardStroke) => void;
   'clear-whiteboard': (payload?: EmptyPayload) => void;
   'set-room-background': (payload: BackgroundPayload) => void;

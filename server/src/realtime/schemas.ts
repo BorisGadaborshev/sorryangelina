@@ -134,6 +134,7 @@ export const eventSchemas: Record<ClientEventName, z.ZodTypeAny> = {
     mood: z.enum(['great', 'good', 'neutral', 'bad', 'awful'])
   }).passthrough(),
   'send-chat-message': z.object({ text: shortText }).passthrough(),
+  'reveal-charades-word': z.object({}).passthrough(),
   'whiteboard-stroke': z.object({}).passthrough(),
   'clear-whiteboard': z.object({}).passthrough(),
   'set-room-background': z.object({

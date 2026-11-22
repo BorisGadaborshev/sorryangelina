@@ -8,7 +8,7 @@ import { registerHttpRoutes } from './http/routes';
 import { attachRealtime } from './realtime/io';
 import { corsOrigin } from './config/cors';
 import { pool } from './config/database';
-import { io as boundIo } from './realtime/runtime';
+import { io as boundIo, USER_DISCONNECT_GRACE_MS } from './realtime/runtime';
 import { RoomService } from './services/RoomService';
 import { logger } from './utils/logger';
 import {
@@ -47,7 +47,7 @@ const io = new Server(httpServer, {
   upgradeTimeout: 10000,
   allowEIO3: true,
   connectionStateRecovery: {
-    maxDisconnectionDuration: 2 * 60 * 1000,
+    maxDisconnectionDuration: USER_DISCONNECT_GRACE_MS,
     skipMiddlewares: true
   }
 });

@@ -148,6 +148,7 @@ interface Props {
   onTool: (tool: WhiteboardTool) => void;
   onColor: (color: string) => void;
   showChat?: boolean;
+  toolsOnly?: boolean;
 }
 
 const ToolGlyph: React.FC<{ children: React.ReactNode }> = ({ children }) => (
@@ -201,7 +202,8 @@ const BoardToolbar: React.FC<Props> = observer(({
   onToggleCatRun,
   onTool,
   onColor,
-  showChat = true
+  showChat = true,
+  toolsOnly = false
 }) => {
   const theme = useTheme();
   const isDark = theme.palette.mode === 'dark';
@@ -220,65 +222,7 @@ const BoardToolbar: React.FC<Props> = observer(({
     },
   });
 
-  return (
-  <Box sx={{ px: 0.75, py: 0.75, borderTop: '1px solid', borderColor: 'divider', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
-    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, justifyContent: 'center' }}>
-      {showChat && canUseChat && (
-        <ChatToolbarButton
-          active={isChatVisible}
-          unread={store.unreadChatCount}
-          onClick={onToggleChat}
-        />
-      )}
-      {canDraw && (
-        <Tooltip title={isDrawEnabled ? 'Выключить рисование' : 'Включить рисование'}>
-          <IconButton
-            size="small"
-            color="default"
-            aria-label={isDrawEnabled ? 'Выключить рисование' : 'Включить рисование'}
-            aria-pressed={isDrawEnabled}
-            onClick={onToggleDraw}
-            sx={chatButtonSx(isDrawEnabled)}
-          >
-            <BrushIcon sx={{ fontSize: 20 }} />
-          </IconButton>
-        </Tooltip>
-      )}
-      {canPlayArkanoid && (
-        <Tooltip title={isArkanoidEnabled ? 'Выйти из Arkanoid' : 'Запустить Arkanoid'}>
-          <IconButton
-            size="small"
-            color={isArkanoidEnabled ? 'primary' : 'default'}
-            aria-label={isArkanoidEnabled ? 'Выйти из Arkanoid' : 'Запустить Arkanoid'}
-            onClick={onToggleArkanoid}
-          >
-            <SportsEsportsIcon fontSize="small" />
-          </IconButton>
-        </Tooltip>
-      )}
-      {canPlayCatRun && (
-        <Tooltip title={isCatRunEnabled ? 'Выйти из игры с котом' : 'Запустить игру с котом'}>
-          <IconButton
-            size="small"
-            color={isCatRunEnabled ? 'primary' : 'default'}
-            aria-label={isCatRunEnabled ? 'Выйти из игры с котом' : 'Запустить игру с котом'}
-            onClick={(event) => {
-              event.currentTarget.blur();
-              onToggleCatRun();
-            }}
-            onKeyDown={(event) => {
-              if (event.code === 'Space' || event.code === 'ArrowUp') {
-                event.preventDefault();
-              }
-            }}
-            sx={chatButtonSx(isCatRunEnabled)}
-          >
-            <CatRunToolbarIcon />
-          </IconButton>
-        </Tooltip>
-      )}
-    </Box>
-    {canDraw && isDrawEnabled && (
+  const drawTools = canDraw && isDrawEnabled && (
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.75, width: '100%', minWidth: 0 }}>
           <Box
             sx={{
@@ -361,7 +305,75 @@ const BoardToolbar: React.FC<Props> = observer(({
             </IconButton>
           </Tooltip>
         </Box>
-    )}
+  );
+
+  if (toolsOnly) {
+    return (
+      <Box sx={{ px: 0.75, py: 0.5, display: 'flex', justifyContent: 'center', bgcolor: 'background.paper' }}>
+        {drawTools}
+      </Box>
+    );
+  }
+
+  return (
+  <Box sx={{ px: 0.75, py: 0.75, borderTop: '1px solid', borderColor: 'divider', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, justifyContent: 'center' }}>
+      {showChat && canUseChat && (
+        <ChatToolbarButton
+          active={isChatVisible}
+          unread={store.unreadChatCount}
+          onClick={onToggleChat}
+        />
+      )}
+      {canDraw && (
+        <Tooltip title={isDrawEnabled ? 'Выключить рисование' : 'Включить рисование'}>
+          <IconButton
+            size="small"
+            color="default"
+            aria-label={isDrawEnabled ? 'Выключить рисование' : 'Включить рисование'}
+            aria-pressed={isDrawEnabled}
+            onClick={onToggleDraw}
+            sx={chatButtonSx(isDrawEnabled)}
+          >
+            <BrushIcon sx={{ fontSize: 20 }} />
+          </IconButton>
+        </Tooltip>
+      )}
+      {canPlayArkanoid && (
+        <Tooltip title={isArkanoidEnabled ? 'Выйти из Arkanoid' : 'Запустить Arkanoid'}>
+          <IconButton
+            size="small"
+            color={isArkanoidEnabled ? 'primary' : 'default'}
+            aria-label={isArkanoidEnabled ? 'Выйти из Arkanoid' : 'Запустить Arkanoid'}
+            onClick={onToggleArkanoid}
+          >
+            <SportsEsportsIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      )}
+      {canPlayCatRun && (
+        <Tooltip title={isCatRunEnabled ? 'Выйти из игры с котом' : 'Запустить игру с котом'}>
+          <IconButton
+            size="small"
+            color={isCatRunEnabled ? 'primary' : 'default'}
+            aria-label={isCatRunEnabled ? 'Выйти из игры с котом' : 'Запустить игру с котом'}
+            onClick={(event) => {
+              event.currentTarget.blur();
+              onToggleCatRun();
+            }}
+            onKeyDown={(event) => {
+              if (event.code === 'Space' || event.code === 'ArrowUp') {
+                event.preventDefault();
+              }
+            }}
+            sx={chatButtonSx(isCatRunEnabled)}
+          >
+            <CatRunToolbarIcon />
+          </IconButton>
+        </Tooltip>
+      )}
+    </Box>
+    {drawTools}
   </Box>
   );
 });

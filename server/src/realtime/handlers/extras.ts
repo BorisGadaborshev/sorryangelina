@@ -9,7 +9,7 @@ import { ContentModerationError } from '../../services/ContentModeration';
 import { logger } from '../../utils/logger';
 import { isRoomAdmin, moderateRoomText } from '../access';
 import { ChatMessage } from '../../types';
-import { canDrawCharadesStroke, roomAllowsCharadesChat, roomAllowsCharadesDraw, tryCharadesGuess } from '../charades';
+import { canDrawCharadesStroke, revealCharadesWord, roomAllowsCharadesChat, roomAllowsCharadesDraw, tryCharadesGuess } from '../charades';
 import {
   appendChatMessage,
   cancelPendingUserDeparture,
@@ -153,6 +153,14 @@ export function registerExtrasHandlers(socket: Socket, session: RealtimeSession)
     appendChatMessage(session.currentUser.roomId, message);
     io.to(session.currentUser.roomId).emit('chat-message', message);
     await tryCharadesGuess(room, session.currentUser.name, message.text);
+  });
+
+
+  on(socket, 'reveal-charades-word', async () => {
+    if (!session.currentUser?.roomId) return;
+    const room = await RoomService.getRoom(session.currentUser.roomId);
+    if (!room) return;
+    await revealCharadesWord(room, session.currentUser.name);
   });
 
 

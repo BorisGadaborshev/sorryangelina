@@ -1,6 +1,6 @@
 import { Server } from 'socket.io';
 import { registerSocketHandlers } from './handlers';
-import { adjustConnectionCount, bindIo } from './runtime';
+import { adjustConnectionCount, bindIo, restoreRecoveredPresence } from './runtime';
 import { RealtimeSession } from './session';
 import { verifyAuthToken } from '../config/jwt';
 import { bindRoomSync } from './roomSync';
@@ -28,9 +28,10 @@ export function attachRealtime(server: Server): void {
 
   server.on('connection', (socket) => {
     const connectionCount = adjustConnectionCount(1);
-    logger.info({ socketId: socket.id, connectionCount }, 'client connected');
+    logger.info({ socketId: socket.id, recovered: socket.recovered, connectionCount }, 'client connected');
 
     const session: RealtimeSession = { currentUser: null };
+    restoreRecoveredPresence(socket, session);
     registerSocketHandlers(socket, session);
     socket.on('disconnect', () => {
       clearEventRateLimit(socket.id);

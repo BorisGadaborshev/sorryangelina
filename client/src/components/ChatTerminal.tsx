@@ -7,9 +7,17 @@ interface Props {
   store: RetroStore;
   compact?: boolean;
   height?: number;
+  showMessages?: boolean;
+  placeholder?: string;
 }
 
-const ChatTerminal: React.FC<Props> = observer(({ store, compact = false, height }) => {
+const ChatTerminal: React.FC<Props> = observer(({
+  store,
+  compact = false,
+  height,
+  showMessages = true,
+  placeholder = 'Введите сообщение...'
+}) => {
   const [draft, setDraft] = useState('');
 
   const messages = store.chatMessages.slice(-200);
@@ -26,8 +34,8 @@ const ChatTerminal: React.FC<Props> = observer(({ store, compact = false, height
       sx={{
         display: 'flex',
         flexDirection: 'column',
-        height: height ?? (compact ? 220 : '100%'),
-        minHeight: height ?? (compact ? 220 : 0),
+        height: showMessages ? (height ?? (compact ? 220 : '100%')) : 'auto',
+        minHeight: showMessages ? (height ?? (compact ? 220 : 0)) : 0,
         bgcolor: '#0f111a',
         color: '#d7e0ea',
         borderRadius: 1,
@@ -36,12 +44,15 @@ const ChatTerminal: React.FC<Props> = observer(({ store, compact = false, height
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace'
       }}
     >
+      {showMessages && (
       <Box sx={{ px: 1.25, py: 0.75, borderBottom: '1px solid rgba(255,255,255,0.1)', bgcolor: '#151a26' }}>
         <Typography variant="caption" sx={{ fontFamily: 'inherit', color: '#9bd0a6' }}>
           retro-chat@room:{store.room?.id || '---'}
         </Typography>
       </Box>
+      )}
 
+      {showMessages && (
       <Box sx={{ flex: 1, overflowY: 'auto', p: 1.25 }}>
         {messages.length === 0 ? (
           <Typography variant="caption" sx={{ color: '#8b93a7', fontFamily: 'inherit' }}>
@@ -60,12 +71,13 @@ const ChatTerminal: React.FC<Props> = observer(({ store, compact = false, height
           ))
         )}
       </Box>
+      )}
 
-      <Box sx={{ p: 1, borderTop: '1px solid rgba(255,255,255,0.1)', bgcolor: '#151a26', display: 'flex', gap: 1 }}>
+      <Box sx={{ p: 1, borderTop: showMessages ? '1px solid rgba(255,255,255,0.1)' : 0, bgcolor: '#151a26', display: 'flex', gap: 1 }}>
         <TextField
           size="small"
           fullWidth
-          placeholder="Введите сообщение..."
+          placeholder={placeholder}
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {

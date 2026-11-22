@@ -38,8 +38,10 @@ import {
 
 export function registerSessionHandlers(socket: Socket, session: RealtimeSession): void {
   on(socket, 'sync-room', async () => {
-    if (!session.currentUser?.roomId) return;
-    const room = await RoomService.getRoom(session.currentUser.roomId);
+    const roomId = session.currentUser?.roomId
+      || (typeof socket.data.roomId === 'string' ? socket.data.roomId : '');
+    if (!roomId) return;
+    const room = await RoomService.getRoom(roomId);
     if (!room) return;
     socket.emit('state-updated', {
       cards: room.cards,

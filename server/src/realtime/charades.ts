@@ -225,6 +225,20 @@ const scheduleNextRound = (roomId: string): void => {
   nextRoundTimers.set(roomId, timeout);
 };
 
+export const revealCharadesWord = async (room: Room, userName: string): Promise<void> => {
+  if (!isCharadesPhase(room)) return;
+  const game = getCharadesRoomState(room.id);
+  if (game.status !== 'playing' || !game.word || game.drawerName !== userName) return;
+
+  game.status = 'guessed';
+  game.winnerName = null;
+  game.lastWord = game.word;
+  game.word = null;
+  await persistRoomEphemeral(room.id);
+  await emitCharadesStateToRoom(room.id);
+  scheduleNextRound(room.id);
+};
+
 export const tryCharadesGuess = async (room: Room, userName: string, text: string): Promise<void> => {
   if (!isCharadesPhase(room)) return;
   const game = getCharadesRoomState(room.id);

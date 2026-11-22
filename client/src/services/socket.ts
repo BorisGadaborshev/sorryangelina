@@ -28,7 +28,7 @@ export class SocketService {
   private static readonly SHORT_AWAY_MS = 15000;
   private static readonly RESUME_DEBOUNCE_MS = 300;
   private static readonly RESTORE_TIMEOUT_MS = 5000;
-  private static readonly OVERLAY_DELAY_MS = 1500;
+  private static readonly QUIET_STATUS_MS = 8000;
 
   constructor(store: RetroStore) {
     log.debug('Initializing socket connection...');
@@ -69,6 +69,13 @@ export class SocketService {
 
     this.socket.io.on('reconnect', () => {
       log.debug('Socket reconnected');
+      if (this.socket.recovered && this.store.canRenderBoard) {
+        this.restoredSocketId = this.socket.id ?? null;
+        this.sessionSyncRequired = false;
+        this.clearReconnecting();
+        return;
+      }
+      if (this.restoredSocketId === this.socket.id && !this.sessionSyncRequired) return;
       this.sessionSyncRequired = true;
       this.restoredSocketId = null;
     });
@@ -87,10 +94,13 @@ export class SocketService {
       this.store.flushBoardState();
       this.sessionSyncRequired = true;
       this.restoredSocketId = null;
-      this.store.setConnectionStatus('reconnecting');
       if (!this.store.canRenderBoard) {
+        this.store.setConnectionStatus('reconnecting');
         this.store.setReconnecting(true);
+        return;
       }
+      if (document.visibilityState === 'hidden') return;
+      this.scheduleVisibleStatus();
     });
 
     this.bindLifecycleHandlers();
@@ -136,19 +146,23 @@ export class SocketService {
     this.restoredSocketId = this.socket.id ?? null;
   }
 
+  private scheduleVisibleStatus(): void {
+    if (this.overlayTimer != null) return;
+    this.overlayTimer = window.setTimeout(() => {
+      this.overlayTimer = null;
+      if (this.socket.connected && this.restoredSocketId === this.socket.id && !this.sessionSyncRequired) return;
+      if (document.visibilityState === 'hidden') return;
+      this.store.setConnectionStatus('reconnecting');
+    }, SocketService.QUIET_STATUS_MS);
+  }
+
   private markReconnecting(): void {
     if (!this.store.canRenderBoard) {
       this.store.setConnectionStatus('reconnecting');
       this.store.setReconnecting(true);
       return;
     }
-    if (this.overlayTimer != null) return;
-    this.overlayTimer = window.setTimeout(() => {
-      this.overlayTimer = null;
-      if (this.restoredSocketId === this.socket.id && !this.sessionSyncRequired && this.socket.connected) return;
-      this.store.setConnectionStatus('reconnecting');
-      this.store.setReconnecting(true);
-    }, SocketService.OVERLAY_DELAY_MS);
+    this.scheduleVisibleStatus();
   }
 
   private clearReconnecting(): void {
@@ -182,6 +196,14 @@ export class SocketService {
     this.socket.on('error', (error: string) => {
       log.debug('Server error:', error);
       this.store.setError(mapServerError(error));
+    });
+
+    this.socket.on('session-expired', () => {
+      if (this.isRestoringSession) return;
+      if (!this.activeSession()) return;
+      this.sessionSyncRequired = true;
+      this.restoredSocketId = null;
+      void this.attemptSessionRestore();
     });
 
     this.socket.on('kicked', () => {
@@ -417,19 +439,16 @@ export class SocketService {
       this.store.hydrateBoardFromCache();
     }
 
-    if (!this.socket.connected || kind === 'online' || kind === 'bfcache') {
-      if (!this.socket.connected) {
-        this.forceReconnect();
-        return;
-      }
-    }
-
-    if (this.socket.connected && kind === 'hide' && away < SocketService.SHORT_AWAY_MS) {
+    if (!this.socket.connected) {
+      this.forceReconnect();
       return;
     }
 
-    this.sessionSyncRequired = true;
-    await this.attemptSessionRestore();
+    if (kind === 'hide' && away < SocketService.SHORT_AWAY_MS) return;
+
+    // The socket is still the same session. Pull current board state without
+    // rebinding the user or showing a reconnect screen.
+    this.socket.emit('sync-room');
   }
 
   private async attemptSessionRestore(): Promise<void> {
@@ -737,6 +756,10 @@ export class SocketService {
 
   sendChatMessage(text: string): void {
     this.socket.emit('send-chat-message', { text });
+  }
+
+  revealCharadesWord(): void {
+    this.socket.emit('reveal-charades-word');
   }
 
   setUserMood(mood: Mood): void {

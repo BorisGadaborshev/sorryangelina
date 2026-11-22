@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import React, { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { observer } from 'mobx-react-lite';
 import { Box, Typography, CircularProgress, useMediaQuery, Snackbar, Alert } from '@mui/material';
 import UserList from './UserList';
@@ -25,6 +25,7 @@ import FloorCat from './FloorCat';
 import BoardWeather from './BoardWeather';
 
 const CollaborativeWhiteboard = lazy(() => import('./CollaborativeWhiteboard'));
+const CharadesDrawStudio = lazy(() => import('./CharadesDrawStudio'));
 const ArkanoidGame = lazy(() => import('./ArkanoidGame'));
 const CatRunGame = lazy(() => import('./CatRunGame'));
 
@@ -52,6 +53,9 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
   const [rejoinError, setRejoinError] = useState<string | null>(null);
   const [isRejoining, setIsRejoining] = useState(false);
   const [isMusicWidgetOpen, setIsMusicWidgetOpen] = useState(false);
+  const [charadesStudioOpen, setCharadesStudioOpen] = useState(false);
+  const charadesWasActiveRef = useRef(false);
+  const wasCharadesDrawerRef = useRef(false);
   const [timerMusicVolume, setTimerMusicVolume] = useState(() => {
     const saved = localStorage.getItem('timerMusicVolume');
     const parsed = saved ? Number(saved) : 0.35;
@@ -128,6 +132,13 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
     return () => store.setChatPanelOpen(false);
   }, [store, canUseChat, isChatVisible]);
 
+  const isCharadesDrawer = Boolean(
+    isCharadesPhase
+    && store.charades.status === 'playing'
+    && store.currentUser?.name
+    && store.charades.drawerName === store.currentUser.name
+  );
+
   useEffect(() => {
     if (isCharadesPhase) {
       setIsChatVisible(true);
@@ -137,6 +148,26 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
       }
     }
   }, [isCharadesPhase, canDrawOnBoard]);
+
+  useEffect(() => {
+    if (!isMobile) {
+      setCharadesStudioOpen(false);
+      charadesWasActiveRef.current = isCharadesPhase;
+      wasCharadesDrawerRef.current = isCharadesDrawer;
+      return;
+    }
+    if (isCharadesPhase && !charadesWasActiveRef.current) {
+      setCharadesStudioOpen(true);
+    }
+    if (!isCharadesPhase && charadesWasActiveRef.current) {
+      setCharadesStudioOpen(false);
+    }
+    if (isCharadesDrawer && !wasCharadesDrawerRef.current) {
+      setCharadesStudioOpen(true);
+    }
+    charadesWasActiveRef.current = isCharadesPhase;
+    wasCharadesDrawerRef.current = isCharadesDrawer;
+  }, [isMobile, isCharadesPhase, isCharadesDrawer]);
 
   useEffect(() => {
     if (!canDrawOnBoard && isDrawEnabled) {
@@ -246,7 +277,8 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
     });
     setIsArkanoidEnabled(false);
   };
-  const whiteboard = canDrawOnBoard && isDrawEnabled && !isArkanoidEnabled ? (
+  const charadesStudioVisible = isMobile && isCharadesPhase && charadesStudioOpen && mobileTab === 0;
+  const whiteboard = canDrawOnBoard && isDrawEnabled && !isArkanoidEnabled && !charadesStudioVisible ? (
     <ErrorBoundary title="Доску для рисования не удалось показать">
       <Suspense fallback={null}>
         <CollaborativeWhiteboard
@@ -258,7 +290,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
       </Suspense>
     </ErrorBoundary>
   ) : null;
-  const renderDrawToolbar = (showChat: boolean) => (
+  const renderDrawToolbar = (showChat: boolean, toolsOnly = false) => (
     <BoardToolbar
       store={store}
       canUseChat={canUseChat}
@@ -272,6 +304,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
       tool={whiteboardTool}
       color={whiteboardColor}
       showChat={showChat}
+      toolsOnly={toolsOnly}
       onToggleChat={toggleChat}
       onToggleDraw={toggleDraw}
       onToggleArkanoid={() => {
@@ -380,24 +413,32 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
                   flexDirection: 'column'
                 }}
               >
-                <Box sx={{ flexShrink: 0, zIndex: 4, mb: 0.75 }}>
-                  <CharadesHud store={store} compact />
-                </Box>
-                {canDrawOnBoard && (
-                  <Box sx={{
-                    flexShrink: 0,
-                    mb: 1,
-                    bgcolor: 'background.paper',
-                    borderRadius: '12px',
-                    border: '1px solid',
-                    borderColor: 'divider'
-                  }}>
-                    {renderDrawToolbar(false)}
-                  </Box>
-                )}
-                <Box sx={{ flexGrow: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }}>
+                <Box sx={{ flexGrow: 1, minHeight: 0, position: 'relative', overflow: 'hidden', bgcolor: '#fffdf8', borderRadius: '12px' }}>
                   {renderContent()}
                   {whiteboard}
+                  <Box sx={{ position: 'absolute', top: 8, left: 8, right: 8, zIndex: 4, pointerEvents: 'none' }}>
+                    <CharadesHud
+                      store={store}
+                      layout="bar"
+                      onExpand={() => setCharadesStudioOpen(true)}
+                    />
+                  </Box>
+                  {canDrawOnBoard && (
+                    <Box sx={{
+                      position: 'absolute',
+                      left: 8,
+                      right: 8,
+                      bottom: 8,
+                      zIndex: 5,
+                      borderRadius: '12px',
+                      border: '1px solid',
+                      borderColor: 'divider',
+                      overflow: 'hidden',
+                      boxShadow: '0 8px 24px rgba(20, 24, 40, 0.12)'
+                    }}>
+                      {renderDrawToolbar(false, true)}
+                    </Box>
+                  )}
                 </Box>
               </Box>
               ) : (
@@ -406,7 +447,7 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
               </Box>
               )
             )}
-            {canUseChat && isChatVisible && (
+            {canUseChat && isChatVisible && !charadesStudioVisible && (
               <Box sx={{ flexShrink: 0 }}>
                 <ChatTerminal store={store} compact height={isCharadesPhase ? 148 : undefined} />
               </Box>
@@ -541,6 +582,22 @@ const Board: React.FC<Props> = observer(({ store, themeMode, onToggleTheme }) =>
         onAdvance={handleAdvancePhaseFromModal}
         onClose={allReady.dismiss}
       />
+
+      {isMobile && (
+        <ErrorBoundary title="Холст шарад не удалось показать">
+          <Suspense fallback={null}>
+            <CharadesDrawStudio
+              open={charadesStudioVisible}
+              store={store}
+              tool={whiteboardTool}
+              color={whiteboardColor}
+              onClose={() => setCharadesStudioOpen(false)}
+              onTool={setWhiteboardTool}
+              onColor={setWhiteboardColor}
+            />
+          </Suspense>
+        </ErrorBoundary>
+      )}
 
       {rejoinDialog}
       {isCatRunEnabled && canPlayCatRun ? (

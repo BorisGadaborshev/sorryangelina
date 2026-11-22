@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { observer } from 'mobx-react-lite';
 import { RetroStore } from '../store/RetroStore';
 import { WhiteboardPoint, WhiteboardStroke } from '../types';
@@ -16,7 +16,8 @@ const CollaborativeWhiteboard: React.FC<Props> = observer(({ store, enabled, too
   const activePointerRef = useRef<number | null>(null);
   const activePointsRef = useRef<WhiteboardPoint[]>([]);
 
-  const lineWidth = useMemo(() => (tool === 'eraser' ? 20 : 3), [tool]);
+  const [coarsePointer] = useState(() => window.matchMedia('(pointer: coarse)').matches);
+  const lineWidth = tool === 'eraser' ? (coarsePointer ? 32 : 20) : (coarsePointer ? 6 : 3);
 
   const resizeCanvas = useCallback(() => {
     const canvas = canvasRef.current;
